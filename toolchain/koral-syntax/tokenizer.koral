@@ -409,6 +409,45 @@ given Tokenizer {
     // Check if rune equals a specific character
     private rune_eq(r: Rune, ch: Rune): Bool = r == ch;
 
+    /// An ASCII hex digit.
+    private is_hex_digit_rune(r: Rune): Bool = {
+        let c = r.to_uint32();
+        return (c >= 48 and c <= 57) or (c >= 97 and c <= 102) or (c >= 65 and c <= 70);
+    };
+
+    /// Whether a `\\u{...}` hex run names a Unicode scalar: 1-6 digits whose
+    /// value is a valid scalar (no surrogates, no more than 0x10FFFF).
+    private is_valid_scalar_hex(hex: String): Bool = {
+        let runes = hex.to_runes();
+        if runes.is_empty() or runes.count() > 6 then {
+            return false;
+        };
+        let mutable value = 0;
+        for r in runes then {
+            if not Tokenizer.is_hex_digit_rune(r) then {
+                return false;
+            };
+            let d = r.to_uint32();
+            let digit = if d >= 48 and d <= 57 then {
+                Int(d) - 48
+            } else {
+                if d >= 97 and d <= 102 then {
+                    Int(d) - 97 + 10
+                } else {
+                    Int(d) - 65 + 10
+                }
+            };
+            value = value * 16 + digit;
+        };
+        if value > 1114111 then {
+            return false;
+        };
+        if value >= 55296 and value <= 57343 then {
+            return false;
+        };
+        return true;
+    };
+
     // ========================================================================
     // Main tokenize entry point
     // ========================================================================
@@ -487,6 +526,28 @@ given Tokenizer {
                 continue;
             };
 
+            // An empty rune literal `''` never lexes: the compilers' rune
+            // scanner swallows the closing quote as content and runs on to
+            // the next one, reporting `unterminated rune literal`. Eager
+            // rejection at the empty spelling says the same thing without the
+            // run-on (both reject `''`; the run-on form is not a shape worth
+            // reproducing).
+            if Tokenizer.rune_eq(r, '\'') and self.peek_at(1) is .Some(q) and Tokenizer.rune_eq(
+                q,
+                '\'',
+            ) then {
+                return .Error("unterminated rune literal");
+            };
+
+            // Character literal (single-quoted) -- it validates its escapes,
+            // so it is scanned here rather than in `scan_operator`, which
+            // cannot report errors.
+            if Tokenizer.rune_eq(r, '\'') then {
+                let char_tok = self.scan_char_literal() or return;
+                tokens.push(char_tok);
+                continue;
+            };
+
             // The retired not-equal spelling. `scan_operator` returns an
             // `Option` and cannot complain, and leaving `<>` to munch as `<`
             // then `>` would report "expected expression, got '>'" -- true but
@@ -561,6 +622,163 @@ given Tokenizer {
     // ========================================================================
     // String literal: "..." or "\(...)" interpolation
     // ========================================================================
+    /// The escape pass the compilers run as they scan (the `\` is already in
+    /// `text`; the cursor sits on the escape's own char). The raw spelling is
+    /// kept verbatim; the SHAPE is validated: `n t r v f 0 \\ " '` are the
+    /// simple set, `\xHH` takes exactly two hex digits, `\u{H...}` a braced
+    /// scalar, anything else is `unknown escape: \c`.
+    private scan_escape_body(self, text: StringBuilder, rune_mode: Bool): Result[Void] = {
+        if self.is_eof() then {
+            if rune_mode then {
+                return .Error("unterminated escape sequence in rune literal");
+            };
+            return .Error("unterminated escape sequence");
+        };
+        let next = self.runes[self.pos];
+        text.push_string(next.to_string());
+        self.pos += 1;
+        // Simple escapes.
+        if Tokenizer.rune_eq(next, 'n') or Tokenizer.rune_eq(next, 't') or Tokenizer.rune_eq(
+            next,
+            'r',
+        ) or Tokenizer.rune_eq(next, 'v') or Tokenizer.rune_eq(next, 'f') or Tokenizer.rune_eq(
+            next,
+            '0',
+        ) or Tokenizer.rune_eq(next, '\\') or Tokenizer.rune_eq(next, '"') or Tokenizer.rune_eq(
+            next,
+            '\'',
+        ) then {
+            return .Ok({});
+        };
+        // `\xHH` -- exactly two hex digits.
+        if Tokenizer.rune_eq(next, 'x') then {
+            let mutable i = 0;
+            while i < 2 then {
+                if self.is_eof() then {
+                    return .Error("\\x escape requires exactly 2 hex digits");
+                };
+                let h = self.runes[self.pos];
+                if not Tokenizer.is_hex_digit_rune(h) then {
+                    return .Error("invalid hex digit '\(h.to_string())' in \\x escape");
+                };
+                text.push_string(h.to_string());
+                self.pos += 1;
+                i += 1;
+            };
+            return .Ok({});
+        };
+        // `\u{H...}` -- a braced Unicode scalar.
+        if Tokenizer.rune_eq(next, 'u') then {
+            if self.is_eof() or not Tokenizer.rune_eq(self.runes[self.pos], '{') then {
+                return .Error("\\u escape requires braces: \\u{HHHH}");
+            };
+            text.push_string("{");
+            self.pos += 1;
+            let mutable hex = "";
+            while not self.is_eof() then {
+                let h = self.runes[self.pos];
+                if Tokenizer.rune_eq(h, '}') then {
+                    text.push_string("}");
+                    self.pos += 1;
+                    break;
+                };
+                if not Tokenizer.is_hex_digit_rune(h) then {
+                    return .Error("invalid hex digit '\(h.to_string())' in \\u escape");
+                };
+                hex = hex + h.to_string();
+                if hex.count() > 6 then {
+                    return .Error("\\u escape has too many digits (max 6)");
+                };
+                text.push_string(h.to_string());
+                self.pos += 1;
+            };
+            if hex.is_empty() then {
+                return .Error("\\u{} escape requires at least one hex digit");
+            };
+            if not Tokenizer.is_valid_scalar_hex(hex) then {
+                return .Error("\\u{\(hex)} is not a valid Unicode scalar");
+            };
+            return .Ok({});
+        };
+        return .Error("unknown escape: \\\(next.to_string())");
+    };
+
+    /// `\( ... )` -- the interpolation run: quote-aware paren counting (a `"`
+    /// / `'` opens a nested quoted run whose parens do not count), escapes
+    /// banned. The cursor sits on the `(`.
+    private scan_interpolation_body(self, text: StringBuilder): Result[Void] = {
+        text.push_string("(");
+        self.pos += 1;
+        let mutable depth = 1;
+        while not self.is_eof() and depth > 0 then {
+            let ir = self.runes[self.pos];
+            if Tokenizer.rune_eq(ir, '\\') then {
+                return .Error(
+                    "escape sequences are not allowed in string interpolation",
+                );
+            };
+            if Tokenizer.rune_eq(ir, '"') or Tokenizer.rune_eq(ir, '\'') then {
+                let quote = ir;
+                self.pos += 1;
+                text.push_string(ir.to_string());
+                let mutable terminated = false;
+                while not self.is_eof() then {
+                    let inner = self.runes[self.pos];
+                    if Tokenizer.rune_eq(inner, '\\') then {
+                        return .Error(
+                            "escape sequences are not allowed in string interpolation",
+                        );
+                    };
+                    self.pos += 1;
+                    text.push_string(inner.to_string());
+                    if Tokenizer.rune_eq(inner, quote) then {
+                        terminated = true;
+                        break;
+                    };
+                };
+                if not terminated then {
+                    return .Error("unterminated string interpolation");
+                };
+                continue;
+            };
+            if Tokenizer.rune_eq(ir, '(') then {
+                depth += 1;
+            };
+            if Tokenizer.rune_eq(ir, ')') then {
+                depth -= 1;
+            };
+            text.push_string(ir.to_string());
+            self.pos += 1;
+        };
+        if depth > 0 then {
+            // The compilers name the interpolation, not the string, when the
+            // `\( ... )` never closes.
+            return .Error("unterminated string interpolation");
+        };
+        return .Ok({});
+    };
+
+    /// One escape or interpolation at the cursor (the `\` is already in
+    /// `text`, the cursor on the escape's own char). Returns true when the
+    /// escape opened an interpolation.
+    private scan_escape_or_interp(
+        self,
+        text: StringBuilder,
+        rune_mode: Bool,
+    ): Result[Bool] = {
+        if self.is_eof() then {
+            if rune_mode then {
+                return .Error("unterminated escape sequence in rune literal");
+            };
+            return .Error("unterminated escape sequence");
+        };
+        if Tokenizer.rune_eq(self.runes[self.pos], '(') then {
+            self.scan_interpolation_body(text) or return;
+            return .Ok(true);
+        };
+        self.scan_escape_body(text, rune_mode) or return;
+        return .Ok(false);
+    };
 
     private scan_string(self): Result[Token] = {
         if self.peek_at(1) is .Some(q1) and Tokenizer.rune_eq(q1, '"') then {
@@ -587,34 +805,14 @@ given Tokenizer {
                 return .Ok(.StrLit(text.to_string()));
             };
 
-            // Escape sequence
+            // Escape sequence (validated as it is scanned -- an escape error
+            // wins over a later "unterminated", the way the compilers scan)
             if Tokenizer.rune_eq(r, '\\') then {
                 text.push_string(r.to_string());
                 self.pos += 1;
-                if not self.is_eof() then {
-                    let next = self.runes[self.pos];
-                    // Interpolation: \(...)
-                    if Tokenizer.rune_eq(next, '(') then {
-                        is_interp = true;
-                        text.push_string(next.to_string());
-                        self.pos += 1;
-                        // Consume until matching )
-                        let mutable depth = 1;
-                        while not self.is_eof() and depth > 0 then {
-                            let ir = self.runes[self.pos];
-                            if Tokenizer.rune_eq(ir, '(') then {
-                                depth += 1;
-                            };
-                            if Tokenizer.rune_eq(ir, ')') then {
-                                depth -= 1;
-                            };
-                            text.push_string(ir.to_string());
-                            self.pos += 1;
-                        };
-                    } else {
-                        text.push_string(next.to_string());
-                        self.pos += 1;
-                    };
+                let opened = self.scan_escape_or_interp(text, false) or return;
+                if opened then {
+                    is_interp = true;
                 };
                 continue;
             };
@@ -628,8 +826,9 @@ given Tokenizer {
             self.pos += 1;
         };
 
-        return Result[Token].Error("unterminated string literal");
+        return .Error("unterminated string literal");
     };
+
 
     private scan_multiline_string(self): Result[Token] = {
         let mutable text = StringBuilder.new();
@@ -655,28 +854,9 @@ given Tokenizer {
             if Tokenizer.rune_eq(r, '\\') then {
                 text.push_string(r.to_string());
                 self.pos += 1;
-                if not self.is_eof() then {
-                    let next = self.runes[self.pos];
-                    if Tokenizer.rune_eq(next, '(') then {
-                        is_interp = true;
-                        text.push_string(next.to_string());
-                        self.pos += 1;
-                        let mutable depth = 1;
-                        while not self.is_eof() and depth > 0 then {
-                            let ir = self.runes[self.pos];
-                            if Tokenizer.rune_eq(ir, '(') then {
-                                depth += 1;
-                            };
-                            if Tokenizer.rune_eq(ir, ')') then {
-                                depth -= 1;
-                            };
-                            text.push_string(ir.to_string());
-                            self.pos += 1;
-                        };
-                    } else {
-                        text.push_string(next.to_string());
-                        self.pos += 1;
-                    };
+                let opened = self.scan_escape_or_interp(text, false) or return;
+                if opened then {
+                    is_interp = true;
                 };
                 continue;
             };
@@ -685,7 +865,7 @@ given Tokenizer {
             self.pos += 1;
         };
 
-        return .Error("unterminated string literal");
+        return .Error("unterminated multiline string literal");
     };
 
     // ========================================================================
@@ -1262,11 +1442,6 @@ given Tokenizer {
             return .Some(.Underscore());
         };
 
-        // Character literal (single-quoted)
-        if cp == 39 then {
-            return .Some(self.scan_char_literal());
-        };
-
         return Option[Token].None();
     };
 
@@ -1274,7 +1449,7 @@ given Tokenizer {
     // Character literal: '...'
     // ========================================================================
 
-    private scan_char_literal(self): Token = {
+    private scan_char_literal(self): Result[Token] = {
         let mutable text = StringBuilder.new();
         text.push_byte('\'');
         self.pos += 1; // skip opening '
@@ -1284,20 +1459,19 @@ given Tokenizer {
             if Tokenizer.rune_eq(r, '\'') then {
                 text.push_byte('\'');
                 self.pos += 1;
-                return .IntLit(text.to_string());
+                return .Ok(.IntLit(text.to_string()));
             };
             if Tokenizer.rune_eq(r, '\\') then {
+                // A rune takes escapes but no interpolation: `\(` is an
+                // unknown escape there.
                 text.push_string(r.to_string());
                 self.pos += 1;
-                if not self.is_eof() then {
-                    text.push_string(self.runes[self.pos].to_string());
-                    self.pos += 1;
-                };
+                self.scan_escape_body(text, true) or return;
                 continue;
             };
             text.push_string(r.to_string());
             self.pos += 1;
         };
-        return Token.IntLit(text.to_string());
+        return .Error("unterminated rune literal");
     };
 };

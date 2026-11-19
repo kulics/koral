@@ -626,6 +626,31 @@ given Lexer {
             .None() then {},
         };
 
+        // 一个小数点后又跟 `.数字` 就是两个小数点（`1.5.6`、`1e5.5`）：数字里
+        // 只能有一个。`..` / `..<` 是范围算子、`.` 后跟别的东西是成员访问，
+        // 都不算小数点。与冻结 seed 词法器、koral-syntax 同一条判据、同一句话。
+        when self.peek() in {
+            .Some(dot) then {
+                if dot == '.' then {
+                    when self.peek_next() in {
+                        .Some(after_dot) then {
+                            if Lexer.is_digit(after_dot) then {
+                                return .Error(
+                                    self.fail_at(
+                                        start_line,
+                                        start_col,
+                                        "consecutive dots are not allowed",
+                                    ),
+                                );
+                            };
+                        },
+                        .None() then {},
+                    };
+                };
+            },
+            .None() then {},
+        };
+
         if is_float then {
             self.add(
                 TokenKind.FloatLiteral(Lexer.normalize_literal_text(text.to_string())),
@@ -715,10 +740,19 @@ given Lexer {
     };
 
     // 解析字符串/字符字面量中的转义序列，返回转义后的字符串
+    //
+    // Messages and the blame anchor (the literal's START) mirror the seed's
+    // inline escape scan byte for byte. This is the RUNE-literal path; the
+    // string path goes through read_escape_from_runes below, which differs
+    // only in the "unterminated escape sequence" wording.
     private read_escape(self, start_line: Int, start_col: Int): Result[String] = {
         let next = self.peek() or else {
             return .Error(
-                self.fail_at(start_line, start_col, "Unterminated escape sequence"),
+                self.fail_at(
+                    start_line,
+                    start_col,
+                    "unterminated escape sequence in rune literal",
+                ),
             );
         };
         self.advance();
@@ -801,7 +835,7 @@ given Lexer {
                         self.fail_at(
                             start_line,
                             start_col,
-                            "invalid hex digit in \\x escape",
+                            "invalid hex digit '\(h)' in \\x escape",
                         ),
                     );
                 };
@@ -855,7 +889,7 @@ given Lexer {
                         self.fail_at(
                             start_line,
                             start_col,
-                            "invalid hex digit in \\u escape",
+                            "invalid hex digit '\(h)' in \\u escape",
                         ),
                     );
                 };
@@ -885,7 +919,7 @@ given Lexer {
                     self.fail_at(
                         start_line,
                         start_col,
-                        "invalid unicode scalar in \\u escape",
+                        "\\u{\(hex.to_string())} is not a valid Unicode scalar",
                     ),
                 );
             };
@@ -894,7 +928,7 @@ given Lexer {
             return .Ok(s.to_string());
         };
 
-        return .Error(self.fail_at(start_line, start_col, "Unknown escape sequence"));
+        return .Error(self.fail_at(start_line, start_col, "unknown escape: \\\(next)"));
     };
 
     private read_string(self, start_line: Int, start_col: Int): Result[Void] = {
@@ -910,6 +944,8 @@ given Lexer {
                     start_col,
                     start_line,
                     start_col + 1,
+                    .Some('"'),
+                    true,
                 ) or return;
                 // A single literal part is a plain string literal; anything
                 // else -- more than one part, or one interpolation -- is an
@@ -942,13 +978,22 @@ given Lexer {
             };
         };
 
-        if raw_content.to_string().contains("\\(") then {
-            return .Error(
-                self.fail_at(start_line, start_col, "unterminated string interpolation"),
-            );
-        };
+        // The file ended inside the literal. The seed scans escapes inline, so
+        // a defect in an escape BEFORE the run-off is the first error it
+        // reports -- run the escape pass first (interpolations assembled but
+        // not lexed; the seed never gets that far) and only then blame the
+        // missing close quote.
+        self.process_string_content_parts(
+            raw_content.to_string(),
+            start_line,
+            start_col,
+            start_line,
+            start_col + 1,
+            .None(),
+            false,
+        ) or return;
         return .Error(
-            self.fail_at(start_line, start_col, "Unterminated string literal"),
+            self.fail_at(start_line, start_col, "unterminated string literal"),
         );
     };
 
@@ -1169,11 +1214,21 @@ given Lexer {
         self,
         runes: List[Rune],
         index: Int,
+        error_line: Int,
+        error_col: Int,
+        tail: Option[Rune],
     ): Result[Pair[String, Int]] = {
+        // Messages and the blame anchor (the literal's START) mirror the
+        // seed's inline escape scan byte for byte. `tail` is the character
+        // that FOLLOWS the literal's content: the closing quote of a
+        // single-line string (inside an escape sequence the seed's scanner
+        // consumes that quote like any other character -- it is usually "the
+        // hex digit that isn't one"), or nothing at end of file / at the end
+        // of a multiline literal's de-quoted content.
         let mutable cur_index = index;
         if cur_index >= runes.count() then {
             return .Error(
-                self.fail_at(self.line, self.column, "Unterminated escape sequence"),
+                self.fail_at(error_line, error_col, "unterminated escape sequence"),
             );
         };
 
@@ -1218,7 +1273,7 @@ given Lexer {
         if next == 'v' then {
             let r = Rune.from_uint32(11) or else {
                 return .Error(
-                    self.fail_at(self.line, self.column, "invalid unicode scalar for \\v"),
+                    self.fail_at(error_line, error_col, "invalid unicode scalar for \\v"),
                 );
             };
             let mutable s = StringBuilder.new();
@@ -1228,7 +1283,7 @@ given Lexer {
         if next == 'f' then {
             let r = Rune.from_uint32(12) or else {
                 return .Error(
-                    self.fail_at(self.line, self.column, "invalid unicode scalar for \\f"),
+                    self.fail_at(error_line, error_col, "invalid unicode scalar for \\f"),
                 );
             };
             let mutable s = StringBuilder.new();
@@ -1240,21 +1295,36 @@ given Lexer {
             let mutable i = 0;
             while i < 2 then {
                 if cur_index >= runes.count() then {
-                    return .Error(
-                        self.fail_at(
-                            self.line,
-                            self.column,
-                            "\\x escape requires exactly 2 hex digits",
-                        ),
-                    );
+                    when tail in {
+                        .Some(q) then {
+                            // The closing quote stands where a hex digit
+                            // should be; name it like the seed does.
+                            return .Error(
+                                self.fail_at(
+                                    error_line,
+                                    error_col,
+                                    "invalid hex digit '\(q)' in \\x escape",
+                                ),
+                            );
+                        },
+                        .None() then {
+                            return .Error(
+                                self.fail_at(
+                                    error_line,
+                                    error_col,
+                                    "\\x escape requires exactly 2 hex digits",
+                                ),
+                            );
+                        },
+                    };
                 };
                 let h = runes[cur_index];
                 if not Lexer.is_hex_digit(h) then {
                     return .Error(
                         self.fail_at(
-                            self.line,
-                            self.column,
-                            "invalid hex digit in \\x escape",
+                            error_line,
+                            error_col,
+                            "invalid hex digit '\(h)' in \\x escape",
                         ),
                     );
                 };
@@ -1266,8 +1336,8 @@ given Lexer {
             let r = Rune.from_uint32(code) or else {
                 return .Error(
                     self.fail_at(
-                        self.line,
-                        self.column,
+                        error_line,
+                        error_col,
                         "invalid unicode scalar in \\x escape",
                     ),
                 );
@@ -1277,29 +1347,34 @@ given Lexer {
             return .Ok(Pair[String, Int](s.to_string(), cur_index));
         };
         if next == 'u' then {
+            // With a closing quote next the quote is the (non-`{`) brace
+            // character; at end of file the scan simply stops. Both blame the
+            // same message, so one check covers them.
             if cur_index >= runes.count() or runes[cur_index] != '{' then {
                 return .Error(
                     self.fail_at(
-                        self.line,
-                        self.column,
+                        error_line,
+                        error_col,
                         "\\u escape requires braces: \\u{HHHH}",
                     ),
                 );
             };
             cur_index += 1;
             let mutable hex = StringBuilder.new();
+            let mutable closed = false;
             while cur_index < runes.count() then {
                 let h = runes[cur_index];
                 if h == '}' then {
                     cur_index += 1;
+                    closed = true;
                     break;
                 };
                 if not Lexer.is_hex_digit(h) then {
                     return .Error(
                         self.fail_at(
-                            self.line,
-                            self.column,
-                            "invalid hex digit in \\u escape",
+                            error_line,
+                            error_col,
+                            "invalid hex digit '\(h)' in \\u escape",
                         ),
                     );
                 };
@@ -1308,18 +1383,34 @@ given Lexer {
                 if hex.count() > 6 then {
                     return .Error(
                         self.fail_at(
-                            self.line,
-                            self.column,
+                            error_line,
+                            error_col,
                             "\\u escape has too many digits (max 6)",
                         ),
                     );
                 };
             };
+            if not closed then {
+                when tail in {
+                    .Some(q) then {
+                        // Ran off the content into the closing quote: the
+                        // seed consumes that quote as the offending digit.
+                        return .Error(
+                            self.fail_at(
+                                error_line,
+                                error_col,
+                                "invalid hex digit '\(q)' in \\u escape",
+                            ),
+                        );
+                    },
+                    .None() then {},
+                };
+            };
             if hex.is_empty() then {
                 return .Error(
                     self.fail_at(
-                        self.line,
-                        self.column,
+                        error_line,
+                        error_col,
                         "\\u{} escape requires at least one hex digit",
                     ),
                 );
@@ -1328,9 +1419,9 @@ given Lexer {
             let r = Rune.from_uint32(code) or else {
                 return .Error(
                     self.fail_at(
-                        self.line,
-                        self.column,
-                        "invalid unicode scalar in \\u escape",
+                        error_line,
+                        error_col,
+                        "\\u{\(hex.to_string())} is not a valid Unicode scalar",
                     ),
                 );
             };
@@ -1339,7 +1430,7 @@ given Lexer {
             return .Ok(Pair[String, Int](s.to_string(), cur_index));
         };
 
-        return .Error(self.fail_at(self.line, self.column, "Unknown escape sequence"));
+        return .Error(self.fail_at(error_line, error_col, "unknown escape: \\\(next)"));
     };
 
     private process_string_content_parts(
@@ -1349,6 +1440,8 @@ given Lexer {
         error_col: Int,
         content_start_line: Int,
         line_start_column: Int,
+        tail: Option[Rune],
+        lex_interpolations: Bool,
     ): Result[List[InterpolatedStringTokenPart]] = {
         let runes = content.to_runes();
         let total = runes.count();
@@ -1486,15 +1579,28 @@ given Lexer {
                     // missing. Hand the (empty) token list on and let the
                     // parser say so -- reporting it here labelled a syntax
                     // complaint as a lexer error.
-                    let expr_tokens = self.lex_interpolation_tokens(
-                        expr_source.to_string(),
-                        expr_start_line,
-                        expr_start_column,
-                        line_start_column,
-                    ) or return;
-                    parts.push(
-                        InterpolatedStringTokenPart.ExpressionTokens(expr_tokens),
-                    );
+                    if lex_interpolations then {
+                        let expr_tokens = self.lex_interpolation_tokens(
+                            expr_source.to_string(),
+                            expr_start_line,
+                            expr_start_column,
+                            line_start_column,
+                        ) or return;
+                        parts.push(
+                            InterpolatedStringTokenPart.ExpressionTokens(expr_tokens),
+                        );
+                    } else {
+                        // The literal never closed (end of file): the seed
+                        // dies at the missing quote and never lexes the
+                        // interpolation's contents, so neither do we -- a
+                        // defect in there must not beat the unterminated
+                        // literal.
+                        parts.push(
+                            InterpolatedStringTokenPart.ExpressionTokens(
+                                List[Token].new(),
+                            ),
+                        );
+                    };
                     continue;
                 };
 
@@ -1503,7 +1609,13 @@ given Lexer {
                 current_column += slash_count;
                 if slash_count % 2 == 1 then {
                     let escape_start = i;
-                    let escaped = self.read_escape_from_runes(runes, i) or return;
+                    let escaped = self.read_escape_from_runes(
+                        runes,
+                        i,
+                        error_line,
+                        error_col,
+                        tail,
+                    ) or return;
                     text.push_string(escaped.first);
                     i = escaped.second;
                     current_column += escaped.second - escape_start;
@@ -1540,7 +1652,7 @@ given Lexer {
                 self.fail_at(
                     start_line,
                     start_col,
-                    "Unterminated multiline string literal",
+                    "unterminated multiline string literal",
                 ),
             );
         };
@@ -1640,7 +1752,7 @@ given Lexer {
                     self.fail_at(
                         start_line,
                         start_col,
-                        "Unterminated multiline string literal",
+                        "unterminated multiline string literal",
                     ),
                 );
             };
@@ -1674,6 +1786,8 @@ given Lexer {
             start_col,
             start_line + 1,
             closing_indent_count + 1,
+            .None(),
+            true,
         ) or return;
         // Same rule as the single-line form: one literal part is a plain
         // string literal, everything else is an interpolated string.

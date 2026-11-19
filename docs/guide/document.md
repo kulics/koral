@@ -2287,7 +2287,7 @@ Supported patterns include:
 - Variable binding patterns: `x` (matches any value and binds to x), `mutable x` (mutable binding)
 - Comparison patterns: `> 5`, `< 0`, `>= 10`, `<= -1`, `> 1.5`, `>= 'a'`
 - Struct destructuring patterns: `Point(x, y)`, `Rect(Point(a, b), w, h)`
-- Tuple destructuring pattern: `(a, b, c)` — positional destructuring of a struct with exactly that many fields (`Pair` included, being a two-field struct); at least two slots
+- Tuple destructuring pattern: `(a, b, c)` — positional destructuring of a struct with exactly that many fields (`Pair` included, being a two-field struct); the comma marks the tuple, so `(a)` is a parenthesized pattern and an error while `(a,)` is a one-slot tuple
 - List destructuring patterns: `[]`, `[a, b]`, `[a, ...]`, `[a, ..., b]`, `[...]` — destructures a `List[T]` by length
 - Rest pattern: `...` — ignores slots (the unwritten middle in a list, the whole element list in a struct or enum case); see below
 - Enum case patterns: `.Some(v)`, `.None()`

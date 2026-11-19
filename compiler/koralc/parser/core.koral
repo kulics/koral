@@ -1501,7 +1501,7 @@ given Parser {
                     _ then {
                         return .Error(
                             self.unexpected_token_error_at(
-                                token_text(self.current()),
+                                token_kind_description(self.current()),
                                 "')'",
                                 self.current(),
                             ),
@@ -1550,7 +1550,7 @@ given Parser {
                 if size_token.kind is not .IntegerLiteral(_) then {
                     return .Error(
                         self.unexpected_token_error_at(
-                            token_text(self.current()),
+                            token_kind_description(self.current()),
                             "an integer array size",
                             self.current(),
                         ),
@@ -1597,7 +1597,7 @@ given Parser {
                 if self.current().kind is not .RBracket() then {
                     return .Error(
                         self.unexpected_token_error_at(
-                            token_text(self.current()),
+                            token_kind_description(self.current()),
                             "']'",
                             self.current(),
                         ),
@@ -1880,6 +1880,13 @@ given Parser {
             if self.current().kind is .KwSelf() then {
                 self.advance();
                 let mutable self_type = TypeNode.InferredSelf(unknown_span());
+                if self.current().kind is .Colon() then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "'self' parameter cannot use named parameter syntax",
+                        ),
+                    );
+                };
                 if self.current().kind is .KwSelfType() then {
                     return .Error(
                         self.parser_error_at_current(
@@ -2072,6 +2079,13 @@ given Parser {
         // inside is a type head, and an empty `()` is decided by `->` after it.
         if self.current().kind is .LParen() and not self.paren_opens_type_at(self.index) then {
             if is_mut then {
+                if decl_is_foreign then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "foreign let mutable cannot declare a function",
+                        ),
+                    );
+                };
                 return .Error(
                     self.parser_error_at_current(
                         "Function declaration cannot use mutable before name",
@@ -2179,7 +2193,7 @@ given Parser {
             if self.current().kind is not .Assign() then {
                 return .Error(
                     self.parser_error(
-                        "Unexpected token: \(token_text(self.current())), expected: '='",
+                        "Unexpected token: \(token_kind_description(self.current())), expected: '='",
                     ),
                 );
             };
@@ -2205,6 +2219,13 @@ given Parser {
         // `unsafe` 只属契约载体（unsafe-design.md §B）：普通变量拒绝；foreign
         // 变量由下方 foreign 分支定形（extern 引用 / C 变量定义收标记，宏常量
         // 拒绝），这里不能抢报。
+        if decl_is_intrinsic then {
+            // The seed blames this right after the name (before the type
+            // annotation is read), so an annotation defect does not win.
+            return .Error(
+                self.parser_error_at_current("intrinsic variable not supported"),
+            );
+        };
         if decl_is_unsafe and not decl_is_foreign then {
             return .Error(
                 self.parser_error_at(
@@ -2442,6 +2463,17 @@ given Parser {
             );
         };
 
+        // `type intrinsic` types are opaque slots: the mutable ban fires at the
+        // token after the name for every non-alias shape (the seed checks right
+        // here, after ruling out the alias form).
+        if is_nominal_mutable and decl_is_intrinsic and self.current().kind is not .Assign() then {
+            return .Error(
+                self.parser_error_at_current(
+                    "intrinsic type cannot be marked mutable",
+                ),
+            );
+        };
+
         when self.current().kind in {
             .Assign() then {
                 if sendability is not .Unmarked() then {
@@ -2456,6 +2488,20 @@ given Parser {
                     return .Error(
                         self.parser_error_at_current(
                             "Type alias cannot be marked mutable",
+                        ),
+                    );
+                };
+                if decl_is_intrinsic then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "Intrinsic type alias is not supported",
+                        ),
+                    );
+                };
+                if decl_is_foreign then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "Foreign type alias is not supported",
                         ),
                     );
                 };
@@ -2477,6 +2523,15 @@ given Parser {
                     return .Error(
                         self.parser_error_at_current(
                             "intrinsic type cannot be marked mutable",
+                        ),
+                    );
+                };
+                if decl_is_intrinsic then {
+                    // `type intrinsic T;` is body-less; `(...)` fields are a
+                    // body. Blame the `(` that opens it.
+                    return .Error(
+                        self.parser_error_at_current(
+                            "intrinsic type cannot have a body",
                         ),
                     );
                 };
@@ -2648,6 +2703,15 @@ given Parser {
                 return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
             },
             .LBrace() then {
+                if decl_is_intrinsic then {
+                    // `type intrinsic T;` is body-less; a `{...}` enum body is
+                    // a body. Blame the `{` that opens it.
+                    return .Error(
+                        self.parser_error_at_current(
+                            "intrinsic type cannot have a body",
+                        ),
+                    );
+                };
                 if is_nominal_mutable then {
                     return .Error(
                         self.parser_error_at_current(
@@ -2711,7 +2775,7 @@ given Parser {
                             if self.current().kind is not .LParen() then {
                                 return .Error(
                                     self.unexpected_token_error_at(
-                                        token_text(self.current()),
+                                        token_kind_description(self.current()),
                                         "'('",
                                         self.current(),
                                     ),

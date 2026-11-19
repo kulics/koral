@@ -53,17 +53,6 @@ given Parser {
         };
     };
 
-    expr_is_ordering_comparison(self, expr: Expr): Bool = {
-        return when expr in {
-            .ComparisonExpr(_, op, _, _) then when op in {
-                .Greater() or .GreaterEqual() or .Less() or .LessEqual() then true,
-                _ then false,
-            },
-            .ComparisonChainExpr(_, _, _) then true,
-            _ then false,
-        };
-    };
-
     invalid_comparison_chain_error(self): Result[Expr] = {
         return .Error(
             self.parser_error(
@@ -441,15 +430,16 @@ given Parser {
 
         // Handle equality (==, !=) - no chaining allowed
         if self.comparison_kind_is_equality(first_kind) then {
-            if self.expr_is_ordering_comparison(expr) then {
-                return self.invalid_comparison_chain_error();
-            };
+            // Chain shape is decided by the token sequence alone: an operand
+            // that is itself a (parenthesized) comparison is an ordinary
+            // operand -- `(a < b) == c` compares two Bool values. Only a
+            // comparison OPERATOR continuing the chain is refused (the frozen
+            // seed's rule; the old operand-shape checks here saw through
+            // parentheses and refused `(a < b) == c` while accepting
+            // `(a == b) < c`).
             let op = self.comparison_operator_from_kind(first_kind);
             self.advance();
             let rhs = self.parse_bitwise_or() or return;
-            if self.expr_is_ordering_comparison(rhs) then {
-                return self.invalid_comparison_chain_error();
-            };
             let result = Expr.ComparisonExpr(
                 expr,
                 op,
@@ -730,7 +720,7 @@ given Parser {
             _ then {
                 return .Error(
                     self.parser_error_at(
-                        "Unexpected token: \(token_text(self.current())), expected: 'in' after flow binding name",
+                        "Unexpected token: \(token_kind_description(self.current())), expected: 'in' after flow binding name",
                         self.current(),
                     ),
                 );
@@ -1041,6 +1031,17 @@ given Parser {
             // then stand in for one that was more precise.
             let expr = self.parse_expression_checked("given member body") or return;
             body = .Some(expr);
+        } else if allow_body then {
+            // A non-intrinsic given member is an implementation, so it must
+            // carry a body -- the seed demands '=' here and blames the token
+            // that should have been it.
+            return .Error(
+                self.unexpected_token_error_at(
+                    token_kind_description(self.current()),
+                    "'='",
+                    self.current(),
+                ),
+            );
         };
 
         return .Ok(
@@ -1387,8 +1388,10 @@ given Parser {
         has_explicit_access: Bool,
     ): Result[Decl] = {
         let start = self.current();
-        self.advance();
 
+        // Anchored on `using` itself -- the declaration keyword is where the
+        // mistake reads. The seed reports the same diagnostic at the same
+        // token; a modifier on `using` is not a global declaration.
         if has_explicit_access then {
             return .Error(
                 self.parser_error(
@@ -1396,6 +1399,8 @@ given Parser {
                 ),
             );
         };
+
+        self.advance();
 
         let specifier_token = self.current();
         let mutable specifier = "";
@@ -1858,9 +1863,13 @@ let token_kind_description(token: Token): String = {
     return when token.kind in {
         .Identifier(name) then "Identifier(\(name))",
         .IntegerLiteral(v) then "Integer(\(v))",
+        .DurationLiteral(v, u) then "DurationLiteral(\(v)\(u))",
         .FloatLiteral(v) then "Float(\(v))",
         .StringLiteral(v) then "String(\(v))",
         .RuneLiteral(v) then "Rune('\(v)')",
+        .KwTrue() then "Bool(true)",
+        .KwFalse() then "Bool(false)",
+        .Eof() then "EOF",
         _ then token_text(token),
     };
 };

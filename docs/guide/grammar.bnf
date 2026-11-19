@@ -57,11 +57,13 @@
 // Global Declarations
 // ============================================================================
 
-<global-decl> ::= <access-modifier>* <let-decl>
-               | <access-modifier>* <type-decl>
-               | <access-modifier>* <trait-decl>
+<global-decl> ::= <access-modifier>? <let-decl>
+               | <access-modifier>? <type-decl>
+               | <access-modifier>? <trait-decl>
                | <given-decl>
                | <build-cond-decl>
+// 访问修饰符至多一个：两个连写报 `Invalid access modifier order: 'a b'.`
+// （消息拼出写下的那一对，句号在消息里）。`given` 与 `using` 不收它。
 
 // ============================================================================
 // Build-Conditional Declarations（docs/design/cffi-design.md §D）
@@ -306,8 +308,10 @@
 //    可跨线程共享（`T: sendable` 直接证明，或经 `trait sendable` 约束转发）
 // 4) 简单 trait 名（如 Eq）
 // 5) 泛型 trait（如 Iterator[T]）
-// 约束是必填的：`[T]` 报 `Type parameter 'T' requires a constraint`；
-// 不加约束就写 `[T: Any]`。`Any` 特殊——它**不是**一种约束，是「无约束」的写法。
+// 约束是必填的：`[T]`（没写 `:`）报 `expected ':' after generic parameter
+// name 'T'`；`[T:]`（写了 `:` 没写约束）报 `Type parameter 'T' requires a
+// constraint`。不加约束就写 `[T: Any]`。`Any` 特殊——它**不是**一种约束，
+// 是「无约束」的写法。
 
 // ============================================================================
 // Types
@@ -323,10 +327,12 @@
               | "(" <type> ")"
               | "Self"
 
-// 定长数组：`[N]Type`。N 是 ≥1 的整数字面量；元素是其后的完整类型
+// 定长数组：`[N]Type`。N 是 ≥1 的十进制整数字面量（`[0]`、`[0x0]`、溢出
+// 都报 `Fixed array size must be at least 1`；`[-1]`、`[3.5]` 报
+// `Unexpected token: X, expected: an integer array size`）；元素是其后的完整类型
 //（`[2]*Int` 是两个 `*Int`，`*[2]Int` 是数组指针），且必须过 FFI 边界
 //（`foreign` 约束那组封闭集合）。C 布局，可变值语义；`[]` 字面量是全零缓冲，
-// 非空字面量恰好 N 个。下标 `a[i]` 不查边界（与 `*T` 同款）。
+// 非空字面量恰好 N 个。下标 `a[i]` 查边界：越界 panic（`*T` 的下标才不查）。
 <fixed-array-type> ::= "[" <integer-literal> "]" <type>
 
 // foreign 函数指针：`foreign (T1, ..) -> R`。裸 C 函数指针（可为 null），
@@ -339,7 +345,9 @@
                | "sendable"
 // *T          — read-only pointer
 // *mutable T  — mutable pointer
-// ?T          — weak reference
+// ?T          — weak reference（`?*T` 是已删旧拼法，报
+//               `Weak reference syntax is '?T', not legacy '?*T'`；产生式
+//               结构上叠得出来，语义拒绝）
 // sendable T  — `sendable` 前缀限定（concurrency-design.md）：只对函数类型
 //               （`sendable (A) -> R`）成立，其余类型报错（`sendable Trait`
 //               已删除——trait 共享性由 `trait sendable` 声明携带）；转换放宽
@@ -394,7 +402,9 @@
 
 // A tuple binding destructures a STRUCT by position: `(a, b, c)` against a
 // struct with exactly three fields, in declaration order. N >= 2 -- `(x)` is a
-// parenthesized binding, not a tuple. A field may be discarded with `_`.
+// parenthesized binding, not a tuple, and unlike <tuple-pattern> the binding
+// list takes NO trailing comma (`let (a, b,) = ...` is rejected). A field may
+// be discarded with `_`.
 // A slot may carry a type annotation: `let (a: Int, b) = ...`.
 // Slots may nest: `let (a, (b, c)) = ...` destructures a field that is itself
 // a struct, the same way a nested <tuple-pattern> does in `when`/`is`.
@@ -513,8 +523,10 @@
 // left to right: `f() and then as v in g(v) or else h()` is
 // `(f() and then as v in g(v)) or else h()`. `or return` is a postfix link (early
 // return, no operand); `or else` takes one more <flow-operand>, which may
-// itself be an `and then` chain: `x or else y and then z` is
-// `x or else (y and then z)`.
+// itself be an `and then` chain: `x or else y and then .f()` is
+// `x or else (y and then .f())`. The bare right operand `z` in
+// `x or else y and then z` is not a form -- `and then` takes a `.member()`
+// chain or an `as name in body` binder.
 <flow-tail> ::= <and-then-link>+ <flow-link>*
               | <flow-link>+
 <and-then-link> ::= "and" "then" <and-then-operand>
@@ -617,7 +629,10 @@
 
 // Ordering chains allow one or more links; a single `<` / `>` is the
 // one-link case. Direction mixing (`a < b > c`) and equality chains
-// (`a == b == c`) are refused at parse time.
+// (`a == b == c`) are refused at parse time. The rule is about the OPERATOR
+// SEQUENCE alone: an operand that is itself a (parenthesized) comparison is
+// an ordinary operand -- `(a < b) == c` compares two Bool values and
+// `(a == b) < c` is a single link over a parenthesized left operand.
 <ascending-chain-tail> ::= <ascending-op> <bitwise-or-expression>
                            (<ascending-op> <bitwise-or-expression>)*
 
@@ -715,7 +730,8 @@
 //     类型标注永远由 `:` 引入（`name: Type`），所以 `let` 名字后的 `(` 一律是
 //     参数表（函数声明），「签名还是类型标注」的歧义已经消失。
 //        例：`let f(x: Int): Int = ...`、`let inc(mutable x: Int): Int = ...`
-//     旧的并置拼法一律拒绝（`Expected '=' in let declaration, got (`）：
+//     旧的并置拼法一律拒绝（`(` 就是 `:` 该在的地方，报
+//     `Missing type: global variable declarations must explicitly declare a type`）：
 //        `let p (Int) = 1`、`let f (Int) -> Int = g` 都不再是写法。
 //     类型标注写 `let p: (Int) = 1`（`(Int)` 是分组，p 是 Int）、
 //        `let f: (Int) -> Int = g`、`let h: ((Int) -> Int) = g`、
@@ -746,7 +762,9 @@
 //   `[` 的归类：
 //     括号内是 <type-list> -> 泛型实例化（由 <generic-instance-suffix> 承担，见下）
 //     其余                 -> <subscript-suffix>
-//   `[` 后若是空的 `[]`，或实参之间出现 `,`，都按错误报出，不猜测语义。
+//   `[` 后若是空的 `[]`，或实参之间出现 `,`，都按错误报出，不猜测语义
+//   （`a[1, 2]` 报 `Subscript expression supports exactly one index`；
+//   空的 `a[]` 报 `Subscript expression requires one index argument`）。
 //
 //   `.member[...]` 后的归类（`m[T](...)`）：
 //     `[` <type-list> `]` `(` -> 泛型方法调用
@@ -988,14 +1006,16 @@
                           | <type-identifier> "[" <type-list> "]"
 // Generic concrete nominal type pattern, e.g. ParseError[Int].
 
-<tuple-pattern> ::= "(" <tuple-slot> ("," <tuple-slot>)+ ")"
+<tuple-pattern> ::= "(" <tuple-slot> "," (<tuple-slot> ",")* <tuple-slot>? ")"
 <tuple-slot> ::= <match-pattern>
-// Positional destructuring against a STRUCT with exactly as many fields:
-// `(a, b, c)` matches a three-field struct in declaration order. N >= 2 --
-// `(` in pattern position opens a tuple and never groups a single pattern.
-// This is how `Pair` is destructured too, since `Pair` is simply a
-// two-field struct. No rest slot here: a whole-list elision is written
-// `Point(...)`, and `( ... )` is the parenthesized-pattern error.
+// Positional destructuring against a STRUCT, by position. The COMMA marks
+// the tuple: `(a)` is a parenthesized pattern and an error (`(` groups
+// nothing in pattern position), while `(a,)` is a one-slot tuple and
+// `(a, b)` / `(a, b,)` the usual two -- a trailing comma is allowed in
+// every pattern element list. This is how `Pair` is destructured too,
+// since `Pair` is simply a two-field struct. No rest slot here: a
+// whole-list elision is written `Point(...)`, and `( ... )` is the
+// parenthesized-pattern error.
 
 <struct-pattern> ::= <type-identifier> "(" <pattern-arg-list>? ")"
 // Struct destructuring pattern: matches a struct value and destructures its fields by position.
@@ -1095,7 +1115,10 @@
 // lexical error ("Invalid digit separator '_' in numeric literal"). A number
 // never LEADS with `_` at all -- `_1` is an identifier -- and `1._x` is member
 // access on `1`, not a float, because a fraction needs a digit right after `.`.
-<decimal-literal> ::= [0-9]+ ("_" [0-9]+)*
+// 十进制整数字面量不许前导零：`00`、`007`、`0_0` 都报
+// `Leading zeros are not allowed in integer literals`（`0` 本身合法；浮点
+// `0.5`/`0.0` 与 `0x00FF` 这类进制字面量合法）。
+<decimal-literal> ::= "0" | [1-9] [0-9]* ("_" [0-9]+)*
 <binary-literal> ::= "0b" [0-1]+ ("_" [0-1]+)*
 <octal-literal> ::= "0o" [0-7]+ ("_" [0-7]+)*
 <hex-literal> ::= "0x" [0-9a-fA-F]+ ("_" [0-9a-fA-F]+)*
@@ -1137,8 +1160,13 @@
 <indent-whitespace> ::= (" " | "\t")*
 
 <interpolation> ::= "\(" <expression> ")"
+// 插值内部不许转义序列（`\` 报 `escape sequences are not allowed in string
+// interpolation`）；`"\()"` 空插值报 `empty interpolation expression`；
+// `\( … )` 不闭合报 `unterminated string interpolation`。
 
-// Exactly one Unicode scalar value -- `''` and `'ab'` are both errors. The
+// Exactly one Unicode scalar value -- `''` and `'ab'` are both errors
+// (`''` is the lexer's `unterminated rune literal`; `'ab'` scans and is
+// rejected in semantic analysis). The
 // literal's default type is `Rune`; in a context that expects `UInt8` the same
 // spelling is inferred as a byte. One form, two types.
 <rune-literal> ::= "'" <rune-char> "'"
@@ -1149,9 +1177,12 @@
                     | "\\x" [0-9a-fA-F] [0-9a-fA-F]
                     | "\\u{" [0-9a-fA-F]+ "}"
 // \xHH  — exactly 2 hex digits, produces a single byte (0x00–0xFF)
-// \u{H…} — 1 to 6 hex digits, produces a Unicode scalar value (must be a valid Unicode scalar)
-// \xHH  — exactly 2 hex digits, produces a single byte (0x00–0xFF)
-// \u{H…} — 1 to 6 hex digits, produces a Unicode scalar value (must be a valid Unicode scalar)
+// \u{H…} — 1 to 6 hex digits, produces a Unicode scalar value (must be a valid
+//          Unicode scalar: no surrogates, ≤ 0x10FFFF)
+// 形状在扫描时即校验（三方同文案）：别的转义是 `unknown escape: \c`；`\x`
+// 缺位或非 hex 是 `invalid hex digit 'c' in \x escape` / `\x escape requires
+// exactly 2 hex digits`；`\u` 的括号、位数、标量各有对应报文；`\` 后直接
+// EOF 是 `unterminated escape sequence`（rune 里是 `... in rune literal`）。
 
 <bool-literal> ::= "true" | "false"
 

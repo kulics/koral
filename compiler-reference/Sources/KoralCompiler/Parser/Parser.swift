@@ -224,6 +224,12 @@ public class Parser {
     try match(.leftParen)
 
     var bindings: [PairBindingElement] = [try parsePairBindingElement()]
+    // At least two slots -- `(x)` is a parenthesized binding, not a tuple.
+    // The dedicated complaint matches koralc's.
+    guard currentToken === .comma else {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan, message: "Expected ',' in tuple let statement")
+    }
     try match(.comma)
     while true {
       bindings.append(try parsePairBindingElement())
@@ -234,6 +240,10 @@ public class Parser {
       }
     }
 
+    guard currentToken === .rightParen else {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan, message: "Expected ')' in tuple let statement")
+    }
     try match(.rightParen)
     try match(.equal)
 

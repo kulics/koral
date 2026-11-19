@@ -188,6 +188,24 @@ given Parser {
         );
     };
 
+    /// Whether a duration literal's digit value fits Int64 (the seed's
+    /// `Int64(value)` guard in `buildDurationLiteralExpression`).
+    duration_value_fits_int64(self, value: String): Bool = {
+        let runes = value.to_runes();
+        let mutable acc = 0;
+        for r in runes then {
+            let d = Int(r.to_uint32()) - 48;
+            if d < 0 or d > 9 then {
+                return false;
+            };
+            if acc > (9223372036854775807 - d) / 10 then {
+                return false;
+            };
+            acc = acc * 10 + d;
+        };
+        return true;
+    };
+
     build_duration_literal_expression(
         self,
         value: String,
@@ -294,6 +312,17 @@ given Parser {
                 return .Ok(Expr.IntegerLiteral(value, self.token_span(t)));
             },
             .DurationLiteral(value, unit) then {
+                // A duration literal's value must fit Int64 -- the seed's
+                // `buildDurationLiteralExpression` guard, with its wording.
+                if not self.duration_value_fits_int64(value) then {
+                    return .Error(
+                        self.unexpected_token_error_at(
+                            value + unit,
+                            "duration literal within Int64 range",
+                            t,
+                        ),
+                    );
+                };
                 self.advance();
                 return self.build_duration_literal_expression(
                     value,
@@ -369,7 +398,7 @@ given Parser {
                 if self.current().kind is not .LParen() then {
                     return .Error(
                         self.parser_error(
-                            "Unexpected token: \(token_text(self.current())), expected: '(' after implicit member name",
+                            "Unexpected token: \(token_kind_description(self.current())), expected: '(' after implicit member name",
                         ),
                     );
                 };
@@ -400,7 +429,7 @@ given Parser {
             _ then {
                 return .Error(
                     self.parser_error_at(
-                        "Unexpected token: \(token_text(t)), expected: number, identifier, boolean literal, block expression, or collection literal",
+                        "Unexpected token: \(token_kind_description(t)), expected: number, identifier, boolean literal, block expression, or collection literal",
                         t,
                     ),
                 );
@@ -506,7 +535,7 @@ given Parser {
             _ then {
                 return .Error(
                     self.unexpected_token_error_at(
-                        token_text(self.current()),
+                        token_kind_description(self.current()),
                         "')'",
                         self.current(),
                     ),
@@ -1164,6 +1193,17 @@ given Parser {
             );
         };
 
+        // Range patterns are gone; the seed blames the range token and names
+        // the replacement. (`..` / `..<` at the head only -- `<..` / `<..<`
+        // fall through to the generic complaint on both sides.)
+        if self.current().kind is .Range() or is .RangeLess() then {
+            return .Error(
+                self.parser_error(
+                    "Range patterns are no longer supported. Use comparison patterns instead (e.g., > 5 and < 10).",
+                ),
+            );
+        };
+
         let mutable node = PatternNode.Wildcard(self.span_from_start(start));
         when self.current().kind in {
             .QuestionMark() then {
@@ -1244,6 +1284,18 @@ given Parser {
             },
             .IntegerLiteral(value) then {
                 self.advance();
+                // `5..10` and friends: the seed names the replacement and
+                // interpolates the written value into the example.
+                when self.current().kind in {
+                    .Range() or .RangeLess() or .LessRange() or .LessRangeLess() then {
+                        return .Error(
+                            self.parser_error(
+                                "Range patterns are no longer supported. Use comparison patterns instead (e.g., >= \(value) and < end).",
+                            ),
+                        );
+                    },
+                    _ then {},
+                };
                 node = PatternNode.IntegerLiteral(value, self.span_from_start(start));
             },
             .FloatLiteral(value) then {
@@ -1527,7 +1579,7 @@ given Parser {
                 // and the same one the frozen reference produces here. The span
                 // already says the token is inside a pattern.
                 return .Error(
-                    self.parser_error("Unexpected token: \(token_text(self.current()))"),
+                    self.parser_error("Unexpected token: \(token_kind_description(self.current()))"),
                 );
             },
         };
@@ -1654,7 +1706,7 @@ given Parser {
                     _ then {
                         return .Error(
                             self.unexpected_token_error_at(
-                                token_text(self.current()),
+                                token_kind_description(self.current()),
                                 "':' in dict literal entry",
                                 self.current(),
                             ),
@@ -1685,6 +1737,18 @@ given Parser {
                 break;
             };
             let next = self.parse_expression() or return;
+            if self.current().kind is .Colon() then {
+                // The dict shape is decided by the FIRST element's `:`; a `:`
+                // on a later element is a mixed literal. The seed names the
+                // mistake instead of a bare "expected: ']'".
+                return .Error(
+                    self.unexpected_token_error_at(
+                        token_kind_description(self.current()),
+                        "no ':' in collection literal element",
+                        self.current(),
+                    ),
+                );
+            };
             elements.push(next);
         };
 
@@ -1904,9 +1968,12 @@ given Parser {
                 self.advance();
             },
             _ then {
+                // The defect is the whole `expr(Type)` SHAPE, so blame its
+                // start (the seed spans base.span.start .. currentSpan.end).
                 return .Error(
-                    self.parser_error(
+                    self.parser_error_at_span(
                         "A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)', not 'expr(Type)'",
+                        self.span_from_expr_start(base),
                     ),
                 );
             },
@@ -2261,7 +2328,7 @@ given Parser {
         if not method_type_args.is_empty() then {
             return .Error(
                 self.unexpected_token_error_at(
-                    token_text(self.current()),
+                    token_kind_description(self.current()),
                     "'(' after generic method name",
                     self.current(),
                 ),
@@ -2271,7 +2338,7 @@ given Parser {
         if bare_method_type_args then {
             return .Error(
                 self.unexpected_token_error_at(
-                    token_text(self.current()),
+                    token_kind_description(self.current()),
                     "'(' after generic method name",
                     self.current(),
                 ),
@@ -2311,6 +2378,19 @@ given Parser {
                 .LBracket() then {
                     if not self.should_continue_postfix_after_expression() then {
                         break;
+                    };
+                    // `[]` is neither a generic application nor a subscript:
+                    // the BNF subscript suffix takes exactly one index. Blame
+                    // the `]` -- the same anchor parse_subscript_suffix uses.
+                    if self.index + 1 < self.tokens.count() then {
+                        if self.tokens[self.index + 1].kind is .RBracket() then {
+                            self.advance();
+                            return .Error(
+                                self.parser_error(
+                                    "Subscript expression requires one index argument",
+                                ),
+                            );
+                        };
                     };
                     // `[` `<type-list>` `]` is a generic application; anything
                     // else is a subscript. One bounded scan of the bracketed

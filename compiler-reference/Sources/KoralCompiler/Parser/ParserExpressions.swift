@@ -313,6 +313,14 @@ extension Parser {
       }
       if currentToken === .comma {
         advanceShape()
+        // A trailing comma before `)` is allowed -- `(x, y,) => ...`
+        // (grammar.bnf <lambda-param-list> is `("," <lambda-param>)* ","?`).
+        // Without this the loop's next iteration sees `)` where a parameter
+        // name belongs and the construct falls through to the pair-literal
+        // error.
+        if currentToken === .rightParen {
+          break
+        }
       } else {
         break
       }
@@ -1273,6 +1281,16 @@ extension Parser {
           expr = try parseCall(expr)
         }
       } else if currentToken === .leftBracket {
+        // `[]` is neither a generic application nor a subscript: the BNF
+        // subscript suffix takes exactly one index. Blame the `]` -- the same
+        // anchor and message koralc's parse_subscript_suffix uses.
+        if lexer.peekNextToken() === .rightBracket {
+          try match(.leftBracket)
+          throw ParserError.rejectedConstruct(
+            span: currentSpan,
+            message: "Subscript expression requires one index argument"
+          )
+        }
         // `[` `<type-list>` `]` is a generic application; anything else is a
         // subscript. One bounded scan decides -- no trial parse, no rollback.
         if case .identifier(let name, _) = expr, scanTypeArgList() {
@@ -1284,7 +1302,15 @@ extension Parser {
             repeat {
               args.append(try expression())
               if currentToken === .comma {
-                try match(.comma)
+                // Exactly one index (grammar.bnf <subscript-suffix> "Exactly
+                // ONE index"): there is no collection in the language that
+                // indexes by a tuple. The blame lands on the `,`, the token
+                // that says "more than one index" -- the same anchor koralc
+                // uses.
+                throw ParserError.rejectedConstruct(
+                  span: currentSpan,
+                  message: "Subscript expression supports exactly one index"
+                )
               } else {
                 break
               }
@@ -1726,6 +1752,10 @@ extension Parser {
 
         if currentToken === .comma {
           try match(.comma)
+          // A trailing comma before `)` is allowed -- `(x, y,) => ...`.
+          if currentToken === .rightParen {
+            break
+          }
         } else {
           break
         }

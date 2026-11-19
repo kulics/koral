@@ -56,7 +56,7 @@ extension Parser {
     let selfSpan = currentSpan
     try match(.selfKeyword)
     if currentToken === .colon {
-      throw ParserError.unexpectedToken(span: currentSpan, got: "'self' parameter cannot use named parameter syntax")
+      throw ParserError.rejectedConstruct(span: currentSpan, message: "'self' parameter cannot use named parameter syntax")
     }
 
     if currentToken !== .comma && currentToken !== .rightParen {
@@ -235,12 +235,12 @@ extension Parser {
       if mutable {
         if isForeign {
           if currentToken === .leftParen && !parenOpensTypeAnnotation() {
-            throw ParserError.unexpectedToken(span: currentSpan, got: "foreign let mutable cannot declare a function")
+            throw ParserError.rejectedConstruct(span: currentSpan, message: "foreign let mutable cannot declare a function")
           }
           return try foreignLetDeclaration(name: name, mutable: true, cname: cname, access: access, isUnsafe: declIsUnsafe, span: startSpan, nameSpan: nameSpan)
         }
         if currentToken === .leftParen && !parenOpensTypeAnnotation() {
-          throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+          throw ParserError.rejectedConstruct(span: currentSpan, message: "Function declaration cannot use mutable before name")
         }
         // A plain variable carries no safety contract (unsafe-design.md §B):
         // `let unsafe x: T = v` is rejected here, at the name.
@@ -269,8 +269,8 @@ extension Parser {
           return try foreignLetDeclaration(name: name, mutable: false, cname: cname, access: access, isUnsafe: declIsUnsafe, span: startSpan, nameSpan: nameSpan)
         }
         if isIntrinsic {
-          throw ParserError.unexpectedToken(
-            span: currentSpan, got: "intrinsic variable not supported")
+          throw ParserError.rejectedConstruct(
+            span: currentSpan, message: "intrinsic variable not supported")
         }
         if declIsUnsafe {
           throw ParserError.rejectedConstruct(
@@ -395,10 +395,10 @@ extension Parser {
           )
         }
         if isIntrinsic {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Intrinsic type alias is not supported")
+          throw ParserError.rejectedConstruct(span: currentSpan, message: "Intrinsic type alias is not supported")
         }
         if isForeign {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Foreign type alias is not supported")
+          throw ParserError.rejectedConstruct(span: currentSpan, message: "Foreign type alias is not supported")
         }
         try match(.equal)
         let targetType = try parseType()
@@ -413,9 +413,9 @@ extension Parser {
       }
 
       if isNominalMutable && isIntrinsic {
-        throw ParserError.unexpectedToken(
+        throw ParserError.rejectedConstruct(
           span: currentSpan,
-          got: "Intrinsic type cannot be marked mutable"
+          message: "intrinsic type cannot be marked mutable"
         )
       }
       if isForeign {
@@ -448,6 +448,14 @@ extension Parser {
       // The trait declaration's span starts at the `trait` keyword, not at the
       // access modifier -- the same head koralc's `span_from_start` covers.
       return try parseTraitDeclaration(access: access, span: currentSpan)
+    } else if currentToken === .usingKeyword {
+      // `using` reached the global-declaration slot, which -- given that the
+      // using region already consumed every leading `using` -- means an access
+      // modifier preceded it. `using` carries no visibility; koralc names the
+      // mistake instead of a bare "Unexpected token: using".
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "access modifier on using declaration is not supported")
     } else {
       throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
     }
@@ -614,7 +622,7 @@ extension Parser {
       let returnType = try parseType()
 
       if currentToken === .equal {
-        throw ParserError.unexpectedToken(span: currentSpan, got: "Trait method should not have body")
+        throw ParserError.rejectedConstruct(span: currentSpan, message: "trait member cannot have a body")
       }
       
       try requireSemicolon()
@@ -748,8 +756,8 @@ extension Parser {
 
       // Must not have body
       if currentToken === .equal {
-        throw ParserError.unexpectedToken(
-          span: currentSpan, got: "Intrinsic given method should not have body")
+        throw ParserError.rejectedConstruct(
+          span: currentSpan, message: "intrinsic given member cannot have a body")
       }
       
       try requireSemicolon()
@@ -1230,8 +1238,8 @@ extension Parser {
 
     if isIntrinsic {
       if currentToken === .equal {
-        throw ParserError.unexpectedToken(
-          span: currentSpan, got: "Intrinsic function should not have body")
+        throw ParserError.rejectedConstruct(
+          span: currentSpan, message: "intrinsic function declaration should not have body")
       }
       return .intrinsicFunctionDeclaration(
         name: name,
@@ -1487,9 +1495,12 @@ extension Parser {
     span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     if isIntrinsic {
-      if currentToken === .leftParen {
-        throw ParserError.unexpectedToken(
-          span: currentSpan, got: "Intrinsic type should not have body")
+      // `type intrinsic T;` is the only intrinsic type shape; a `(...)` field
+      // list or a `{...}` enum body is a body, and the message says so at the
+      // token that opens it (koralc: "intrinsic type cannot have a body").
+      if currentToken === .leftParen || currentToken === .leftBrace {
+        throw ParserError.rejectedConstruct(
+          span: currentSpan, message: "intrinsic type cannot have a body")
       }
       return .intrinsicTypeDeclaration(
         name: name, typeParameters: typeParams, access: access, span: span, nameSpan: nameSpan)

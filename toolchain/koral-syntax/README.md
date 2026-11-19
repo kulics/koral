@@ -51,7 +51,7 @@ verbatim, so a toolchain error and a compiler error say the same thing:
 | `<>` | `'<>' is not supported; use '!='` |
 | `pat if cond then` (guard) | `Pattern guards use 'where', not 'if'` |
 | `*self`, `*self mutable` | `Invalid receiver parameter syntax: use 'self' only` |
-| default on a positional param/field | `Default values are only allowed for named parameters (use 'name: Type = value' syntax)` |
+| positional param after named | `Positional parameter '<n>' cannot appear after named parameters` |
 | `type mutable` on an alias / enum | `Type alias cannot be marked mutable` / `Enum type cannot be marked mutable` |
 | import alias case mismatch | `Using alias '<a>' is invalid: alias must start with an upper\|lowercase letter because referenced identifier '<n>' starts with upper\|lowercase` |
 | flow operator mixed with logical `and` / `or`, or the reverse | `'<op>' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses` / `'<op>' cannot be mixed with logical 'and' / 'or' without parentheses` |

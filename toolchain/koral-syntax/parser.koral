@@ -65,9 +65,299 @@ given CstParser {
         };
     };
 
+    /// The compilers' generic parse-error shape: the offending token is named
+    /// the way `token_kind_description` names it, then what was expected.
     private expected_error(self, expected: String): String = {
         let got = self.peek();
-        return "Parse error: expected \(expected), got '\(got.to_string())' at token #\(self.pos.to_string())";
+        return "Parse error: Unexpected token: \(self.token_desc(got)), expected: \(expected)";
+    };
+
+    // ------------------------------------------------------------------
+    // Validation helpers (compiler parity)
+    //
+    // The predicates and renderings below mirror the compilers' own
+    // (`compiler/koralc/parser/core.koral` `is_valid_value_name` /
+    // `is_valid_c_name` / `token_kind_description`, and the frozen seed's
+    // equivalents) so a toolchain error and a compiler error say the same
+    // thing.
+    // ------------------------------------------------------------------
+
+    /// How a token is named inside `Unexpected token: <desc>` messages: valued
+    /// tokens print `kind(value)`, keywords and punctuation print their
+    /// spelling. Mirrors `token_kind_description` (the fixed-array `Float(3.5)`
+    /// and `Bool(false)` spellings are this same family).
+    private token_desc(self, token: Token): String = when token in {
+        .Ident(name) then "Identifier(\(name))",
+        .IntLit(text) then {
+            if CstParser.text_starts_with_quote(text) then {
+                // Rune literals scan as `IntLit` carrying their quoted
+                // spelling; the compilers print `Rune('a')`.
+                "Rune(\(text))"
+            } else if CstParser.is_duration_text(text) then {
+                "DurationLiteral(\(text))"
+            } else {
+                "Integer(\(CstParser.literal_int_value(text)))"
+            }
+        },
+        .FloatLit(text) then "Float(\(CstParser.literal_text_value(text)))",
+        .StrLit(text) then "String(\(CstParser.string_content_text(text)))",
+        .InterpStr(_) then "<interpolated-string>",
+        .BoolTrue() then "Bool(true)",
+        .BoolFalse() then "Bool(false)",
+        .EOF() then "EOF",
+        _ then token.to_string(),
+    };
+
+    /// Whether a duration literal's digit value fits Int64 (the compilers'
+    /// `Int64(value)` guard in the duration builder).
+    private duration_value_fits_int64(text: String): Bool = {
+        let runes = text.to_runes();
+        let last = runes[runes.count() - 1];
+        let prev = if runes.count() >= 2 then {
+            runes[runes.count() - 2]
+        } else {
+            'x'
+        };
+        let suffix_len = if prev == 'm' or prev == 'u' or prev == 'n' then {
+            2
+        } else {
+            1
+        };
+        let digit_end = runes.count() - suffix_len;
+        let mutable acc = 0;
+        let mutable i = 0;
+        while i < digit_end then {
+            let d = Int(runes[i].to_uint32()) - 48;
+            if d < 0 or d > 9 then {
+                return false;
+            };
+            if acc > (9223372036854775807 - d) / 10 then {
+                return false;
+            };
+            acc = acc * 10 + d;
+            i += 1;
+        };
+        return true;
+    };
+
+    /// A duration literal's spelling: ASCII digits then a `s` / `ms` / `us` /
+    /// `ns` suffix (the compilers print `DurationLiteral(10s)`).
+    private is_duration_text(text: String): Bool = {
+        let runes = text.to_runes();
+        if runes.count() < 2 then {
+            return false;
+        };
+        let last = runes[runes.count() - 1];
+        if last != 's' then {
+            return false;
+        };
+        let prev = runes[runes.count() - 2];
+        let suffix_len = if prev == 'm' or prev == 'u' or prev == 'n' then {
+            2
+        } else {
+            1
+        };
+        let digit_end = runes.count() - suffix_len;
+        if digit_end <= 0 then {
+            return false;
+        };
+        let mutable i = 0;
+        while i < digit_end then {
+            let c = runes[i].to_uint32();
+            if c < 48 or c > 57 then {
+                return false;
+            };
+            i += 1;
+        };
+        return true;
+    };
+
+    private text_starts_with_quote(text: String): Bool = {
+        let runes = text.to_runes();
+        return runes.count() > 0 and (runes[0] == '\'' or runes[0] == '"');
+    };
+
+    /// A literal's spelling minus digit separators (the compilers' normalized
+    /// token text).
+    private literal_text_value(text: String): String = {
+        let mutable out = "";
+        for r in text.to_runes() then {
+            if r != '_' then {
+                out = out + r.to_string();
+            };
+        };
+        return out;
+    };
+
+    /// An integer literal rendered the way `Integer(v)` prints it: base
+    /// prefixes become their decimal value (`0xFF` -> `255`), digit
+    /// separators are dropped.
+    private literal_int_value(text: String): String = {
+        let cleaned = CstParser.literal_text_value(text);
+        let runes = cleaned.to_runes();
+        if runes.count() > 2 and runes[0] == '0' then {
+            let mutable radix = 0;
+            if runes[1] == 'x' or runes[1] == 'X' then {
+                radix = 16;
+            } else if runes[1] == 'b' or runes[1] == 'B' then {
+                radix = 2;
+            } else if runes[1] == 'o' or runes[1] == 'O' then {
+                radix = 8;
+            };
+            if radix != 0 then {
+                let mutable magnitude = 0;
+                let mutable i = 2;
+                while i < runes.count() then {
+                    let d = CstParser.hex_digit_value(runes[i]);
+                    if d >= radix then {
+                        return cleaned;
+                    };
+                    magnitude = magnitude * radix + d;
+                    i += 1;
+                };
+                return magnitude.to_string();
+            };
+        };
+        return cleaned;
+    };
+
+    private hex_digit_value(ch: Rune): Int = {
+        if ch >= '0' and ch <= '9' then {
+            return Int(ch.to_uint32()) - 48;
+        };
+        if ch >= 'a' and ch <= 'f' then {
+            return Int(ch.to_uint32()) - 97 + 10;
+        };
+        return Int(ch.to_uint32()) - 65 + 10;
+    };
+
+    /// A fixed-array size: ASCII decimal digits in `Int` range. Anything else
+    /// -- a base prefix, an overflow -- reads as 0 and fails the minimum-size
+    /// rule the way the compilers' size parser does.
+    private parse_decimal_size(text: String): Int = {
+        let cleaned = CstParser.literal_text_value(text);
+        let runes = cleaned.to_runes();
+        if runes.is_empty() then {
+            return 0;
+        };
+        let mutable value = 0;
+        let mutable i = 0;
+        while i < runes.count() then {
+            let c = runes[i].to_uint32();
+            if c < 48 or c > 57 then {
+                return 0;
+            };
+            if value > 922337203685477580 then {
+                return 0;
+            };
+            value = value * 10 + Int(c) - 48;
+            i += 1;
+        };
+        return value;
+    };
+
+    /// A string token's content: the quotes are spelling, not content
+    /// (`String(s)` prints the inside).
+    private string_content_text(text: String): String = {
+        let runes = text.to_runes();
+        if runes.count() < 2 then {
+            return text;
+        };
+        let mutable out = "";
+        let mutable i = 1;
+        while i < runes.count() - 1 then {
+            out = out + runes[i].to_string();
+            i += 1;
+        };
+        return out;
+    };
+
+    /// Value-name shape (koralc `is_valid_value_name`): all underscores, or
+    /// the first non-`_` rune is an ASCII lowercase letter.
+    private is_valid_value_name(name: String): Bool = {
+        let runes = name.to_runes();
+        if runes.is_empty() then {
+            return false;
+        };
+        let mutable idx = 0;
+        while idx < runes.count() and runes[idx].to_uint32() == 95 then {
+            idx += 1;
+        };
+        if idx >= runes.count() then {
+            return true;
+        };
+        let first = runes[idx].to_uint32();
+        return first >= 97 and first <= 122;
+    };
+
+    /// Type-name shape (koralc `is_upper_first`): the first non-`_` rune is
+    /// an ASCII uppercase letter. All-underscore names are not type names.
+    private is_valid_type_name(name: String): Bool = {
+        let runes = name.to_runes();
+        if runes.is_empty() then {
+            return false;
+        };
+        let mutable idx = 0;
+        while idx < runes.count() and runes[idx].to_uint32() == 95 then {
+            idx += 1;
+        };
+        if idx >= runes.count() then {
+            return false;
+        };
+        let first = runes[idx].to_uint32();
+        return first >= 65 and first <= 90;
+    };
+
+    /// A legal C identifier (koralc `is_valid_c_name`): non-empty, ASCII
+    /// letter or `_` first, ASCII letters/digits/`_` after, and not one of
+    /// the C reserved words.
+    private is_valid_c_name(text: String): Bool = {
+        let runes = text.to_runes();
+        if runes.is_empty() then {
+            return false;
+        };
+        let first = runes[0].to_uint32();
+        let first_ok = (first >= 65 and first <= 90) or (first >= 97 and first <= 122) or first == 95;
+        if not first_ok then {
+            return false;
+        };
+        let mutable i = 1;
+        while i < runes.count() then {
+            let c = runes[i].to_uint32();
+            let ok = (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 95;
+            if not ok then {
+                return false;
+            };
+            i += 1;
+        };
+        return not CstParser.is_c_reserved_word(text);
+    };
+
+    /// The C reserved words (C89-C23 plus the standard spellings) -- a C name
+    /// slot may not spell one (koralc `c_reserved_words`).
+    private is_c_reserved_word(text: String): Bool = {
+        return text == "auto" or text == "break" or text == "case" or text == "char"
+            or text == "const" or text == "constexpr" or text == "consteval"
+            or text == "continue" or text == "default" or text == "do"
+            or text == "double" or text == "else" or text == "enum"
+            or text == "extern" or text == "float" or text == "for"
+            or text == "goto" or text == "if" or text == "inline"
+            or text == "int" or text == "long" or text == "register"
+            or text == "restrict" or text == "return" or text == "short"
+            or text == "signed" or text == "sizeof" or text == "static"
+            or text == "struct" or text == "switch" or text == "typedef"
+            or text == "union" or text == "unsigned" or text == "void"
+            or text == "volatile" or text == "while" or text == "_Alignas"
+            or text == "_Alignof" or text == "_Atomic" or text == "_BitInt"
+            or text == "_Bool" or text == "_Complex" or text == "_Decimal128"
+            or text == "_Decimal32" or text == "_Decimal64" or text == "_Generic"
+            or text == "_Imaginary" or text == "_Noreturn" or text == "_Static_assert"
+            or text == "_Thread_local" or text == "alignas" or text == "alignof"
+            or text == "bool" or text == "complex" or text == "decimal32"
+            or text == "decimal64" or text == "decimal128" or text == "false"
+            or text == "imaginary" or text == "nullptr" or text == "static_assert"
+            or text == "thread_local" or text == "true" or text == "typeof"
+            or text == "typeof_unqual";
     };
 
     private is_eof(self): Bool = self.peek() is .EOF();
@@ -82,9 +372,30 @@ given CstParser {
         return .Error(self.expected_error(expected_name));
     };
 
+    /// The compilers' identifier expectation: `Expected identifier for <what>,
+    /// got: <desc>` (the `what` labels are theirs: `let declaration`,
+    /// `type identifier`, `parameter`, ...).
     private expect_ident(self, what: String): Result[Token] = when self.peek() in {
         .Ident(_) then .Ok(self.eat()),
-        _ then .Error(self.expected_error(what)),
+        _ then .Error(
+            "Parse error: Expected identifier for \(what), got: \(self.token_desc(self.peek()))",
+        ),
+    };
+
+    /// The type-position name expectation, which the compilers phrase their
+    /// own way: `Expected type identifier, got: X`.
+    private expect_type_identifier(self): Result[Token] = when self.peek() in {
+        .Ident(_) then .Ok(self.eat()),
+        _ then .Error(
+            "Parse error: Expected type identifier, got: \(self.token_desc(self.peek()))",
+        ),
+    };
+
+    /// A generic parameter name -- `Expected identifier for type parameter`,
+    /// with no `got:` part in the compilers' phrasing.
+    private expect_type_parameter_name(self): Result[Token] = when self.peek() in {
+        .Ident(_) then .Ok(self.eat()),
+        _ then .Error("Parse error: Expected identifier for type parameter"),
     };
 
     // ── 有界前看：形状归类 ─────────────────────────────────────────────────
@@ -267,6 +578,26 @@ given CstParser {
                 continue;
             };
             i = next;
+            // Types in the list are comma-separated: juxtaposed `name Type`
+            // is a parameter list's legacy shape, not a type list.
+            let j = self.sig_index_at(i);
+            let mutable sep_ok = true;
+            if j >= self.tokens.count() then {
+                sep_ok = true;
+            } else if self.tokens[j] is .Comma() then {
+                sep_ok = true;
+            } else if is_bracket_list and self.tokens[j] is .RBracket() then {
+                sep_ok = true;
+            } else if is_paren_list and self.tokens[j] is .RParen() then {
+                sep_ok = true;
+            } else {
+                sep_ok = false;
+            };
+            if not sep_ok then {
+                done = true;
+                result = Option[Int].None();
+                continue;
+            };
         };
         return result;
     };
@@ -402,6 +733,13 @@ given CstParser {
             };
             if self.tokens[i] is .Comma() then {
                 i += 1;
+                // A trailing comma before `)` is allowed -- `(x, y,) => ...`
+                // (grammar.bnf <lambda-param-list> is `("," <lambda-param>)* ","?`).
+                let after_comma = self.sig_index_at(i);
+                if after_comma < self.tokens.count() and self.tokens[after_comma] is .RParen() then {
+                    i = after_comma;
+                    break;
+                };
             } else {
                 break;
             };
@@ -569,7 +907,7 @@ given CstParser {
     /// into a shape the compiler will then refuse.
     private eat_decl_semi(self): Result[Token] = {
         if self.peek() is not .Semi() then {
-            return .Error("Parse error: expected ';' after declaration");
+            return .Error(self.expected_error("';'"));
         };
         return .Ok(self.eat());
     };
@@ -663,11 +1001,117 @@ given CstParser {
     /// and rewrote it to the old `package_private` spelling, silently turning a
     /// rejected program into an accepted one with different visibility. The merge
     /// is gone; the note stays as a warning against reintroducing it.
-    private eat_vis(self): Option[Token] = {
-        if self.is_access_mod() then {
-            return .Some(self.eat());
+    ///
+    /// The removed access spellings are ordinary identifiers now, so written
+    /// in a modifier slot they read as a name unless the FOLLOWER test says
+    /// otherwise (`next_token_opens_declaration_item` in the compilers): a
+    /// name slot is protected -- `let file_private = 1` and
+    /// `type T(file_private: Int)` name their declarations and keep working.
+    private eat_vis(self): Result[Option[Token]] = {
+        if self.peek() is .Ident(name) then {
+            let legacy_message = when name in {
+                "file_private" then "Access modifier is 'private', not legacy 'file_private'",
+                "module_private" then "Access modifier is 'internal', not legacy 'module_private'",
+                "package_private" then "Access modifier is 'protected', not legacy 'package_private'",
+                _ then "",
+            };
+            if legacy_message != "" and self.follower_opens_decl_item() then {
+                return .Error("Parse error: \(legacy_message)");
+            };
         };
-        return .None();
+        if self.is_access_mod() then {
+            return .Ok(.Some(self.eat()));
+        };
+        return .Ok(.None());
+    };
+
+    /// The token `offset` slots past the cursor opens a declaration item (the
+    /// compilers' `next_token_opens_declaration_item`): another modifier, a
+    /// declaration keyword, or the declared NAME -- `_`-only or lowercase.
+    private follower_opens_decl_item(self): Bool = {
+        return self.follower_opens_decl_item_at(1);
+    };
+
+    /// A retired access spelling is an attempted modifier wherever the
+    /// modifier prefix runs (`parse_decl_flags` in the compilers) -- so the
+    /// check runs across the whole prefix, not just its first token.
+    private reject_legacy_access_prefix(self): Result[Void] = {
+        let mutable scan = 0;
+        while true then {
+            let tok = self.peek_at_skip_nl(scan);
+            when tok in {
+                .KwPublic() or .KwPrivate() or .KwInternal() or .KwProtected() then {
+                    scan += 1;
+                },
+                .Ident(name) then {
+                    let legacy_message = when name in {
+                        "file_private" then "Access modifier is 'private', not legacy 'file_private'",
+                        "module_private" then "Access modifier is 'internal', not legacy 'module_private'",
+                        "package_private" then "Access modifier is 'protected', not legacy 'package_private'",
+                        _ then "",
+                    };
+                    if legacy_message != ""
+                        and self.follower_opens_decl_item_at(scan + 1) then {
+                        return .Error("Parse error: \(legacy_message)");
+                    };
+                    return .Ok({});
+                },
+                _ then {
+                    return .Ok({});
+                },
+            };
+        };
+        return .Ok({});
+    };
+
+    private follower_opens_decl_item_at(self, offset: Int): Bool = {
+        let follower = self.peek_at_skip_nl(offset);
+        return when follower in {
+            .KwLet() or .KwMut() or .KwType() or .KwUsing() or .KwTrait()
+                or .KwGiven() or .KwForeign() or .KwIntrinsic()
+                or .KwPrivate() or .KwInternal() or .KwProtected() or .KwPublic() then true,
+            .Ident(n) then {
+                let runes = n.to_runes();
+                let mutable all_underscore = runes.count() > 0;
+                let mutable i = 0;
+                while i < runes.count() then {
+                    if runes[i].to_uint32() != 95 then {
+                        all_underscore = false;
+                    };
+                    i += 1;
+                };
+                all_underscore or CstParser.is_valid_value_name(n)
+            },
+            _ then false,
+        };
+    };
+
+    /// The top-level access prefix: at most one modifier, and no retired
+    /// spelling (`parse_decl_flags` in the compilers). The order message
+    /// spells the written pair, trailing period included.
+    private eat_top_level_vis(self): Result[Option[Token]] = {
+        let mutable vis = Option[Token].None();
+        while true then {
+            let one = self.eat_vis() or return;
+            when one in {
+                .Some(tok) then {
+                    when vis in {
+                        .Some(prev) then {
+                            return .Error(
+                                "Parse error: Invalid access modifier order: '\(prev.to_string()) \(tok.to_string())'.",
+                            );
+                        },
+                        .None() then {
+                            vis = .Some(tok);
+                        },
+                    };
+                },
+                .None() then {
+                    return .Ok(vis);
+                },
+            };
+        };
+        return .Ok(vis);
     };
 
     /// The `foreign` / `intrinsic` qualifiers written immediately after a
@@ -689,6 +1133,42 @@ given CstParser {
             };
         };
         return mods;
+    };
+
+    /// The qualifiers are a closed pair -- neither repeating nor mixing
+    /// (grammar.bnf <decl-qualifier>). The compilers blame the declaration
+    /// keyword for these; the message text is all that travels here.
+    private validate_kind_modifiers(self, mods: List[Token]): Result[Void] = {
+        let mutable has_foreign = false;
+        let mutable has_intrinsic = false;
+        for m in mods then {
+            when m in {
+                .KwForeign() then {
+                    if has_foreign then {
+                        return .Error("Parse error: Duplicate declaration modifier: foreign");
+                    };
+                    if has_intrinsic then {
+                        return .Error(
+                            "Parse error: foreign and intrinsic cannot be used together",
+                        );
+                    };
+                    has_foreign = true;
+                },
+                .KwIntrinsic() then {
+                    if has_intrinsic then {
+                        return .Error("Parse error: Duplicate declaration modifier: intrinsic");
+                    };
+                    if has_foreign then {
+                        return .Error(
+                            "Parse error: foreign and intrinsic cannot be used together",
+                        );
+                    };
+                    has_intrinsic = true;
+                },
+                _ then {},
+            };
+        };
+        return .Ok({});
     };
 
     /// How many leading tokens are access modifiers, before the declaration
@@ -873,20 +1353,40 @@ given CstParser {
             return .Ok(.Weakref(inner, kw));
         };
 
-        // Fixed array: `[N]Type` (grammar.bnf <fixed-array-type>). N is an
-        // integer literal; the element is the full type that follows.
+        // Fixed array: `[N]Type` (grammar.bnf <fixed-array-type>). N is a
+        // plain decimal integer >= 1; the element is the full type that
+        // follows. The compilers parse ASCII decimal digits in `Int` range and
+        // blame the size itself for anything else -- `[0]`, `[0x0]` and
+        // overflow all report the minimum-size error, while a non-integer
+        // TOKEN is `Unexpected token: X, expected: an integer array size`.
         if self.check(.LBracket()) then {
             let lb = self.eat();
-            let len = self.eat();
+            let len = self.peek();
+            let mutable size_ok = false;
             when len in {
-                .IntLit(_) then {},
-                _ then {
-                    return .Error("Parse error: expected integer array length after '['");
+                .IntLit(text) then {
+                    if CstParser.parse_decimal_size(text) >= 1 then {
+                        size_ok = true;
+                    };
                 },
+                _ then {},
             };
+            if not size_ok then {
+                when len in {
+                    .IntLit(_) then {
+                        return .Error("Parse error: Fixed array size must be at least 1");
+                    },
+                    _ then {
+                        return .Error(
+                            "Parse error: Unexpected token: \(self.token_desc(len)), expected: an integer array size",
+                        );
+                    },
+                };
+            };
+            let len_tok = self.eat();
             let rb = self.expect(.RBracket(), "']'") or return;
             let element = self.parse_type_node() or return;
-            return .Ok(CstType.FixedArray(lb, len, rb, element));
+            return .Ok(CstType.FixedArray(lb, len_tok, rb, element));
         };
 
         // Two shapes open with `(`. A function type is `(T1, T2) -> R` -- its
@@ -930,31 +1430,18 @@ given CstParser {
             return .Ok(CstType.SelfType(kw));
         };
 
-        // Simple named type
-        let name = self.expect_ident("type name") or return;
+        // Simple named type -- the compilers' type-position expectation has
+        // its own shape (`Expected type identifier, got: X`).
+        let name = self.expect_type_identifier() or return;
         when name in {
             .Ident(n) then {
-                let runes = n.to_runes();
-                if runes.count() == 0 then {
-                    return .Error("Parse error: empty type name");
-                } else {
-                    // `<type-identifier> ::= "_"* [A-Z] ...` (grammar.bnf):
-                    // leading underscores are allowed, the first letter is not.
-                    let mutable idx = 0;
-                    while idx < runes.count() and runes[idx].to_uint32() == 95 then {
-                        idx += 1;
-                    };
-                    if idx >= runes.count() then {
-                        return .Error(
-                            "Parse error: type name must start with uppercase, got '\(n)'",
-                        );
-                    };
-                    let first = runes[idx].to_uint32();
-                    if first < 65 or first > 90 then {
-                        return .Error(
-                            "Parse error: type name must start with uppercase, got '\(n)'",
-                        );
-                    };
+                // `<type-identifier> ::= "_"* [A-Z] ...` (grammar.bnf):
+                // leading underscores are allowed, the first letter is not.
+                // Same message as the compilers'.
+                if not CstParser.is_valid_type_name(n) then {
+                    return .Error(
+                        "Parse error: Type name '\(n)' must start with an uppercase letter",
+                    );
                 };
             },
             _ then {},
@@ -1054,7 +1541,7 @@ given CstParser {
         let lb = self.expect(.LBracket(), "'['") or return;
         let mutable params = List[CstGenericParam].new();
         while not self.check(.RBracket()) and not self.is_eof() then {
-            let name = self.expect_ident("generic parameter name") or return;
+            let name = self.expect_type_parameter_name() or return;
             // Constraints are spelled `name: C1 and C2`; the colon separates
             // the type parameter from its bounds.
             if not self.check(.Colon()) then {
@@ -1090,6 +1577,13 @@ given CstParser {
                 let ct = self.parse_type_node() or return;
                 constraints.push(ct);
             };
+            // A type parameter must carry at least one constraint; the
+            // vacuous one is spelled `Any`, not left out.
+            if constraints.is_empty() then {
+                return .Error(
+                    "Parse error: Type parameter '\(name.to_string())' requires a constraint",
+                );
+            };
             let comma = self.eat_comma();
             params.push(CstGenericParam(name, constraints, comma));
         };
@@ -1119,6 +1613,13 @@ given CstParser {
             };
             if first == 1 and self.check(.KwSelf()) then {
                 let kw = self.eat();
+                // `self` is the receiver, not a named parameter: `self: T` /
+                // `self = ` are the named forms and do not apply.
+                if self.check(.Colon()) or self.check(.Eq()) then {
+                    return .Error(
+                        "Parse error: 'self' parameter cannot use named parameter syntax",
+                    );
+                };
                 let comma = self.eat_comma();
                 params.push(.SelfParam(kw, .None(), comma));
                 first = 0;
@@ -1130,7 +1631,12 @@ given CstParser {
                 param_mut = .Some(self.eat());
             };
 
-            let name = self.expect_ident("parameter name") or return;
+            let name = self.expect_ident("parameter") or return;
+            if not CstParser.is_valid_value_name(name.to_string()) then {
+                return .Error(
+                    "Parse error: Parameter name '\(name.to_string())' must start with a lowercase letter",
+                );
+            };
 
             // Every parameter is spelled `name: Type`; the colon separates the
             // name from its type. A following `=` marks a NAMED parameter:
@@ -1257,12 +1763,32 @@ given CstParser {
     // unwrapped value has no implicit name.
     //
     // A leading dot here is the chain, never an implicit member.
+    /// Binary operators that cannot follow an `and then .member()` chain (the
+    /// compilers' `isChainBinaryContinuation`): the chain is postfix-only.
+    private chain_binary_continuation(self): Bool = when self.peek() in {
+        .Plus() or .Minus() or .Star() or .Slash() or .Percent()
+            or .Amp() or .Pipe() or .Caret() or .LShift() or .RShift()
+            or .EqEq() or .NotEq() or .Gt() or .Lt() or .GtEq() or .LtEq()
+            or .Range() or .RangeLt() or .LtRange() or .LtRangeLt()
+            or .EllipsisLt() or .LtEllipsis()
+            or .KwIs() or .KwAs() then true,
+        _ then false,
+    };
+
     private parse_and_then_operand(self): Result[CstExpr] = {
         if self.check(.Dot()) then {
             // The leading `.` is consumed by the dot suffix, which the postfix
             // loop runs on the elided receiver.
             let base = CstExpr.FlowReceiver();
             let chain = self.parse_postfix_suffixes(base) or return;
+            // The chain is postfix-only: computing on the unwrapped value
+            // takes the `as name in ...` binder. A binary operator here means
+            // the reader tried to compute through the sugar.
+            if self.chain_binary_continuation() then {
+                return .Error(
+                    "Parse error: 'and then' chain is postfix-only -- compute on the value with 'as name in ...'",
+                );
+            };
             return .Ok(.FlowChain(chain));
         };
         if self.check(.KwAs()) then {
@@ -1394,7 +1920,12 @@ given CstParser {
     };
 
     private parse_single_pattern(self): Result[CstPattern] = {
-        return self.parse_primary_pattern();
+        let p = self.parse_primary_pattern(false) or return;
+        // `|` is not part of the pattern grammar (see parse_or_pattern).
+        if self.check(.Pipe()) then {
+            return .Error("Parse error: Pattern separator '|' is not supported; use 'or'");
+        };
+        return .Ok(p);
     };
 
     private parse_is(self): Result[CstExpr] = {
@@ -1554,22 +2085,60 @@ given CstParser {
         _ then false,
     };
 
+    /// Comparison chains. The chain shape is decided by the operator TOKEN
+    /// SEQUENCE alone -- an operand that is itself a (parenthesized)
+    /// comparison is an ordinary operand (`(a < b) == c` compares two Bools).
+    /// The compilers' rule, mirrored verbatim:
+    ///   - `==` / `!=` never chain: one link, and no comparison operator may
+    ///     follow it.
+    ///   - `<` `<=` `>` `>=` chain, one direction only; an equality operator
+    ///     anywhere in the chain is refused.
     private parse_comparison(self): Result[CstExpr] = {
         let mutable left = self.parse_bitwise_or() or return;
-        while true then {
+        let first = self.peek();
+        let first_is_equality = first is .EqEq() or first is .NotEq();
+        let first_is_ordering = first is .Gt() or first is .Lt() or first is .GtEq() or first is .LtEq();
+        if not first_is_equality and not first_is_ordering then {
+            return .Ok(left);
+        };
+        let op = self.eat();
+        let right = self.parse_bitwise_or() or return;
+        left = .BinaryOp(left, op, right);
+        if first_is_equality then {
             when self.peek() in {
                 .EqEq() or .NotEq() or .Gt() or .Lt() or .GtEq() or .LtEq() then {
-                    let op = self.eat();
-                    let right = self.parse_bitwise_or() or return;
-                    left = .BinaryOp(left, op, right);
+                    return .Error(CstParser.invalid_comparison_chain_error());
                 },
-                _ then {
-                    break;
-                },
+                _ then {},
             };
+            return .Ok(left);
+        };
+        // Ordering: further links must keep the direction; equality refused.
+        let ascending = first is .Lt() or first is .LtEq();
+        while true then {
+            let next = self.peek();
+            let next_is_equality = next is .EqEq() or next is .NotEq();
+            let next_is_ordering = next is .Gt() or next is .Lt() or next is .GtEq() or next is .LtEq();
+            if not next_is_equality and not next_is_ordering then {
+                break;
+            };
+            if next_is_equality then {
+                return .Error(CstParser.invalid_comparison_chain_error());
+            };
+            let next_ascending = next is .Lt() or next is .LtEq();
+            if next_ascending != ascending then {
+                return .Error(CstParser.invalid_comparison_chain_error());
+            };
+            let link_op = self.eat();
+            let link_right = self.parse_bitwise_or() or return;
+            left = .BinaryOp(left, link_op, link_right);
         };
         return .Ok(left);
     };
+
+    /// The compilers' comparison-chain diagnostic, verbatim.
+    private invalid_comparison_chain_error(): String =
+        "Parse error: Comparison chains only support same-direction ordering operators (<, <=) or (>, >=). Use 'and' to combine other comparisons explicitly.";
 
     private parse_shift(self): Result[CstExpr] = {
         let mutable left = self.parse_additive() or return;
@@ -1655,12 +2224,11 @@ given CstParser {
 
     private parse_prefix(self): Result[CstExpr] = {
         let mutable leading_comments = List[Token].new();
-        while self.peek() is .LineComment(_) or is .BlockComment(_) or is .Semi() then {
-            if self.peek() is .Semi() then {
-                let ignored_semi = self.eat();
-            } else {
-                leading_comments.push(self.eat());
-            };
+        // Comments may lead an expression; a `;` may NOT -- it terminates the
+        // statement around it (the compilers name it where an expression
+        // belongs).
+        while self.peek() is .LineComment(_) or is .BlockComment(_) then {
+            leading_comments.push(self.eat());
         };
 
         if leading_comments.count() > 0 then {
@@ -1748,7 +2316,7 @@ given CstParser {
         let rp = self.expect(.RParen(), "')'") or return;
         if not self.check(.Dot()) then {
             return .Error(
-                "Parse error: A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)' or 'expr as Type', not 'expr(Type)'",
+                "Parse error: A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)', not 'expr(Type)'",
             );
         };
         let dot = self.eat();
@@ -1772,11 +2340,11 @@ given CstParser {
         };
         if not self.check(.LParen()) then {
             return .Error(
-                "Parse error: A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)' or 'expr as Type', not 'expr(Type)'",
+                "Parse error: A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)', not 'expr(Type)'",
             );
         };
         let call_lp = self.eat();
-        let args = self.parse_call_args() or return;
+        let args = self.parse_call_args("Expected ')' after qualified method call arguments") or return;
         let call_rp = self.expect(.RParen(), "')'") or return;
         return .Ok(.Call(field, call_lp, args, call_rp));
     };
@@ -1800,7 +2368,14 @@ given CstParser {
                 if self.check(.LParen()) then {
                     let field_expr = CstExpr.FieldAccess(expr, dot, field);
                     let lp = self.eat();
-                    let args = self.parse_call_args() or return;
+                    // A type-name base is the STATIC call site, which the
+                    // compilers name separately in its closer error.
+                    let close_msg = if self.expr_is_type_name(expr) then {
+                        "Expected ')' after static method call arguments"
+                    } else {
+                        ""
+                    };
+                    let args = self.parse_call_args(close_msg) or return;
                     let rp = self.expect(.RParen(), "')'") or return;
                     expr = .Call(field_expr, lp, args, rp);
                     continue;
@@ -1825,7 +2400,7 @@ given CstParser {
                     continue;
                 };
                 let call_lp = self.eat();
-                let args = self.parse_call_args() or return;
+                let args = self.parse_call_args("") or return;
                 let rp = self.expect(.RParen(), "')'") or return;
                 // `Type(expr)` -- one positional operand -- is the cast
                 // spelling. `Type(a, b)`, `Type(x = 1)`, `Type()` are
@@ -1854,6 +2429,13 @@ given CstParser {
 
             // Generic instantiation suffix: expr[T]
             if self.check(.LBracket()) then {
+                // An empty `[]` is neither a generic application nor a
+                // subscript: the compilers name it at the bracket.
+                if self.peek_at_skip_nl(1) is .RBracket() then {
+                    return .Error(
+                        "Parse error: Subscript expression requires one index argument",
+                    );
+                };
                 // `[` `<type-list>` `]` is a generic application; anything else
                 // is a subscript. One bounded scan of the bracketed run decides
                 // -- so `s[UInt(0)]` is a subscript whose index is a cast, not
@@ -1931,16 +2513,18 @@ given CstParser {
         return .Ok(expr);
     };
 
-    private parse_call_args(self): Result[List[CstCallArg]] = {
+    /// `close_message` names the call site in the closer error: the plain
+    /// sites use the compilers' generic `Unexpected token: X, expected: ')'`
+    /// shape (pass ""), the static / implicit-member / qualified sites their
+    /// own sentences.
+    private parse_call_args(self, close_message: String): Result[List[CstCallArg]] = {
         let mutable args = List[CstCallArg].new();
         // Positional arguments must not appear after named arguments
         // (grammar.bnf <argument-list>).
         let mutable seen_named = false;
         while not self.check(.RParen()) and not self.is_eof() then {
-            if self.check(.Semi()) then {
-                self.eat();
-                continue;
-            };
+            // A `;` inside an argument list is not layout: the compilers name
+            // it where an expression belongs.
             let mutable leading_comments = List[Token].new();
             while self.peek() is .LineComment(_) or is .BlockComment(_) then {
                 leading_comments.push(self.eat());
@@ -1965,6 +2549,16 @@ given CstParser {
             };
             let comma = self.eat_comma();
             args.push(.Value(label, colon, value, comma));
+            // Arguments are comma-separated: without a comma the list is over
+            // and only `)` may follow. The first offending token is blamed.
+            if not self.sep_has_comma(comma) and not self.check(.RParen()) then {
+                if close_message != "" then {
+                    return .Error("Parse error: \(close_message)");
+                };
+                return .Error(
+                    "Parse error: Unexpected token: \(self.token_desc(self.peek())), expected: ')'",
+                );
+            };
             if self.pos == before then {
                 return .Error("Parse error: parser made no progress in argument list");
             };
@@ -1997,8 +2591,18 @@ given CstParser {
         };
 
         when self.peek() in {
-            .IntLit(_) then {
-                return .Ok(.IntLit(self.eat()));
+            .IntLit(lit_text) then {
+                let lit_tok = self.eat();
+                // A duration literal's value must fit Int64 -- the compilers
+                // name the literal when it does not.
+                if CstParser.is_duration_text(lit_text) then {
+                    if not CstParser.duration_value_fits_int64(lit_text) then {
+                        return .Error(
+                            "Parse error: Unexpected token: \(lit_text), expected: duration literal within Int64 range",
+                        );
+                    };
+                };
+                return .Ok(.IntLit(lit_tok));
             },
             .FloatLit(_) then {
                 return .Ok(.FloatLit(self.eat()));
@@ -2007,7 +2611,9 @@ given CstParser {
                 return .Ok(.StrLit(self.eat()));
             },
             .InterpStr(_) then {
-                return .Ok(.InterpStr(self.eat()));
+                let interp_tok = self.eat();
+                self.check_interpolation_parts(interp_tok) or return;
+                return .Ok(.InterpStr(interp_tok));
             },
             .BoolTrue() or .BoolFalse() then {
                 return .Ok(.BoolLit(self.eat()));
@@ -2048,15 +2654,18 @@ given CstParser {
         if self.check(.Dot()) then {
             let dot = self.eat();
             let name = self.expect_ident("member name") or return;
-            if self.check(.LParen()) then {
-                let lp = self.eat();
-                let args = self.parse_call_args() or return;
-                let rp = self.expect(.RParen(), "')'") or return;
-                return .Ok(.ImplicitMember(dot, name, .Some(lp), args, .Some(rp)));
+            // Every implicit member opens its argument list immediately
+            // (grammar.bnf <implicit-member-expression>): `.On()`, never bare
+            // `.On`. Newlines before the `(` are layout.
+            if not self.check(.LParen()) then {
+                return .Error(
+                    "Parse error: Unexpected token: \(self.token_desc(self.peek())), expected: '(' after implicit member name",
+                );
             };
-            return .Ok(
-                .ImplicitMember(dot, name, .None(), List[CstCallArg].new(), .None()),
-            );
+            let lp = self.eat();
+            let args = self.parse_call_args("Expected ')' after implicit member call arguments") or return;
+            let rp = self.expect(.RParen(), "')'") or return;
+            return .Ok(.ImplicitMember(dot, name, .Some(lp), args, .Some(rp)));
         };
 
         // `Self` is a TYPE, not an expression. The compilers' primary
@@ -2069,18 +2678,9 @@ given CstParser {
             );
         };
 
-        // Invalid primary token
-        let got = self.peek();
-        when got in {
-            .RParen() or .RBracket() or .RBrace() or .Comma() or .Semi() then {
-                return .Error(
-                    "Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())",
-                );
-            },
-            _ then {},
-        };
+        // Invalid primary token -- the compilers' expression-start list.
         return .Error(
-            "Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())",
+            "Parse error: Unexpected token: \(self.token_desc(self.peek())), expected: number, identifier, boolean literal, block expression, or collection literal",
         );
     };
 
@@ -2115,7 +2715,7 @@ given CstParser {
 
             while not self.check(.RBracket()) and not self.is_eof() then {
                 let key = self.parse_expr_node() or return;
-                let colon = self.expect(.Colon(), "':'") or return;
+                let colon = self.expect(.Colon(), "':' in dict literal entry") or return;
                 let value = self.parse_expr_node() or return;
                 let comma = self.eat_comma();
                 entries.push(CstDictEntry(key, colon, value, comma));
@@ -2130,6 +2730,13 @@ given CstParser {
         elements.push(CstCollectionElement(first, first_comma));
         while not self.check(.RBracket()) and not self.is_eof() then {
             let element = self.parse_expr_node() or return;
+            // The dict shape is decided by the FIRST element's `:`; a `:` on
+            // a later element mixes the two literal forms.
+            if self.check(.Colon()) then {
+                return .Error(
+                    "Parse error: Unexpected token: \(self.token_desc(self.peek())), expected: no ':' in collection literal element",
+                );
+            };
             let comma = self.eat_comma();
             elements.push(CstCollectionElement(element, comma));
         };
@@ -2198,8 +2805,11 @@ given CstParser {
                                     tail_expr = .Some(expr);
                                     tail_comments = pre_semi;
                                 } else {
+                                    // The bare expression is the block's
+                                    // tail and must be last -- the compilers
+                                    // blame the token where `}` belongs.
                                     return .Error(
-                                        "Parse error: expected ';' after expression statement",
+                                        "Parse error: Unexpected token: \(self.token_desc(self.peek())), expected: '}'",
                                     );
                                 };
                             } else {
@@ -2333,6 +2943,11 @@ given CstParser {
         let mutable params = List[CstLambdaParam].new();
         while not self.check(.RParen()) and not self.is_eof() then {
             let name = self.expect_ident("lambda parameter") or return;
+            if not CstParser.is_valid_value_name(name.to_string()) then {
+                return .Error(
+                    "Parse error: Parameter name '\(name.to_string())' must start with a lowercase letter",
+                );
+            };
             let mutable pt = Option[CstType].None();
             if self.check(.Colon()) then {
                 self.eat();
@@ -2540,7 +3155,7 @@ given CstParser {
     /// compiler's call, not this parser's.
     private parse_for_expr(self): Result[CstExpr] = {
         let kw = self.expect(.KwFor(), "'for'") or return;
-        let binding = self.parse_pattern_node() or return;
+        let binding = self.parse_pattern_node(false) or return;
         let in_kw = self.expect(.KwIn(), "'in'") or return;
         let iterable = self.parse_expr_node() or return;
         // Optional guard: `for p in xs where cond then body`. It sits after the
@@ -2605,7 +3220,7 @@ given CstParser {
     };
 
     private parse_when_arm(self): Result[CstWhenArm] = {
-        let pattern = self.parse_pattern_node() or return;
+        let pattern = self.parse_pattern_node(false) or return;
         // Optional arm guard: `pat where cond then body`. The condition parses
         // like an `if` condition and stops before `then`.
         let mutable guard_kw = Option[Token].None();
@@ -2630,9 +3245,12 @@ given CstParser {
         while self.peek_raw() is .LineComment(_) or is .BlockComment(_) then {
             trailing_comments.push(self.advance());
         };
-        // Skip semicolons too
-        if self.peek() is .Semi() then {
-            self.eat();
+        // An arm is closed by `,` or `}` -- a `;` is not a separator (the
+        // compilers blame the first token of the next arm).
+        if not self.sep_has_comma(comma) and not self.check(.RBrace()) then {
+            return .Error(
+                "Parse error: Unexpected token: \(self.token_desc(self.peek())), expected: ',' or '}' after when arm",
+            );
         };
         return .Ok(
             CstWhenArm(
@@ -2648,13 +3266,123 @@ given CstParser {
         );
     };
 
-    /// A pattern bound: an integer, float, or rune literal. Rune literals scan
-    /// as `IntLit` tokens carrying their quoted spelling, so the integer case
-    /// already covers them.
-    private expect_pattern_value(self, what: String): Result[Token] = {
+    /// Rest rules per element list (grammar.bnf <rest-pattern>): in a
+    /// fixed-arity list (struct / enum / tuple) a rest must be the ONLY slot;
+    /// in a list pattern it may share the list but only one may appear. The
+    /// "only slot" rule fires first, in list order.
+    private check_rest_slots(
+        self,
+        fixed_arity: Bool,
+        slots: List[CstPattern],
+    ): Result[Void] = {
+        let mutable rest_count = 0;
+        for p in slots then {
+            if CstParser.pattern_is_rest(p) then {
+                if fixed_arity and slots.count() > 1 then {
+                    return .Error(
+                        "Parse error: Rest pattern must be the only slot in a struct, enum or tuple pattern; use '_' for the other fields",
+                    );
+                };
+                rest_count += 1;
+                if rest_count > 1 then {
+                    return .Error(
+                        "Parse error: Only one rest pattern is allowed per element list",
+                    );
+                };
+            };
+        };
+        return .Ok({});
+    };
+
+    private pattern_is_rest(p: CstPattern): Bool = when p in {
+        .Rest(_) then true,
+        _ then false,
+    };
+
+    /// An interpolated string's `\( ... )` parts each hold an expression, and
+    /// the compilers parse them -- `"a \(1 +)"` is a parse error there. Parts
+    /// are checked left to right; a part whose real tokens are none is empty.
+    private check_interpolation_parts(self, tok: Token): Result[Void] = {
+        let raw = when tok in {
+            .InterpStr(text) then text,
+            _ then "",
+        };
+        let runes = raw.to_runes();
+        let mutable i = 0;
+        while i < runes.count() then {
+            if runes[i] == '\\' and i + 1 < runes.count() and runes[i + 1] == '(' then {
+                let content_start = i + 2;
+                // Quote-aware paren counting -- the same walk the tokenizer
+                // used to delimit the part (a nested quoted run's parens do
+                // not count).
+                let mutable depth = 1;
+                let mutable j = content_start;
+                while j < runes.count() and depth > 0 then {
+                    let c = runes[j];
+                    if c == '"' or c == '\'' then {
+                        let quote = c;
+                        j += 1;
+                        while j < runes.count() and runes[j] != quote then {
+                            j += 1;
+                        };
+                        j += 1;
+                        continue;
+                    };
+                    if c == '(' then {
+                        depth += 1;
+                    };
+                    if c == ')' then {
+                        depth -= 1;
+                    };
+                    if depth == 0 then {
+                        break;
+                    };
+                    j += 1;
+                };
+                let mutable content = "";
+                let mutable k = content_start;
+                while k < j then {
+                    content = content + runes[k].to_string();
+                    k += 1;
+                };
+                let mutable sub_lex = Tokenizer.new(content);
+                let sub_tokens = sub_lex.tokenize() or return;
+                let mutable real_count = 0;
+                for t in sub_tokens then {
+                    when t in {
+                        .LineComment(_) or .BlockComment(_) or .Newline() or .EOF() then {},
+                        _ then {
+                            real_count += 1;
+                        },
+                    };
+                };
+                if real_count == 0 then {
+                    return .Error("Parse error: empty interpolation expression");
+                };
+                let mutable sub_parser = CstParser.new(sub_tokens);
+                sub_parser.parse_expr() or return;
+                if sub_parser.peek() is not .EOF() then {
+                    return .Error(
+                        "Parse error: Unexpected token: \(sub_parser.token_desc(sub_parser.peek())), expected: end of interpolation",
+                    );
+                };
+                i = j + 1;
+            } else {
+                i += 1;
+            };
+        };
+        return .Ok({});
+    };
+
+    /// A comparison-pattern bound: an integer, float, or rune literal. Rune
+    /// literals scan as `IntLit` tokens carrying their quoted spelling, so the
+    /// integer case already covers them.
+    private expect_pattern_value_cmp(self): Result[Token] = {
         return when self.peek() in {
             .IntLit(_) or .FloatLit(_) then .Ok(self.eat()),
-            _ then .Error(self.expected_error(what)),
+            _ then .Error(
+                "Parse error: Expected integer, float, or rune literal in comparison pattern",
+            ),
         };
     };
 
@@ -2663,51 +3391,68 @@ given CstParser {
     // ========================================================================
 
     public parse_pattern(self): Result[CstPattern] = {
-        return self.parse_pattern_node();
+        return self.parse_pattern_node(false);
     };
 
-    private parse_pattern_node(self): Result[CstPattern] = {
-        return self.parse_or_pattern();
+    private parse_pattern_node(self, allow_rest: Bool): Result[CstPattern] = {
+        return self.parse_or_pattern(allow_rest);
     };
 
-    private parse_or_pattern(self): Result[CstPattern] = {
-        let mutable left = self.parse_and_pattern() or return;
+    private parse_or_pattern(self, allow_rest: Bool): Result[CstPattern] = {
+        let mutable left = self.parse_and_pattern(allow_rest) or return;
         while self.check(.KwOr()) then {
             let next = self.peek_at_skip_nl(1);
             if next is .KwElse() then {
                 break;
             };
             let op = self.eat();
-            let right = self.parse_and_pattern() or return;
+            let right = self.parse_and_pattern(allow_rest) or return;
             left = .OrPattern(left, op, right);
+        };
+        // `|` is not part of the pattern grammar: an alternative is spelled
+        // `or` (and `or is` in an `is` chain). The compilers name the mistake.
+        if self.check(.Pipe()) then {
+            return .Error("Parse error: Pattern separator '|' is not supported; use 'or'");
         };
         return .Ok(left);
     };
 
-    private parse_and_pattern(self): Result[CstPattern] = {
-        let mutable left = self.parse_not_pattern() or return;
+    private parse_and_pattern(self, allow_rest: Bool): Result[CstPattern] = {
+        let mutable left = self.parse_not_pattern(allow_rest) or return;
         while self.check(.KwAnd()) then {
             let next = self.peek_at_skip_nl(1);
             if next is .KwThen() then {
                 break;
             };
             let op = self.eat();
-            let right = self.parse_not_pattern() or return;
+            let right = self.parse_not_pattern(allow_rest) or return;
             left = .AndPattern(left, op, right);
         };
         return .Ok(left);
     };
 
-    private parse_not_pattern(self): Result[CstPattern] = {
+    private parse_not_pattern(self, allow_rest: Bool): Result[CstPattern] = {
         if self.check(.KwNot()) then {
             let op = self.eat();
-            let inner = self.parse_not_pattern() or return;
+            // `not ...` is not a shape: the rest is a slot device, and under
+            // `not` there is no slot (grammar.bnf <rest-pattern>).
+            let inner = self.parse_not_pattern(false) or return;
             return .Ok(.NotPattern(op, inner));
         };
-        return self.parse_primary_pattern();
+        return self.parse_primary_pattern(allow_rest);
     };
 
-    private parse_primary_pattern(self): Result[CstPattern] = {
+    private parse_primary_pattern(self, allow_rest: Bool): Result[CstPattern] = {
+        // A pattern that STARTS with a retired range operator: the compilers
+        // name the mistake (ParserPatterns in the seed).
+        when self.peek() in {
+            .Range() or .RangeLt() then {
+                return .Error(
+                    "Parse error: Range patterns are no longer supported. Use comparison patterns instead (e.g., > 5 and < 10).",
+                );
+            },
+            _ then {},
+        };
         // Comparison patterns: > n, < n, >= n, <= n (n optionally negative)
         when self.peek() in {
             .Gt() or .Lt() or .GtEq() or .LtEq() then {
@@ -2715,8 +3460,24 @@ given CstParser {
                 let mutable minus = Option[Token].None();
                 if self.check(.Minus()) then {
                     minus = .Some(self.eat());
+                    // A sign folds into numeric bounds only -- no rune.
+                    when self.peek() in {
+                        .IntLit(text) then {
+                            if CstParser.text_starts_with_quote(text) then {
+                                return .Error(
+                                    "Parse error: Expected integer or float literal after '-'",
+                                );
+                            };
+                        },
+                        .FloatLit(_) then {},
+                        _ then {
+                            return .Error(
+                                "Parse error: Expected integer or float literal after '-'",
+                            );
+                        },
+                    };
                 };
-                let value = self.expect_pattern_value("pattern value") or return;
+                let value = self.expect_pattern_value_cmp() or return;
                 return .Ok(.Comparison(op, minus, value));
             },
             _ then {},
@@ -2725,7 +3486,23 @@ given CstParser {
         // Negative numeric literal: -5, -1.5
         if self.check(.Minus()) then {
             let minus = self.eat();
-            let value = self.expect_pattern_value("integer or float literal") or return;
+            // A sign folds into numeric bounds only -- no rune.
+            when self.peek() in {
+                .IntLit(text) then {
+                    if CstParser.text_starts_with_quote(text) then {
+                        return .Error(
+                            "Parse error: Expected integer or float literal after '-'",
+                        );
+                    };
+                },
+                .FloatLit(_) then {},
+                _ then {
+                    return .Error(
+                        "Parse error: Expected integer or float literal after '-'",
+                    );
+                },
+            };
+            let value = self.expect_pattern_value_cmp() or return;
             return when value in {
                 .FloatLit(_) then .Ok(.NegFloatLit(minus, value)),
                 _ then .Ok(.NegIntLit(minus, value)),
@@ -2734,8 +3511,21 @@ given CstParser {
 
         // Integer / float literal
         when self.peek() in {
-            .IntLit(_) then {
-                return .Ok(.PatIntLit(self.eat()));
+            .IntLit(int_text) then {
+                let int_tok = self.eat();
+                // A retired range shape after an integer pattern: the
+                // message's example interpolates the written value.
+                if not CstParser.text_starts_with_quote(int_text) then {
+                    when self.peek() in {
+                        .Range() or .RangeLt() or .LtRange() or .LtRangeLt() then {
+                            return .Error(
+                                "Parse error: Range patterns are no longer supported. Use comparison patterns instead (e.g., >= \(CstParser.literal_int_value(int_text)) and < end).",
+                            );
+                        },
+                        _ then {},
+                    };
+                };
+                return .Ok(.PatIntLit(int_tok));
             },
             .FloatLit(_) then {
                 return .Ok(.PatFloatLit(self.eat()));
@@ -2795,49 +3585,70 @@ given CstParser {
             return .Ok(.WeakBinding(question, name, .None(), .None(), .None()));
         };
 
-        // Enum case: .Name or .Name(args)
+        // Enum case: .Name(args) -- the parens are written even when empty
+        // (grammar.bnf <enum-case-pattern>).
         if self.check(.Dot()) then {
             let dot = self.eat();
             let name = self.expect_ident("enum case name") or return;
-            if self.check(.LParen()) then {
-                let lp = self.eat();
-                let mutable args = List[CstPatternArg].new();
-                while not self.check(.RParen()) and not self.is_eof() then {
-                    let mutable label = Option[Token].None();
-                    let mutable colon = Option[Token].None();
-                    if self.peek() is .Ident(_) and self.peek_at_skip_nl(1) is .Eq() then {
-                        label = .Some(self.eat());
-                        colon = .Some(self.eat());
-                    };
-                    let p = self.parse_pattern_node() or return;
-                    let comma = self.eat_comma();
-                    args.push(CstPatternArg(label, colon, p, comma));
-                };
-                let rp = self.expect(.RParen(), "')'") or return;
-                return .Ok(.EnumCase(dot, name, .Some(lp), args, .Some(rp)));
+            if not CstParser.is_valid_type_name(name.to_string()) then {
+                return .Error(
+                    "Parse error: Enum case name '\(name.to_string())' must start with an uppercase letter",
+                );
             };
-            return .Ok(
-                .EnumCase(dot, name, .None(), List[CstPatternArg].new(), .None()),
-            );
+            if not self.check(.LParen()) then {
+                return .Error("Parse error: Expected '(' after enum case name");
+            };
+            let lp = self.eat();
+            let mutable args = List[CstPatternArg].new();
+            let mutable arg_patterns = List[CstPattern].new();
+            while not self.check(.RParen()) and not self.is_eof() then {
+                let mutable label = Option[Token].None();
+                let mutable colon = Option[Token].None();
+                if self.peek() is .Ident(_) and self.peek_at_skip_nl(1) is .Eq() then {
+                    label = .Some(self.eat());
+                    colon = .Some(self.eat());
+                    // A rest is a slot device; a label names a binding.
+                    if self.check(.Ellipsis()) then {
+                        return .Error("Parse error: Rest pattern cannot be labeled");
+                    };
+                };
+                let p = self.parse_pattern_node(true) or return;
+                arg_patterns.push(p);
+                let comma = self.eat_comma();
+                args.push(CstPatternArg(label, colon, p, comma));
+            };
+            self.check_rest_slots(true, arg_patterns) or return;
+            let rp = self.expect(.RParen(), "')'") or return;
+            return .Ok(.EnumCase(dot, name, .Some(lp), args, .Some(rp)));
         };
 
-        // `...` -- rest slot. In the compiler this is only legal as a slot of an
-        // element list; the CST records what was written, so it is a pattern
-        // node here and the round trip keeps the token.
+        // `...` -- rest slot. Only legal as a slot of an element list; it
+        // ignores slots, never binds.
         if self.check(.Ellipsis()) then {
-            return .Ok(.Rest(self.eat()));
+            let rest = self.eat();
+            if not allow_rest then {
+                return .Error(
+                    "Parse error: Rest pattern must be inside a list, enum, struct, or tuple pattern",
+                );
+            };
+            if self.peek() is .Ident(_) then {
+                return .Error("Parse error: Rest pattern cannot bind a name");
+            };
+            return .Ok(.Rest(rest));
         };
 
         // `[ p, q ]` -- list pattern: destructuring of a `List[T]` by length
         if self.check(.LBracket()) then {
             let lb = self.eat();
             let mutable items = List[CstListPatternItem].new();
+            let mutable slot_patterns = List[CstPattern].new();
             let mutable more = true;
             while more then {
                 if self.check(.RBracket()) or self.is_eof() then {
                     more = false;
                 } else {
-                    let p = self.parse_pattern_node() or return;
+                    let p = self.parse_pattern_node(true) or return;
+                    slot_patterns.push(p);
                     let sep = self.eat_comma();
                     items.push(CstListPatternItem(p, sep));
                     if not self.sep_has_comma(sep) then {
@@ -2845,6 +3656,7 @@ given CstParser {
                     };
                 };
             };
+            self.check_rest_slots(false, slot_patterns) or return;
             let rb = self.expect(.RBracket(), "']'") or return;
             return .Ok(.ListPattern(lb, items, rb));
         };
@@ -2854,9 +3666,11 @@ given CstParser {
         // `(` groups nothing and is rejected below.
         if self.check(.LParen()) then {
             let lp = self.eat();
-            let first = self.parse_pattern_node() or return;
+            let first = self.parse_pattern_node(true) or return;
             if self.check(.Comma()) then {
                 let mutable items = List[CstTuplePatternItem].new();
+                let mutable slot_patterns = List[CstPattern].new();
+                slot_patterns.push(first);
                 let mutable current = first;
                 let mutable more = true;
                 while more then {
@@ -2864,11 +3678,17 @@ given CstParser {
                     items.push(CstTuplePatternItem(current, sep));
                     if not self.sep_has_comma(sep) then {
                         more = false;
+                    } else if self.check(.RParen()) or self.is_eof() then {
+                        // Trailing comma: every pattern element list takes one
+                        // (the compilers accept `(a,)` as a one-slot tuple).
+                        more = false;
                     } else {
-                        let next = self.parse_pattern_node() or return;
+                        let next = self.parse_pattern_node(true) or return;
+                        slot_patterns.push(next);
                         current = next;
                     };
                 };
+                self.check_rest_slots(true, slot_patterns) or return;
                 let rp = self.expect(.RParen(), "')'") or return;
                 return .Ok(.TuplePattern(lp, items, rp));
             };
@@ -2878,7 +3698,7 @@ given CstParser {
             // combinators are the connectors `or is` / `and is`, which live
             // outside the slot. Same wording as the compilers.
             return .Error(
-                "A parenthesized pattern groups nothing; `(` starts a tuple pattern with at least two slots. Under 'is', combine tests with 'or is' / 'and is'",
+                "Parse error: A parenthesized pattern groups nothing; `(` starts a tuple pattern with at least two slots. Under 'is', combine tests with 'or is' / 'and is'",
             );
         };
 
@@ -2888,17 +3708,24 @@ given CstParser {
             if self.check(.LParen()) then {
                 let lp = self.eat();
                 let mutable args = List[CstPatternArg].new();
+                let mutable arg_patterns = List[CstPattern].new();
                 while not self.check(.RParen()) and not self.is_eof() then {
                     let mutable label = Option[Token].None();
                     let mutable colon = Option[Token].None();
                     if self.peek() is .Ident(_) and self.peek_at_skip_nl(1) is .Eq() then {
                         label = .Some(self.eat());
                         colon = .Some(self.eat());
+                        // A rest is a slot device; a label names a binding.
+                        if self.check(.Ellipsis()) then {
+                            return .Error("Parse error: Rest pattern cannot be labeled");
+                        };
                     };
-                    let p = self.parse_pattern_node() or return;
+                    let p = self.parse_pattern_node(true) or return;
+                    arg_patterns.push(p);
                     let comma = self.eat_comma();
                     args.push(CstPatternArg(label, colon, p, comma));
                 };
+                self.check_rest_slots(true, arg_patterns) or return;
                 let rp = self.expect(.RParen(), "')'") or return;
                 return .Ok(.StructPattern(name, lp, args, rp));
             };
@@ -2911,8 +3738,10 @@ given CstParser {
             return .Ok(.Variable(name));
         };
 
-        // Fallback
-        return .Error(self.expected_error("pattern"));
+        // Fallback -- the compilers name the token alone here.
+        return .Error(
+            "Parse error: Unexpected token: \(self.token_desc(self.peek()))",
+        );
     };
 
     // ========================================================================
@@ -2995,7 +3824,7 @@ given CstParser {
                 let kw = self.eat();
                 let term = self.eat_stmt_terminator();
                 if term.token is .None() then {
-                    return .Error("Parse error: expected ';' after continue");
+                    return .Error(self.expected_error("';'"));
                 };
                 return .Ok(self.stmt_item(term, .Continue(kw)));
             },
@@ -3031,7 +3860,7 @@ given CstParser {
             let mutable current = first;
             // At least two slots: `let (x) = ...` is not a tuple binding.
             if self.peek_past_comments() is not .Comma() then {
-                return .Error("Parse error: expected ',' in tuple let statement");
+                return .Error("Parse error: Expected ',' in tuple let statement");
             };
             let mutable more = true;
             while more then {
@@ -3044,12 +3873,15 @@ given CstParser {
                     current = next;
                 };
             };
-            let rp = self.expect(.RParen(), "')'") or return;
+            if not self.check(.RParen()) then {
+                return .Error("Parse error: Expected ')' in tuple let statement");
+            };
+            let rp = self.eat();
             let eq = self.expect(.Eq(), "'='") or return;
             let value = self.parse_expr_node() or return;
             let term = self.eat_stmt_terminator();
             if term.token is .None() then {
-                return .Error("Parse error: expected ';' after let declaration");
+                return .Error(self.expected_error("';'"));
             };
             return .Ok(
                 self.stmt_item(term, .TupleVarDecl(let_kw, lp, items, rp, eq, value)),
@@ -3060,7 +3892,7 @@ given CstParser {
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat());
         };
-        let name = self.expect_ident("variable name") or return;
+        let name = self.expect_ident("let declaration") or return;
 
         // Optional type annotation: `let x: Type = ...`
         let mutable var_type = Option[CstType].None();
@@ -3074,7 +3906,7 @@ given CstParser {
         let value = self.parse_expr_node() or return;
         let term = self.eat_stmt_terminator();
         if term.token is .None() then {
-            return .Error("Parse error: expected ';' after let declaration");
+            return .Error(self.expected_error("';'"));
         };
         return .Ok(
             self.stmt_item(term, .VarDecl(let_kw, mut_kw, name, var_type, eq, value)),
@@ -3099,7 +3931,7 @@ given CstParser {
             return .Ok(.Leaf(mut_kw, name, .None(), true));
         };
 
-        let name = self.expect_ident("variable name") or return;
+        let name = self.expect_ident("pair let binding") or return;
 
         // `_` is spelled as an identifier by the tokenizer; it is still the
         // discard slot. The compilers recognise the name the same way.
@@ -3200,7 +4032,7 @@ given CstParser {
             if CstParser.item_is_using_decl(item) then {
                 if seen_non_using then {
                     return .Error(
-                        "Parse error: using declarations must appear before other top-level declarations",
+                        "Parse error: Using declarations must appear before other declarations",
                     );
                 };
             } else if CstParser.item_is_non_using_top_level_code(item) then {
@@ -3211,6 +4043,7 @@ given CstParser {
                 return .Error("Parse error: parser made no progress");
             };
         };
+        self.check_build_cond_partitions(items) or return;
         return .Ok(CstFile(items));
     };
 
@@ -3221,14 +4054,18 @@ given CstParser {
             return self.parse_if_build_item();
         };
         // Using declaration. Its `;` is collected inside the declaration's own
-        // token list, and the compiler does not require one at all -- so it
-        // does not go through `finish_decl_item`. Matching the compiler here
-        // means accepting `using "./x.koral"` without `;`, even though
-        // grammar.bnf writes the `;` as mandatory.
+        // token list -- the `;` is mandatory (the compilers report
+        // `Unexpected token: X, expected: ';'` without one), so the
+        // declaration does not go through `finish_decl_item`.
         if self.check(.KwUsing()) then {
             let d = self.parse_using_decl() or return;
             return .Ok(.Decl(d));
         };
+
+        // A retired access spelling is an attempted modifier, not a statement:
+        // the check runs across the whole modifier prefix before the dispatch
+        // decides what this is.
+        self.reject_legacy_access_prefix() or return;
 
         // Determine declaration kind by peeking past every leading access
         // modifier.
@@ -3243,6 +4080,13 @@ given CstParser {
             },
             .KwIntrinsic() then {
                 return .Error("Parse error: Unexpected token: intrinsic");
+            },
+            .KwUsing() then {
+                // A `using` reached the dispatch past an access modifier:
+                // it carries no visibility (the bare form was handled above).
+                return .Error(
+                    "Parse error: access modifier on using declaration is not supported",
+                );
             },
             _ then {},
         };
@@ -3347,7 +4191,7 @@ given CstParser {
             if CstParser.item_is_using_decl(item) then {
                 if seen_non_using then {
                     return .Error(
-                        "Parse error: using declarations must appear before other top-level declarations",
+                        "Parse error: Using declarations must appear before other declarations",
                     );
                 };
             } else if CstParser.item_is_non_using_top_level_code(item) then {
@@ -3400,10 +4244,160 @@ given CstParser {
             return .Ok(.Paren(lparen, inner, rparen));
         };
         let head = self.eat();
+        // The condition mini-grammar is closed: `os(...)` / `arch(...)` atoms
+        // over closed value sets (cffi-design.md §D).
+        let head_name = CstParser.ident_text(head);
+        let is_os = head_name == "os";
+        let is_arch = head_name == "arch";
+        if not is_os and not is_arch then {
+            return .Error(
+                "Parse error: unknown build condition predicate '\(head_name)'; expected 'os' or 'arch'",
+            );
+        };
         let lparen = self.expect(.LParen(), "'('") or return;
         let value = self.expect(.StrLit(""), "string condition value") or return;
+        let value_text = when value in {
+            .StrLit(raw) then CstParser.string_content_text(raw),
+            _ then "",
+        };
+        if is_os then {
+            if value_text != "windows" and value_text != "linux" and value_text != "macos" then {
+                return .Error(
+                    "Parse error: unknown os condition value '\(value_text)'; expected one of windows, linux, macos",
+                );
+            };
+        } else {
+            if value_text != "x86_64" and value_text != "aarch64" then {
+                return .Error(
+                    "Parse error: unknown arch condition value '\(value_text)'; expected one of x86_64, aarch64",
+                );
+            };
+        };
         let rparen = self.expect(.RParen(), "')'") or return;
         return .Ok(.Pred(head, lparen, value, rparen));
+    };
+
+    /// The partition rule (cffi-design.md §D): two same-name declarations must
+    /// sit on OPPOSITE sides of one shared `#if … else …`. Sharing no
+    /// construct, or sitting on the same side of every shared one, is a
+    /// duplicate. Two unconditional declarations are the semantic layer's
+    /// wording and pass through; `using` and `given` declarations carry no
+    /// name and never participate. Runs after the whole file parses; the first
+    /// violating pair in source order is reported.
+    private check_build_cond_partitions(self, items: List[CstItem]): Result[Void] = {
+        let names = List[String].new();
+        let chains = List[List[String]].new();
+        let counter = List[Int].new();
+        counter.push(0);
+        self.collect_partition_decls(items, List[String].new(), counter, names, chains);
+        let mutable i = 0;
+        while i < names.count() then {
+            let mutable j = i + 1;
+            while j < names.count() then {
+                if names[i] == names[j] and (chains[i].count() > 0 or chains[j].count() > 0) then {
+                    if not CstParser.chains_are_separated(chains[i], chains[j]) then {
+                        return .Error(
+                            "Parse error: duplicate declaration '\(names[i])': same-name declarations must be partitioned across the branches of one '#if … else …'",
+                        );
+                    };
+                };
+                j += 1;
+            };
+            i += 1;
+        };
+        return .Ok({});
+    };
+
+    private collect_partition_decls(
+        self,
+        items: List[CstItem],
+        chain: List[String],
+        counter: List[Int],
+        names: List[String],
+        chains: List[List[String]],
+    ): Void = {
+        for item in items then {
+            when item in {
+                .Decl(d) then {
+                    self.record_partition_decl(d, chain, names, chains);
+                },
+                .DeclPreSemi(_, d) then {
+                    self.record_partition_decl(d, chain, names, chains);
+                },
+                .IfBuild(_, _, _, _, _, then_items, _, _, _, else_items, _, _) then {
+                    let id = counter[0];
+                    counter[0] = id + 1;
+                    let then_chain = CstParser.chain_with(chain, id.to_string() + "T");
+                    self.collect_partition_decls(then_items, then_chain, counter, names, chains);
+                    let else_chain = CstParser.chain_with(chain, id.to_string() + "E");
+                    self.collect_partition_decls(else_items, else_chain, counter, names, chains);
+                },
+                _ then {},
+            };
+        };
+    };
+
+    private record_partition_decl(
+        self,
+        d: CstDecl,
+        chain: List[String],
+        names: List[String],
+        chains: List[List[String]],
+    ): Void = {
+        let name = CstParser.decl_name_of(d);
+        if name != "" then {
+            names.push(name);
+            chains.push(chain);
+        };
+    };
+
+    private chain_with(chain: List[String], entry: String): List[String] = {
+        let mutable out = List[String].new();
+        for e in chain then {
+            out.push(e);
+        };
+        out.push(entry);
+        return out;
+    };
+
+    /// Two chains are separated when some shared construct sits on opposite
+    /// sides in them: an entry with the same construct id and a different side.
+    private chains_are_separated(a: List[String], b: List[String]): Bool = {
+        for ea in a then {
+            for eb in b then {
+                let la = ea.count();
+                let lb = eb.count();
+                if la > 0 and la == lb and ea != eb and ea.substring(0..<(la - 1))
+                    == eb.substring(0..<(lb - 1)) then {
+                    return true;
+                };
+            };
+        };
+        return false;
+    };
+
+    private decl_name_of(d: CstDecl): String = when d in {
+        .Var(_, _, _, name, _) then CstParser.ident_text(name),
+        .Type(_, _, _, _, _, _, _, _, name, _) then CstParser.ident_text(name),
+        .Trait(_, _, _, _, name, _, _, _, _) then CstParser.ident_text(name),
+        .Func(_, _, _, _, _, _, _, name, _, _, _, _, _, _) then {
+            when name in {
+                .Some(t) then CstParser.ident_text(t),
+                .None() then "",
+            }
+        },
+        .ForeignDecl(_, _, _, _, _, _, _, name, _, _, _, _) then {
+            when name in {
+                .Some(t) then CstParser.ident_text(t),
+                .None() then "",
+            }
+        },
+        _ then "",
+    };
+
+    private ident_text(t: Token): String = when t in {
+        .Ident(n) then n,
+        _ then "",
     };
 
     // ========================================================================
@@ -3440,7 +4434,7 @@ given CstParser {
             };
         };
         if not seen_semi then {
-            return .Error("Parse error: expected ';' after declaration");
+            return .Error(self.expected_error("';'"));
         };
         return .Ok({});
     };
@@ -3483,6 +4477,7 @@ given CstParser {
         self,
         tokens: List[Token],
         start: Int,
+        spec: String,
     ): Result[Void] = {
         let mutable i = start;
         if i >= tokens.count() or tokens[i] is not .LBrace() then {
@@ -3494,6 +4489,7 @@ given CstParser {
         let mutable import_all = false;
         let mutable saw_exclude = false;
         let mutable saw_positive = false;
+        let mutable first_bare_positive = "";
         while true then {
             i = CstParser.skip_newline_tokens(tokens, i);
             if i >= tokens.count() then {
@@ -3506,6 +4502,7 @@ given CstParser {
                     import_all,
                     saw_exclude,
                     saw_positive,
+                    first_bare_positive,
                 );
             };
             if tokens[i] is .Ellipsis() then {
@@ -3516,7 +4513,7 @@ given CstParser {
                 };
                 if i >= tokens.count() or tokens[i] is not .RBrace() then {
                     return .Error(
-                        "Parse error: '...' closes the import list; put renames or exclusions before it, or write '{ ... }'",
+                        "Parse error: \"...\" closes the import list; put renames or exclusions before it, or write \"{ ... }\"",
                     );
                 };
                 return self.finish_import_list_tokens(
@@ -3525,11 +4522,12 @@ given CstParser {
                     true,
                     saw_exclude,
                     saw_positive,
+                    first_bare_positive,
                 );
             };
             if tokens[i] is .Range() then {
                 return .Error(
-                    "Parse error: '..' is not an import item; write '...' to import every visible member",
+                    "Parse error: \"..\" is not an import item; write \"...\" to import every visible member of \"\(spec)\"",
                 );
             };
             let mutable excluded = false;
@@ -3552,12 +4550,14 @@ given CstParser {
             i += 1;
 
             i = CstParser.skip_newline_tokens(tokens, i);
+            let mutable has_alias = false;
             if i < tokens.count() and tokens[i] is .KwAs() then {
                 if excluded then {
                     return .Error(
                         "Parse error: '!\(item_name)' is an exclusion and cannot be renamed; drop the '!' or drop the 'as'",
                     );
                 };
+                has_alias = true;
                 i = CstParser.skip_newline_tokens(tokens, i + 1);
                 if i >= tokens.count() or tokens[i] is not .Ident(_) then {
                     return .Error("Parse error: expected an alias name after 'as'");
@@ -3599,6 +4599,11 @@ given CstParser {
                 i += 1;
             };
 
+            // A positive item next to `...` without `as` is a redundant rest
+            // listing; record the first one for the close-time check.
+            if not excluded and not has_alias and first_bare_positive == "" then {
+                first_bare_positive = item_name;
+            };
             i = CstParser.skip_newline_tokens(tokens, i);
             if i >= tokens.count() then {
                 return .Error("Parse error: expected ',' or '}' in import list");
@@ -3614,6 +4619,7 @@ given CstParser {
                     import_all,
                     saw_exclude,
                     saw_positive,
+                    first_bare_positive,
                 );
             };
             return .Error("Parse error: expected ',' or '}' in import list");
@@ -3632,6 +4638,7 @@ given CstParser {
         import_all: Bool,
         saw_exclude: Bool,
         saw_positive: Bool,
+        first_bare_positive: String,
     ): Result[Void] = {
         if saw_exclude and saw_positive then {
             return .Error(
@@ -3641,6 +4648,13 @@ given CstParser {
         if saw_exclude and not import_all then {
             return .Error(
                 "Parse error: '!' excludes from the whole module surface and needs '...'; write '{ !name, ... }'",
+            );
+        };
+        if import_all and first_bare_positive != "" then {
+            // Next to `...` a bare name restates what the base set already
+            // brings: rename it with `as` or exclude it with `!`.
+            return .Error(
+                "Parse error: '\(first_bare_positive)' next to '...' is redundant; either drop it, rename it with 'as', or exclude it with '!'",
             );
         };
         return self.validate_using_trailing_tokens(
@@ -3663,35 +4677,90 @@ given CstParser {
             return .Error("Parse error: expected 'using' declaration");
         };
         if tokens.count() < 2 or tokens[1] is not .StrLit(_) then {
+            let got = if tokens.count() >= 2 then {
+                self.token_desc(tokens[1])
+            } else {
+                "EOF"
+            };
             return .Error(
-                "Parse error: expected a string literal after 'using', like 'using \"std/io\";' or 'using \"./file.koral\";'",
+                "Parse error: Unexpected token: \(got), expected: a string literal: \"./file.koral\" to merge a file, or \"package[/subpath]\" to import a module",
             );
         };
 
         let spec = self.using_specifier_text(tokens[1]);
         if tokens.count() > 2 and tokens[2] is .KwAs() then {
-            // Renaming a module is changing its key in `dependencies`, not an
-            // alias on the `using` (module-design §5.3). File merges never had
-            // aliases either -- merging is whole-file.
+            // A module is not renamed; the names it exports are (module-design
+            // §5.3). File merges never had aliases either -- merging is
+            // whole-file.
             return .Error(
-                "Parse error: 'using' takes no alias; rename a dependency by changing its key, or name members in an import list with 'as'",
+                "Parse error: a module is not renamed; alias the names you import: using \"\(spec)\" { Name as Alias }",
             );
         };
-        if self.is_file_merge_specifier(spec) and not spec.ends_with(".koral") then {
-            return .Error("Parse error: file merge path must end in '.koral'");
+        if self.is_file_merge_specifier(spec) then {
+            if not spec.ends_with(".koral") then {
+                return .Error(
+                    "Parse error: File merge path must end in '.koral'; write '\(spec).koral'",
+                );
+            };
+        } else if not CstParser.is_valid_module_specifier(spec) then {
+            // `package[/subpath]`, every segment a lowercase identifier; "."
+            // is manifest notation only (module-design §2.1 / §5.2).
+            if spec == "." then {
+                return .Error(
+                    "Parse error: write the package name itself for its main module; \".\" is only manifest notation",
+                );
+            };
+            return .Error(
+                "Parse error: module name must be 'package[/subpath]' with lowercase identifier segments",
+            );
         };
         // A local path may be merged (bare) or imported (braces) -- the
         // braces decide only whether the target's boundary survives (§3).
         // The spec's shape says where the target is (§3.1), never what
         // happens to it.
         if tokens.count() > 2 and tokens[2] is .LBrace() then {
-            return self.validate_import_list_tokens(tokens, 2);
+            return self.validate_import_list_tokens(tokens, 2, spec);
         };
         return self.validate_using_trailing_tokens(
             tokens,
             2,
             "Parse error: unexpected tokens after using declaration",
         );
+    };
+
+    /// The module-specifier shape (module-design §2.1): `package[/subpath]`,
+    /// every segment non-empty and a lowercase identifier -- ASCII `a`-`z`
+    /// first, then ASCII lowercase / digits / `_`.
+    private is_valid_module_specifier(spec: String): Bool = {
+        let runes = spec.to_runes();
+        if runes.is_empty() then {
+            return false;
+        };
+        let mutable at_seg_start = true;
+        let mutable ok = true;
+        for r in runes then {
+            let c = r.to_uint32();
+            if r == '/' then {
+                if at_seg_start then {
+                    ok = false;
+                };
+                at_seg_start = true;
+            } else if at_seg_start then {
+                if c < 97 or c > 122 then {
+                    ok = false;
+                };
+                at_seg_start = false;
+            } else {
+                let good = (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 95;
+                if not good then {
+                    ok = false;
+                };
+            };
+        };
+        if at_seg_start then {
+            ok = false;
+        };
+        return ok;
     };
 
     /// Collects the whole `using` declaration as a flat token list. An import
@@ -3741,7 +4810,7 @@ given CstParser {
     // ========================================================================
 
     private parse_let_decl(self): Result[CstDecl] = {
-        let vis = self.eat_vis();
+        let vis = self.eat_top_level_vis() or return;
         let let_kw = self.expect(.KwLet(), "'let'") or return;
         // `unsafe` sits immediately after `let`, before `foreign` / `intrinsic`
         // (docs/design/unsafe-design.md §B): `let unsafe foreign strlen(…)`.
@@ -3752,6 +4821,7 @@ given CstParser {
         // `foreign` / `intrinsic` sit immediately after `let`, before `mutable`:
         // `let foreign mutable errno Int32;`.
         let mods = self.eat_kind_modifiers();
+        self.validate_kind_modifiers(mods) or return;
         // The marker precedes the qualifiers -- the compilers reject the other
         // order with this same wording (docs/design/unsafe-design.md §B).
         if self.check(.KwUnsafe()) then {
@@ -3772,7 +4842,22 @@ given CstParser {
         };
         let mutable cname = Option[Token].None();
         if has_foreign and self.check(.StrLit("")) then {
-            cname = .Some(self.eat());
+            let cname_tok = self.eat();
+            // The slot spells the C name verbatim; it must be a legal C
+            // identifier. Checked the moment the string is read -- before the
+            // name, matching the compilers.
+            when cname_tok in {
+                .StrLit(raw) then {
+                    let c_text = CstParser.string_content_text(raw);
+                    if not CstParser.is_valid_c_name(c_text) then {
+                        return .Error(
+                            "Parse error: C name \"\(c_text)\" is not a legal C identifier",
+                        );
+                    };
+                },
+                _ then {},
+            };
+            cname = .Some(cname_tok);
         };
         let mutable mut_kw = Option[Token].None();
         if self.check(.KwMut()) then {
@@ -3786,6 +4871,7 @@ given CstParser {
             unsafe_kw,
             mut_kw,
             false,
+            false,
         );
     };
 
@@ -3798,17 +4884,61 @@ given CstParser {
         unsafe_kw: Option[Token],
         mut_kw: Option[Token],
         in_member_context: Bool,
+        allow_bodyless_member: Bool,
     ): Result[CstDecl] = {
-        let name = self.expect_ident("declaration name") or return;
-        let gp = self.parse_generic_params() or return;
+        let name_label = if in_member_context then {
+            "given member"
+        } else {
+            "let declaration"
+        };
+        let name = self.expect_ident(name_label) or return;
         let mutable has_foreign = false;
+        let mutable has_intrinsic = false;
         for m in mods then {
             when m in {
                 .KwForeign() then {
                     has_foreign = true;
                 },
+                .KwIntrinsic() then {
+                    has_intrinsic = true;
+                },
                 _ then {},
             };
+        };
+
+        // Name shape (koralc `is_valid_value_name`, flavored by the raw `(`
+        // peek): a `(` after the name reads it as a function's, any other
+        // continuation as a variable's -- `let Bad[T: Any](...)` is reported
+        // as a VARIABLE name, matching the compilers.
+        if not CstParser.is_valid_value_name(name.to_string()) then {
+            if self.check(.LParen()) then {
+                return .Error(
+                    "Parse error: Function name '\(name.to_string())' must start with a lowercase letter",
+                );
+            };
+            return .Error(
+                "Parse error: Variable name '\(name.to_string())' must start with a lowercase letter",
+            );
+        };
+        // A `foreign` name spelled nowhere in the C-name slot is the C name:
+        // it must be a legal C identifier (cffi-design.md §C). After the case
+        // check, before type parameters -- the compilers' order.
+        if has_foreign and cname is .None() and not CstParser.is_valid_c_name(
+            name.to_string(),
+        ) then {
+            return .Error(
+                "Parse error: Koral name \"\(name.to_string())\" is not a legal C identifier; write a C name string after 'foreign'",
+            );
+        };
+
+        let gp = self.parse_generic_params() or return;
+        if has_foreign and gp is .Some(_) then {
+            return .Error("Parse error: foreign function does not support generics");
+        };
+
+        // A member is a method: its parameter list is not optional.
+        if in_member_context and not self.check(.LParen()) then {
+            return .Error("Parse error: Expected '(' in given member declaration");
         };
 
         // Parameters -- unless the `(` opens a function TYPE's parameter list
@@ -3824,6 +4954,36 @@ given CstParser {
             rp = .Some(
                 self.expect(.RParen(), "')'") or return,
             );
+        };
+        // Foreign declarations take positional parameters only (grammar.bnf
+        // <positional-signature>): the `=` (named marker) is refused at the
+        // parameter, with or without a default.
+        if has_foreign then {
+            for p in params then {
+                when p in {
+                    .NamedParam(pname, _, colon, _, _, _) then {
+                        if colon is .Some(_) then {
+                            return .Error(
+                                "Parse error: Named parameters are not supported in foreign declarations",
+                            );
+                        };
+                    },
+                    _ then {},
+                };
+            };
+        };
+
+        // `mutable` marks a binding, not a function declaration; and
+        // `intrinsic` declares compiler-resident types / functions only -- a
+        // variable is not one. The compilers name both.
+        if mut_kw is .Some(_) and lp is .Some(_) then {
+            if has_foreign then {
+                return .Error("Parse error: foreign let mutable cannot declare a function");
+            };
+            return .Error("Parse error: Function declaration cannot use mutable before name");
+        };
+        if has_intrinsic and lp is .None() then {
+            return .Error("Parse error: intrinsic variable not supported");
         };
 
         // A variable carries no safety contract (docs/design/unsafe-design.md
@@ -3843,8 +5003,49 @@ given CstParser {
             ret = .Some(t);
         };
 
+        // A function or method spells its return type; a global variable
+        // spells its type (only locals infer). Both checks land where the `:`
+        // was expected -- the compilers' blame -- before any body is read.
+        if lp is .Some(_) then {
+            if ret is .None() then {
+                return .Error(
+                    "Parse error: Missing return type: function and method declarations must explicitly declare a return type",
+                );
+            };
+        } else if ret is .None() and not in_member_context then {
+            if has_foreign then {
+                return .Error("Parse error: foreign let declaration requires explicit type");
+            };
+            return .Error(
+                "Parse error: Missing type: global variable declarations must explicitly declare a type",
+            );
+        };
+
         // = body → function
         if self.check(.Eq()) then {
+            // An intrinsic is compiler-resident: its function carries no body,
+            // and a `given intrinsic` member is a signature only.
+            if has_intrinsic and lp is .Some(_) then {
+                return .Error(
+                    "Parse error: intrinsic function declaration should not have body",
+                );
+            };
+            if in_member_context and allow_bodyless_member then {
+                return .Error("Parse error: intrinsic given member cannot have a body");
+            };
+            // A foreign variable's initializer is a C static initializer: a
+            // constant literal, optionally negated, or `null` (cffi-design.md
+            // §B). A rune is not a C constant.
+            if has_foreign and lp is .None() then {
+                if not CstParser.is_foreign_constant_init_tokens(
+                    self.peek_at_skip_nl(1),
+                    self.peek_at_skip_nl(2),
+                ) then {
+                    return .Error(
+                        "Parse error: foreign variable initializer must be a constant literal (C static initializers are constant expressions)",
+                    );
+                };
+            };
             let eq = self.eat();
             let body = self.parse_expr_node() or return;
             // A foreign declaration with a value and no `mutable` is a C macro
@@ -3861,9 +5062,8 @@ given CstParser {
         };
 
         // No `=` means no body. That is legal for a `foreign` or `intrinsic`
-        // declaration and for a trait/given method signature -- and nowhere
-        // else. `let f(x Int) Int;` is a syntax error, and parsing it as a
-        // variable would drop the parameter list on the floor.
+        // declaration and for a body-less `given intrinsic` member -- and
+        // nowhere else: everything else must continue with `=`.
         if mods.count() > 0 then {
             // Hardening rule (docs/design/unsafe-design.md §E): a body-less
             // `foreign` reference whose signature or type carries a raw
@@ -3895,24 +5095,34 @@ given CstParser {
             );
         };
 
-        if in_member_context then {
-            if lp is .Some(_) then {
-                return .Ok(
-                    .ForeignDecl(vis, mods, cname, let_kw, unsafe_kw, mut_kw, gp, .Some(name), lp, params, rp, ret),
-                );
-            };
-            return .Error(self.expected_error("member signature"));
-        };
-
-        if lp is .Some(_) then {
-            return .Error(
-                "Parse error: a function declaration without a body needs 'foreign' or 'intrinsic'",
+        if in_member_context and allow_bodyless_member and lp is .Some(_) then {
+            // A body-less `given intrinsic` member: the definition lives in
+            // the compiler.
+            return .Ok(
+                .ForeignDecl(vis, mods, cname, let_kw, unsafe_kw, mut_kw, gp, .Some(name), lp, params, rp, ret),
             );
         };
 
-        // Variable declaration (top-level)
-        let lk = let_kw or else .KwLet();
-        return .Ok(.Var(vis, lk, mut_kw, name, ret));
+        return .Error(
+            "Parse error: Unexpected token: \(self.token_desc(self.peek())), expected: '='",
+        );
+    };
+
+    /// The foreign variable initializer whitelist (koralc
+    /// `is_foreign_constant_initializer`), read off the leading tokens: an
+    /// integer / float / bool / `null` literal, or ONE unary minus over a
+    /// numeric literal. A rune is not a C constant.
+    private is_foreign_constant_init_tokens(first: Token, second: Token): Bool = {
+        return when first in {
+            .IntLit(text) then not CstParser.text_starts_with_quote(text),
+            .FloatLit(_) or .BoolTrue() or .BoolFalse() or .NullLit() then true,
+            .Minus() then (when second in {
+                .IntLit(text) then not CstParser.text_starts_with_quote(text),
+                .FloatLit(_) then true,
+                _ then false,
+            }),
+            _ then false,
+        };
     };
 
     /// Hardening criterion (docs/design/unsafe-design.md §E): a body-less
@@ -3961,24 +5171,44 @@ given CstParser {
     // ========================================================================
 
     private parse_type_decl(self): Result[CstDecl] = {
-        let vis = self.eat_vis();
+        let vis = self.eat_top_level_vis() or return;
         let kw = self.expect(.KwType(), "'type'") or return;
         // `foreign` / `intrinsic` sit immediately after `type`: `type foreign`.
         let mods = self.eat_kind_modifiers();
+        self.validate_kind_modifiers(mods) or return;
         // C 名槽位：`type foreign "timespec" KoralTimespec(…)`——与 `let foreign`
         // 同一拼写（docs/design/cffi-design.md §C）。
         let mutable has_foreign = false;
+        let mutable has_intrinsic = false;
         for m in mods then {
             when m in {
                 .KwForeign() then {
                     has_foreign = true;
+                },
+                .KwIntrinsic() then {
+                    has_intrinsic = true;
                 },
                 _ then {},
             };
         };
         let mutable cname = Option[Token].None();
         if has_foreign and self.check(.StrLit("")) then {
-            cname = .Some(self.eat());
+            let cname_tok = self.eat();
+            // The slot spells the C name verbatim; it must be a legal C
+            // identifier. Checked the moment the string is read -- before the
+            // name, matching the compilers.
+            when cname_tok in {
+                .StrLit(raw) then {
+                    let c_text = CstParser.string_content_text(raw);
+                    if not CstParser.is_valid_c_name(c_text) then {
+                        return .Error(
+                            "Parse error: C name \"\(c_text)\" is not a legal C identifier",
+                        );
+                    };
+                },
+                _ then {},
+            };
+            cname = .Some(cname_tok);
         };
         // `unsafe`? `sendable`? sit after `foreign` / the C name and before
         // `mutable`: `type unsafe sendable mutable X` (grammar.bnf
@@ -3996,17 +5226,67 @@ given CstParser {
         } else if self.check(.KwSendable()) then {
             sendable_kw = .Some(self.eat());
         };
+        // A foreign layout is C's and an intrinsic is the compiler's: neither
+        // may claim thread sharing (concurrency-design.md). These fire at the
+        // `sendable` token -- before the name, matching the compilers.
+        if sendable_kw is .Some(_) then {
+            let label = if unsafe_kw is .Some(_) then {
+                "unsafe sendable"
+            } else {
+                "sendable"
+            };
+            if has_foreign then {
+                return .Error("Parse error: foreign type cannot be marked \(label)");
+            };
+            if has_intrinsic then {
+                return .Error("Parse error: intrinsic type cannot be marked \(label)");
+            };
+        };
         // `type` `mutable`? — the two nominal forms the language has
         // (grammar.bnf `<type-decl>`). `mutable` applies to structs only.
         let mutable mut_kw = Option[Token].None();
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat());
         };
-        let name = self.expect_ident("type name") or return;
+        let name = self.expect_ident("type declaration") or return;
+        when name in {
+            .Ident(n) then {
+                if not CstParser.is_valid_type_name(n) then {
+                    return .Error(
+                        "Parse error: Type name '\(n)' must start with an uppercase letter",
+                    );
+                };
+            },
+            _ then {},
+        };
+        // A `foreign` name spelled nowhere in the C-name slot is the C name:
+        // it must be a legal C identifier. After the case check, before the
+        // generics ban -- the compilers' order.
+        let name_text = name.to_string();
+        if has_foreign and cname is .None() and not CstParser.is_valid_c_name(name_text) then {
+            return .Error(
+                "Parse error: Koral name \"\(name_text)\" is not a legal C identifier; write a C name string after 'foreign'",
+            );
+        };
         let gp = self.parse_generic_params() or return;
+        if has_foreign and gp is .Some(_) then {
+            return .Error("Parse error: Foreign type does not support generics");
+        };
+
+        // Body-shape rules (the compilers blame these at the body, after the
+        // name and derived-C-name checks have had their turn).
+        if has_foreign and mut_kw is .Some(_) then {
+            return .Error("Parse error: Foreign type cannot be marked mutable");
+        };
+        if has_intrinsic and mut_kw is .Some(_) then {
+            return .Error("Parse error: intrinsic type cannot be marked mutable");
+        };
 
         // Struct body: (fields)
         if self.check(.LParen()) then {
+            if has_intrinsic then {
+                return .Error("Parse error: intrinsic type cannot have a body");
+            };
             let lp = self.eat();
             let mutable items = List[CstStructBodyItem].new();
             // Positional fields must come before named fields (grammar.bnf
@@ -4038,12 +5318,64 @@ given CstParser {
                     };
                     continue;
                 };
+                // Foreign fields are bare `name: Type` (cffi-design.md §B):
+                // no access modifiers, no `mutable` marker, no named/default
+                // forms. Anything else lands where a field NAME is expected,
+                // which is the message the compilers give.
+                if has_foreign then {
+                    if self.is_access_mod() or self.check(.KwMut()) then {
+                        return .Error(
+                            "Parse error: Expected identifier for field name, got: \(self.token_desc(self.peek()))",
+                        );
+                    };
+                    if self.peek() is not .Ident(_) then {
+                        return .Error(
+                            "Parse error: Expected identifier for field name, got: \(self.token_desc(self.peek()))",
+                        );
+                    };
+                    let field_name = self.expect_ident("field name") or return;
+                    if not CstParser.is_valid_value_name(field_name.to_string()) then {
+                        return .Error(
+                            "Parse error: Field name '\(field_name.to_string())' must start with a lowercase letter",
+                        );
+                    };
+                    if not self.check(.Colon()) then {
+                        return .Error(
+                            "Parse error: expected ':' after field name '\(field_name.to_string())'",
+                        );
+                    };
+                    let field_colon_tok = self.eat();
+                    let field_type = self.parse_type_node() or return;
+                    // No default-value parse: a `=` left in the stream fails
+                    // the next field's name expectation, exactly as the
+                    // compilers report it.
+                    let comma = self.eat_comma();
+                    items.push(
+                        CstStructBodyItem.Field(
+                            CstStructField(
+                                .None(),
+                                .None(),
+                                field_name,
+                                .None(),
+                                field_type,
+                                .None(),
+                                comma,
+                            ),
+                        ),
+                    );
+                    continue;
+                };
                 let mutable field_mut = Option[Token].None();
-                let field_access = self.eat_vis();
+                let field_access = self.eat_vis() or return;
                 if self.check(.KwMut()) then {
                     field_mut = .Some(self.eat());
                 };
                 let field_name = self.expect_ident("field name") or return;
+                if not CstParser.is_valid_value_name(field_name.to_string()) then {
+                    return .Error(
+                        "Parse error: Field name '\(field_name.to_string())' must start with a lowercase letter",
+                    );
+                };
                 // Every field is spelled `name: Type` (grammar.bnf <field>).
                 // The colon slot is filled only for a NAMED field -- that bit
                 // is what the printer reads to keep the distinction.
@@ -4101,10 +5433,41 @@ given CstParser {
 
         // Enum body: { .Variant1, .Variant2(T) }
         if self.check(.LBrace()) then {
+            if has_intrinsic then {
+                return .Error("Parse error: intrinsic type cannot have a body");
+            };
             if mut_kw is .Some(_) then {
                 return .Error("Parse error: Enum type cannot be marked mutable");
             };
             let lb = self.eat();
+            // `type foreign` is opaque: `{}` is the empty enum body and no
+            // variant may appear in it (grammar.bnf <foreign-type-body>).
+            if has_foreign then {
+                let mutable cases = List[CstItem].new();
+                while self.peek() is .LineComment(_) or is .BlockComment(_) then {
+                    cases.push(CstItem.Comment(self.eat()));
+                };
+                if not self.check(.RBrace()) then {
+                    return .Error(
+                        "Parse error: Unexpected token: \(self.token_desc(self.peek())), expected: '}'",
+                    );
+                };
+                let rb = self.eat();
+                return .Ok(
+                    .Type(
+                        vis,
+                        mods,
+                        cname,
+                        kw,
+                        unsafe_kw,
+                        sendable_kw,
+                        mut_kw,
+                        gp,
+                        name,
+                        CstTypeBody.Enum(lb, cases, rb),
+                    ),
+                );
+            };
             let mutable cases = List[CstItem].new();
             while not self.check(.RBrace()) and not self.is_eof() then {
                 let nl_count = self.count_newlines();
@@ -4163,8 +5526,24 @@ given CstParser {
 
         // Alias: = OtherType
         if self.check(.Eq()) then {
+            // An intrinsic lives in the compiler and a foreign layout is C's:
+            // neither is written as an alias of a Koral type.
+            if has_intrinsic then {
+                return .Error("Parse error: Intrinsic type alias is not supported");
+            };
+            if has_foreign then {
+                return .Error("Parse error: Foreign type alias is not supported");
+            };
             if mut_kw is .Some(_) then {
                 return .Error("Parse error: Type alias cannot be marked mutable");
+            };
+            if sendable_kw is .Some(_) then {
+                let label = if unsafe_kw is .Some(_) then {
+                    "unsafe sendable"
+                } else {
+                    "sendable"
+                };
+                return .Error("Parse error: Type alias cannot be marked \(label)");
             };
             let eq = self.expect(.Eq(), "'='") or return;
             let target = self.parse_type_node() or return;
@@ -4184,14 +5563,29 @@ given CstParser {
             );
         };
 
-        // Empty (foreign type)
-        return .Ok(
-            .Type(vis, mods, cname, kw, unsafe_kw, sendable_kw, mut_kw, gp, name, CstTypeBody.Empty()),
+        // No body. The only body-less form is `type intrinsic T;` -- an
+        // intrinsic lives in the compiler. A `foreign` type needs its body
+        // (opaque `{}` or a field list); anything else expects `(`.
+        if has_intrinsic then {
+            return .Ok(
+                .Type(vis, mods, cname, kw, unsafe_kw, sendable_kw, mut_kw, gp, name, CstTypeBody.Empty()),
+            );
+        };
+        if has_foreign then {
+            return .Error("Parse error: foreign type cannot be declared without a body");
+        };
+        return .Error(
+            "Parse error: Unexpected token: \(self.token_desc(self.peek())), expected: '('",
         );
     };
 
     private parse_enum_variant_expr(self): Result[CstExpr] = {
-        let name = self.expect_ident("enum variant name") or return;
+        let name = self.expect_ident("enum case") or return;
+        if not CstParser.is_valid_type_name(name.to_string()) then {
+            return .Error(
+                "Parse error: Enum case name '\(name.to_string())' must start with an uppercase letter",
+            );
+        };
 
         let mutable fields = List[CstEnumField].new();
         // Positional payload fields must come before named ones -- see
@@ -4209,7 +5603,12 @@ given CstParser {
             while self.peek() is .LineComment(_) or is .BlockComment(_) then {
                 comments.push(self.eat());
             };
-            let field_name = self.expect_ident("enum field name") or return;
+            let field_name = self.expect_ident("enum payload name") or return;
+            if not CstParser.is_valid_value_name(field_name.to_string()) then {
+                return .Error(
+                    "Parse error: Field name '\(field_name.to_string())' must start with a lowercase letter",
+                );
+            };
             // `name: Type` separates the field name from its type; a following
             // `=` marks a named field (`name: Type =` required,
             // `name: Type = value` defaulted).
@@ -4252,7 +5651,7 @@ given CstParser {
     // ========================================================================
 
     private parse_trait_decl(self): Result[CstDecl] = {
-        let vis = self.eat_vis();
+        let vis = self.eat_top_level_vis() or return;
         let kw = self.expect(.KwTrait(), "'trait'") or return;
         // `trait sendable Name` -- declaration-site trait sendability
         // (concurrency-design.md). Syntax-only here; the compilers own the rules.
@@ -4260,7 +5659,7 @@ given CstParser {
         if self.check(.KwSendable()) then {
             sendable_kw = Option[Token].Some(self.eat());
         };
-        let name = self.expect_ident("trait name") or return;
+        let name = self.expect_ident("trait declaration") or return;
         let gp = self.parse_generic_params() or return;
 
         // Super traits: `Name: Super and Super2 {` -- the colon separates the
@@ -4322,14 +5721,20 @@ given CstParser {
     };
 
     private parse_trait_method_sig(self): Result[CstDecl] = {
-        let vis = self.eat_vis();
+        let vis = self.eat_vis() or return;
+        // A requirement's visibility is the trait's (接口件随容器).
+        if vis is .Some(_) then {
+            return .Error(
+                "Parse error: Access modifier on trait method is not supported",
+            );
+        };
         // `unsafe` is the requirement's member-level marker
         // (docs/design/unsafe-design.md §B): it sits before the name.
         let mutable unsafe_kw = Option[Token].None();
         if self.check(.KwUnsafe()) then {
             unsafe_kw = .Some(self.eat());
         };
-        let name = self.expect_ident("method name") or return;
+        let name = self.expect_ident("trait member") or return;
         let gp = self.parse_generic_params() or return;
         let lp = self.expect(.LParen(), "'('") or return;
         let mutable params = List[CstTraitMethodParam].new();
@@ -4345,6 +5750,13 @@ given CstParser {
             };
             if self.peek() is .KwSelf() then {
                 let kw = self.eat();
+                // `self` is the receiver, not a named parameter: `self: T` /
+                // `self = ` are the named forms and do not apply.
+                if self.check(.Colon()) or self.check(.Eq()) then {
+                    return .Error(
+                        "Parse error: 'self' parameter cannot use named parameter syntax",
+                    );
+                };
                 let comma = self.eat_comma();
                 params.push(.SelfParam(kw, .None(), comma));
                 first = 0;
@@ -4358,7 +5770,12 @@ given CstParser {
             if self.check(.KwMut()) then {
                 param_mut = .Some(self.eat());
             };
-            let pname = self.expect_ident("parameter name") or return;
+            let pname = self.expect_ident("parameter") or return;
+            if not CstParser.is_valid_value_name(pname.to_string()) then {
+                return .Error(
+                    "Parse error: Parameter name '\(pname.to_string())' must start with a lowercase letter",
+                );
+            };
             if not self.check(.Colon()) then {
                 return .Error(
                     "Parse error: expected ':' after parameter name '\(pname.to_string())'",
@@ -4388,6 +5805,15 @@ given CstParser {
             let t = self.parse_type_node() or return;
             ret = .Some(t);
         };
+        if ret is .None() then {
+            return .Error(
+                "Parse error: Missing return type: function and method declarations must explicitly declare a return type",
+            );
+        };
+        // A trait requirement is a signature only -- no body.
+        if self.check(.Eq()) then {
+            return .Error("Parse error: trait member cannot have a body");
+        };
         return .Ok(.TraitMethod(vis, unsafe_kw, gp, name, lp, params, rp, ret));
     };
 
@@ -4396,10 +5822,29 @@ given CstParser {
     // ========================================================================
 
     private parse_given_decl(self): Result[CstDecl] = {
-        let vis = self.eat_vis();
+        let vis = self.eat_top_level_vis() or return;
+        // A `given` carries no visibility: it is a conformance or an
+        // extension, not a name (the compilers name the mistake).
+        if vis is .Some(_) then {
+            return .Error(
+                "Parse error: Access modifier on given declaration is not supported",
+            );
+        };
         let kw = self.expect(.KwGiven(), "'given'") or return;
         // `intrinsic` sits immediately after `given`: `given intrinsic Int`.
         let mods = self.eat_kind_modifiers();
+        self.validate_kind_modifiers(mods) or return;
+        // Only `given intrinsic` members may stand body-less (the definition
+        // lives in the compiler).
+        let mutable mut_allow_bodyless = false;
+        for m in mods then {
+            when m in {
+                .KwIntrinsic() then {
+                    mut_allow_bodyless = true;
+                },
+                _ then {},
+            };
+        };
         let gp = self.parse_generic_params() or return;
 
         // Target type (may be complex like [T, R]EnumerateStream)
@@ -4415,7 +5860,7 @@ given CstParser {
         };
 
         let lb = self.expect(.LBrace(), "'{'") or return;
-        let members = self.parse_member_items() or return;
+        let members = self.parse_member_items(mut_allow_bodyless) or return;
         let rb = self.expect(.RBrace(), "'}'") or return;
         return .Ok(
             .Given(vis, mods, kw, gp, target, as_kw, trait_type, lb, members, rb),
@@ -4426,7 +5871,7 @@ given CstParser {
     // Member items (shared by trait/given)
     // ========================================================================
 
-    private parse_member_items(self): Result[List[CstItem]] = {
+    private parse_member_items(self, allow_bodyless: Bool): Result[List[CstItem]] = {
         let mutable members = List[CstItem].new();
         while not self.check(.RBrace()) and not self.is_eof() then {
             let nl_count = self.count_newlines();
@@ -4453,19 +5898,18 @@ given CstParser {
                 };
                 continue;
             };
-            // Determine if this is a let-decl or a method without let, peeking
-            // past every leading modifier regardless of the order it was written in.
+            // A `given` body has no `let` slot: members are declared bare.
+            // Peeking past every leading modifier lands on the member's
+            // first token either way.
             let offset = self.modifier_token_count();
             let kw = self.peek_at_skip_nl(offset);
             when kw in {
                 .KwLet() then {
-                    let d = self.parse_let_decl() or return;
-                    self.eat_decl_semi() or return;
-                    members.push(CstItem.Decl(d));
+                    return .Error("Parse error: Expected identifier for given member, got: let");
                 },
                 _ then {
                     // Method without let keyword
-                    let d = self.parse_member_no_let() or return;
+                    let d = self.parse_member_no_let(allow_bodyless) or return;
                     self.eat_decl_semi() or return;
                     members.push(CstItem.Decl(d));
                 },
@@ -4474,8 +5918,8 @@ given CstParser {
         return .Ok(members);
     };
 
-    private parse_member_no_let(self): Result[CstDecl] = {
-        let vis = self.eat_vis();
+    private parse_member_no_let(self, allow_bodyless: Bool): Result[CstDecl] = {
+        let vis = self.eat_vis() or return;
         // `unsafe` sits after the access modifier and before the name
         // (docs/design/unsafe-design.md §B): `unsafe slot_at(self, …)`.
         let mutable unsafe_kw = Option[Token].None();
@@ -4492,6 +5936,7 @@ given CstParser {
             unsafe_kw,
             .None(),
             true,
+            allow_bodyless,
         );
     };
 };

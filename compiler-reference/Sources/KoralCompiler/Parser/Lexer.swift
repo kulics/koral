@@ -224,8 +224,11 @@ public enum Token: CustomStringConvertible {
       return "String(\(value))"
     case .rune(let value):
       return "Rune('\(value)')"
-    case .interpolatedString(let parts):
-      return "InterpolatedString(\(parts))"
+    case .interpolatedString:
+      // A stable placeholder, not the AST dump: this text lands in
+      // `Unexpected token: <...>` diagnostics and must read like a token kind
+      // (koralc prints `<interpolated-string>`).
+      return "<interpolated-string>"
     case .plus:
       return "+"
     case .minus:

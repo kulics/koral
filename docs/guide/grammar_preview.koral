@@ -20,11 +20,38 @@ using "./utils.koral";
 using "./helpers.koral";
 using "../shared/format.koral";
 
-// 模块导入：specifier 是 `包名[/子路径]`
+// 模块导入：specifier 是 `包名[/子路径]`；导入列表的形态（`...` 是基础集合并关闭列表）：
+//   { } 空占位 / { a, b } 只带一部分 / { a as b } 逐项别名
+//   { ... } 全部 / { a as b, ... } 全部加别名 / { !a, !b, ... } 全部减排除
+//   （同一模块每文件只导入一次；下列各行并列展示形态写法）
 using "std/io" { ... }; // 全部
 using "std/io" { Reader }; // 只带一部分
 using "std/io" { Reader as IoReader, Writer }; // 逐项别名
+using "std/io" { }; // 空列表：占位（编辑期先占着）
+using "std/os" { Config as OsConfig, ... }; // 全部加别名（重命名项写在 `...` 前）
+using "std/os" { !Config, !Builder, ... }; // 全部减去排除项（排除项写在 `...` 前）
 using "app/services" { run_server };
+
+// ------------------------------------------------------------
+// 构建条件声明 (Build-Conditional Declarations)
+// ------------------------------------------------------------
+// #if 按构建目标（os / arch）在编译期选择声明：条件是封闭语法——
+// os("...") / arch("...") 用 and / or / not 与括号组合，不是表达式。
+// 分支只装全局声明（可嵌套 #if / using），以 ; 结束；未选中的分支仍要
+// 解析，但名字不解析、类型不检查。同名声明必须分置在 #if … else … 的
+// 两侧（一侧一个），无条件声明不能与条件声明同名。
+
+#if os("windows") then {
+    let unsafe foreign "CreateFileA" create_file_a(path: *UInt8, access: UInt32): UInt32;
+} else {
+    let unsafe foreign "open" open_path(path: *UInt8, flags: Int32): Int32;
+};
+
+#if (os("linux") or os("macos")) and not arch("x86_64") then {
+    let platform_line_end: String = "\n";
+} else {
+    let platform_line_end: String = "\r\n";
+};
 
 // 入口函数：无参数，返回 Int 或 Void
 let main(): Int = {
@@ -136,6 +163,9 @@ let variables(): Void = {
     let (mutable e, f) = Pair(10, 20); // 可变绑定
     let (_, g) = Pair(1, 2); // 丢弃第一个元素
 
+    // 嵌套解构绑定
+    let (h, (i, j)) = Pair(1, Pair(2, 3));
+
     // 丢弃返回值
     let _ = some_fn();
 };
@@ -227,6 +257,13 @@ let first_of[T: Any](list: List[T]): Option[T] = list.first();
 // 泛型函数（多约束）
 let max[T: Eq and Ord](a: T, b: T): T = if a.compare(b) >= 0 then a else b;
 
+// 泛型函数（形状约束：mutable / foreign / sendable 是关键字，不是 trait，
+// 编译器按类型自己的声明判定；可用 and 组合）
+let bump[T: mutable](c: T): T = c;
+let read_bytes[T: foreign](buf: List[T]): *T = buf.borrow_ptr();
+let pass[T: sendable](x: T): T = x;
+let pass_foreign[T: foreign and sendable](x: T): T = x;
+
 // 函数类型
 let fn_types(): Void = {
     let f: (Int, Int) -> Int = (x: Int, y: Int): Int => x + y;
@@ -244,6 +281,17 @@ let fn_types(): Void = {
 
     // 链式调用（lambda 作为参数）；惰性管线从 lazy() 进入
     some_list.lazy().filter((x) => x % 2 == 0).map((x) => x * x);
+};
+
+// 类型头表达式：括号里的类型头与裸名是同一目标
+//（`(Point)(1, 2)` == `Point(1, 2)`；`(Point).origin()` == `Point.origin()`）
+given Point {
+    origin(): Point = Point(0, 0); // 省略 `self` 的方法即静态方法
+};
+
+let type_head_expr(): Void = {
+    let p = (Point)(1, 2);
+    let o = (Point).origin();
 };
 
 // ------------------------------------------------------------
@@ -411,7 +459,7 @@ let control_flow(): Void = {
 // block tail expression（块尾表达式）
 // ------------------------------------------------------------
 
-let value = if ready() then {
+let value: Int = if ready() then {
     42
 } else {
     0
@@ -469,6 +517,10 @@ let option_chaining(): Void = {
     let doubled = opt and then as v in v * 2; // Some(84)
     let chained = opt and then as v in v + 1 and then as v in v * 3; // Some(129)
 
+    // and then 接收者省略链：右侧是以 `.` 开头的后缀链，接收者是解包值
+    //（`opt and then .to_string()` == `opt and then as v in v.to_string()`）
+    let text = opt and then .to_string(); // Some("42")
+
     // 跨层的两种合法写法——括号就是分层
     let ready: Bool = true;
     let wrapped = opt and then as v in (v == 1 and false); // Option[Bool]：Some(false)
@@ -476,8 +528,7 @@ let option_chaining(): Void = {
 
     // and then 折叠同族：变换体自身已是同一种 Option / Result 时，它的值就是结果；
     // 否则包一层
-    let safe_div: (Int, Int) -> Option[Int] = (x: Int, y: Int): Option[Int] => if y == 0 then .None(
-    ) else .Some(x / y);
+    let safe_div: (Int, Int) -> Option[Int] = (x: Int, y: Int): Option[Int] => if y == 0 then .None() else .Some(x / y);
     let result = opt and then as v in safe_div(v, 10); // Option[Int]：Some(4)
 
     // Result 同样支持 or else / and then；`as e in` 绑定 Error 值
@@ -519,7 +570,7 @@ let doubled_value(res: Result[Int]): Result[Int] = {
 let format_file_with_or_return(path: String): Result[Void] = {
     let source = read_text_file(path) or return;
     let formatted = format_source(source) or return;
-    return write_text_file(path, formatted);
+    return write_text_file(path, content = formatted);
 };
 
 let format_file_with_or_else(path: String): Result[Void] = {
@@ -529,7 +580,7 @@ let format_file_with_or_else(path: String): Result[Void] = {
     let formatted = format_source(source) or else as e in {
         return Result[Void].Error(e);
     };
-    return write_text_file(path, formatted);
+    return write_text_file(path, content = formatted);
 };
 
 // or else 仍然用于需要自定义处理的场景
@@ -569,10 +620,11 @@ type Box3[T: Any] {
     None(),
 };
 
-// 类型别名（不能声明 `mutable`）
+// 类型别名（不能声明 `mutable`；可以带泛型参数与约束）
 type Byte = UInt8;
 type Meters = Int;
 type Coord = Point;
+type OrdList[T: Ord] = List[T];
 
 // ------------------------------------------------------------
 // type mutable：共享可变对象
@@ -582,6 +634,12 @@ type Coord = Point;
 
 type mutable Counter(mutable count: Int, id: UInt);
 type mutable Table[T: Any](mutable data: T);
+
+// clone() 是 Clone trait 方法：List / Set / Dict / Deque 自带，
+// 其他共享对象要给 Clone 实现后才能 clone()
+given[T: Any] Table[T]: Clone {
+    clone(self): Table[T] = Table[T](self.data);
+};
 
 let shared_objects(): Void = {
     let c = Counter(0, 1);
@@ -593,7 +651,47 @@ let shared_objects(): Void = {
     t.data = 43;
     // alias.data == 43
 
-    let copy = t.clone(); // 显式独立副本
+    let copy = t.clone(); // 显式独立副本（clone() 是 Clone trait 方法，由 given 提供）
+};
+
+// ------------------------------------------------------------
+// sendable：并发安全声明（类型修饰符槽：unsafe? sendable? mutable?）
+// ------------------------------------------------------------
+// 六种形态：type / type mutable（线程内）+ sendable 家族（可跨线程）：
+//   type sendable                 冻结数据，浅层不可变，安全共享
+//   type sendable mutable         共享修改，编译器内建对象锁
+//   type unsafe sendable          开发者承诺可共享
+//   type unsafe sendable mutable  开发者承诺，同步自理
+// 安全形态校验每个字段（enum 校验每个 payload）；unsafe 必须伴随 sendable。
+// enum 只取不可变形态（type sendable / type unsafe sendable），不带 mutable；
+// type foreign / 类型别名 / type intrinsic 不能标记 sendable。
+
+type sendable SharedPoint(x: Int, y: Int);
+type sendable mutable SharedCounter(mutable hits: Int);
+type unsafe sendable mutable Mutex(private handle: *UInt8);
+type sendable SendShape {
+    Circle(r: Float64),
+    Rect(w: Float64, h: Float64),
+};
+
+// trait sendable：对象总是可跨线程；每个 given 实现必须自身 sendable
+trait sendable Speak {
+    speak(self): Int;
+};
+
+type sendable Robot(id: Int);
+
+given Robot: Speak {
+    speak(self): Int = self.id;
+};
+
+// sendable 函数类型：限定整个函数类型（可嵌套）；可转成普通函数类型，反向不行
+let run_task(f: sendable () -> Void): Void = f();
+
+let sendable_fn_types(): Void = {
+    let worker: sendable (Int) -> Int = (x) => x * 2;
+    let nested: sendable (Int) -> sendable (Int) -> Int = (x) => (y) => x + y;
+    let takes: (sendable (Int) -> Int) -> Int = (f) => f(1); // 内层参数带限定
 };
 
 // ------------------------------------------------------------
@@ -615,7 +713,8 @@ let generics_usage(): Void = {
     let result = t.transform[Int]((x) => x * 2);
 
     first_of[Int]([1, 2]); // 显式泛型函数调用
-    first_of([1, 2]); // 推断泛型函数调用
+    let ints: List[Int] = [1, 2];
+    first_of(ints); // 推断泛型函数调用
 };
 
 // ------------------------------------------------------------
@@ -671,8 +770,8 @@ let pattern_matching(): Void = {
         .None() then "empty",
     };
 
-    // 所有模式类型
-    when value in {
+    // 所有模式类型（主体是占位符，不绑定具体类型）
+    when subject in {
         1 then {}, // 整数字面量
         -5 then {}, // 负整数字面量
         1.5 then {}, // 浮点字面量
@@ -710,6 +809,7 @@ let pattern_matching(): Void = {
     // 无 `...` 时长度必须恰好相等；有 `...` 时已写的槽位数是长度下界。
     // `...` 只忽略槽位、不绑定，每层元素表至多一个。列表里它可以和已写的槽位
     // 并存；结构体 / 枚举变体里它必须是唯一槽位（整段省略）。
+    let nums: List[Int] = [1, 2];
     when nums in {
         [] then println("empty"),
         [x] then println("one"),
@@ -732,6 +832,14 @@ let pattern_matching(): Void = {
     // is 链（同一主体上的多个测试用 or is / and is 串成一个模式）
     if a is 1 or is 2 then {}; // or is：任一匹配即真
     if p is Point(_, _) and is not Point(0, 0) then {}; // and is not：收窄再排除
+
+    // null 模式（字面量模式；字面量模式不单独穷尽，when 仍需兜底分支）
+    let q: *Int = null;
+    when q in {
+        null then println("null"),
+        _ then println("live"),
+    };
+    if q is not null then {};
 
     // trait object 的实现类型精确匹配（主体保持 trait object）
     let problem: Problem = PreviewIoError(7);
@@ -848,7 +956,8 @@ given[T: Eq] Table[T]: Eq {
 // trait 工具方法（given Trait）
 // ------------------------------------------------------------
 
-trait Problem {
+// public trait：要求与实现的可见性随 trait 本体（省略修饰符即继承）
+public trait Problem {
     render(self): String;
 };
 
@@ -858,7 +967,7 @@ given Problem {
 
 type PreviewIoError(code: Int);
 given PreviewIoError: Problem {
-    render(self): String = "io";
+    public render(self): String = "io";
 };
 
 // ------------------------------------------------------------
@@ -886,6 +995,9 @@ let qualified_call_example(): Void = {
     // receiver 是第一个实参，因此实例方法与静态 trait 方法写法一致。
     println(Num(Tag).plus_ten(n));
     println(Num(Tag).kind(n));
+    // expr(TraitName).method(...) — receiver 限定调用：receiver 是基础表达式，
+    // 不再重复传入（仅实例方法）。
+    println(n(Tag).plus_ten());
 };
 
 // ------------------------------------------------------------
@@ -975,6 +1087,8 @@ let operator_overloading(): Void = {
 };
 
 // 内建下标访问与下标赋值（List 是 `type mutable`，无需 `let mutable` 绑定）
+// String / List / [N]T 的下标有边界检查，是安全操作；raw pointer 的下标是
+// 未检查的 C 索引，读写都要 unsafe 块。
 let builtin_subscript(): Void = {
     let list = [10, 20, 30];
     println(list[0]);
@@ -984,11 +1098,12 @@ let builtin_subscript(): Void = {
     let b: UInt8 = text[1];
     println(b);
 
-    let p: *mutable Int = alloc_memory[Int](2);
-    p[0] = list[0];
-    p[1] = list[1];
-    println(p[1]);
-    dealloc_memory(p);
+    // raw pointer 下标（未检查的 C 索引）
+    let p: *mutable Int = unsafe { alloc_memory[Int](UInt(2)) };
+    unsafe { p[0] = list[0]; p[1] = list[1]; };
+    let v = unsafe { p[1] };
+    println(v);
+    unsafe { dealloc_memory(p) };
 };
 
 // ------------------------------------------------------------
@@ -1031,36 +1146,47 @@ given PublicType {
 // *T          只读 raw pointer：*expr 读取；不支持 *expr / p[i] 赋值
 // *mutable T  可变 raw pointer：*expr 读写、p[i] 读写、指针算术
 // *mutable T  可隐式转换为 *T，反向不允许
+//
+// 触碰内存的操作都要 unsafe { … } 块：*p 解引用（读写）、p[i] 未检查下标
+// （读写）、p ± n 指针算术、字段投影 p.f、内存内建函数（alloc_memory 等）。
+// 产生与携带指针是安全的：&x / &mutable m、null、p == null、as 重解释。
 
 let pointer_ops(): Void = {
-    let p: *mutable Int = alloc_memory[Int](2); // 分配 2 个 Int 的内存
+    let p: *mutable Int = unsafe { alloc_memory[Int](UInt(2)) }; // 分配 2 个 Int
 
-    init_memory(p, 100); // 初始化（要求 *mutable T）
-    let value = *p; // 解引用读取
+    unsafe {
+        init_memory(p, 100); // 初始化（要求 *mutable T）
+        let value = *p; // 解引用读取
 
-    let p2 = p + 1; // 指针偏移
-    init_memory(p2, 200);
+        let p2 = p + 1; // 指针偏移
+        init_memory(p2, 200);
 
-    *p = 999; // 解引用赋值（*mutable T 支持）
+        *p = 999; // 解引用赋值（*mutable T 支持）
 
-    // 下标访问（指针偏移 + 解引用）
-    let v0 = p[0]; // 等价于 *(p + 0)
-    let v1 = p[1]; // 等价于 *(p + 1)
-    p[0] = 111; // 下标赋值（*mutable T 支持）
-    p[1] = 222;
+        // 下标访问（指针偏移 + 解引用）
+        let v0 = p[0]; // 等价于 *(p + 0)
+        let v1 = p[1]; // 等价于 *(p + 1)
+        p[0] = 111; // 下标赋值（*mutable T 支持）
+        p[1] = 222;
 
-    deinit_memory(p); // 析构（要求 *mutable T）
-    deinit_memory(p2);
-    dealloc_memory(p); // 释放内存
+        deinit_memory(p); // 析构（要求 *mutable T）
+        deinit_memory(p2);
+        dealloc_memory(p); // 释放内存
+    };
+
+    // as 重解释转换（安全操作）：指针 <-> 整数地址、换指向类型、*mutable T -> *T
+    let addr = p as UInt; // 指针读成整数地址
+    let back = addr as *Int; // 整数地址读回指针
 
     let np: *Int = null; // null 指针字面量（加入 *T / *mutable T）
-    println(p == null);
+    println(np == null); // 指针比较是安全操作（p != null 同理）
 };
 
 // ------------------------------------------------------------
-// 不安全取址 (Unsafe Address-Of)
+// 取址 (Address-Of)
 // ------------------------------------------------------------
 // & / &mutable 要求可取地址的存储；字面量和临时值会被拒绝。
+// 产生指针是安全操作（危险在触碰内存的操作，见上）。
 
 let address_of(): Void = {
     let local: Int = 7;
@@ -1080,8 +1206,87 @@ let address_of(): Void = {
 type foreign FILE {};
 type foreign Timespec(tv_sec: Int64, tv_nsec: Int64); // 带字段的外部类型
 
-let foreign fopen(path: *UInt8, mode: *UInt8): *FILE;
-let foreign fclose(file: *FILE): Int32;
+// 外部函数：无函数体是引用（extern 链接），有函数体是 C ABI 导出。
+// 签名带 raw pointer / C 函数指针的引用必须标记 `unsafe`（见 unsafe 声明）。
+let unsafe foreign fopen(path: *UInt8, mode: *UInt8): *FILE;
+let unsafe foreign fclose(file: *FILE): Int32;
 
-// 内建类型与函数（保留给标准库）
-// public type intrinsic Int;
+// C 名字槽：`foreign` 后的字符串是该声明在 C 侧的名字（符号名 / 宏名）；
+// 缺省时 C 名等于 Koral 名，Koral 名必须是合法 C 标识符
+let unsafe foreign "strlen" c_strlen(p: *UInt8): UInt;
+
+// 外部变量：`mutable` 选 extern 可变变量；带初值是 C 变量定义；
+// 无 `mutable` 且带常量初值是 C 宏常量绑定（不产生链接符号）
+let foreign mutable errno: Int32; // extern 可变变量
+let unsafe foreign stdin: *UInt8; // 指针类型的 foreign 全局必须标记 unsafe
+let foreign mutable counter: Int32 = 0; // C 变量定义（静态初始化）
+let foreign "AF_INET6" af_inet6: Int32 = 10; // C 宏常量（带 C 名槽）
+
+// ------------------------------------------------------------
+// C 函数指针类型 (Foreign Function Types)
+// ------------------------------------------------------------
+// foreign (A) -> R 是裸 C 函数指针，不是 Koral 闭包：只有 let foreign 函数
+// 与同型值能落入，null 可以加入（同 *T）；调用需要 unsafe 块。
+
+let foreign abs(x: Int32): Int32;
+
+let fn_pointer_types(): Void = {
+    let f: foreign (Int32) -> Int32 = abs;
+    let cb: foreign (Int32) -> Int32 = null;
+};
+
+// ------------------------------------------------------------
+// 定长数组 [N]T (Fixed-Size Arrays)
+// ------------------------------------------------------------
+// C 布局定长数组：值语义（赋值 / 传参拷贝）。下标有边界检查，是安全操作
+// （只有 *T 的下标才是未检查的 C 索引）。元素类型必须能跨 FFI 边界；
+// [N]T 不能直接作 let foreign 的参数 / 返回类型（用 *T）。
+
+let fixed_arrays(): Void = {
+    let mutable a: [4]Int32 = [1, 2, 3, 4]; // 恰好 N 个元素
+    let mutable z: [4]Int32 = []; // 全零缓冲
+    a[2] = Int32(9); // 下标赋值（边界检查，安全）
+    let p: *Int32 = &a[0]; // 元素地址（取址是安全操作）
+};
+
+// ------------------------------------------------------------
+// unsafe 声明 (Unsafe Declarations)
+// ------------------------------------------------------------
+// 安全契约标记：调用（或访问）被标记的声明需要 unsafe 上下文。
+// 标记位置：函数 / foreign / intrinsic 声明在 `let` 之后（foreign / intrinsic
+// 之前）；方法与 trait 要求在可见性与名字之间。变量不能标记。
+// trait 要求与实现必须携带同一标记；被标记函数的函数体不是隐式 unsafe
+// 上下文——体内的不安全操作仍要写 unsafe { … }。
+
+let unsafe first_byte(p: *UInt8): UInt8 = unsafe { *p };
+
+type Buffer(data: *mutable UInt8);
+
+given Buffer {
+    unsafe slot_at(self, i: UInt): *mutable UInt8 = unsafe { self.data + Int(i) };
+};
+
+trait Blob {
+    unsafe raw_bytes(self): *UInt8;
+};
+
+type BlobImpl(data: *UInt8);
+
+given BlobImpl: Blob {
+    unsafe raw_bytes(self): *UInt8 = self.data; // 与要求携带同一标记
+};
+
+// foreign 声明同理：签名带 raw pointer / C 函数指针的引用必须标记 unsafe
+let unsafe foreign strlen(p: *UInt8): UInt;
+
+// ------------------------------------------------------------
+// 内建声明 (Intrinsic Declarations，保留给标准库)
+// ------------------------------------------------------------
+// intrinsic 声明编译器内建的类型与函数，只允许写在标准库源码里；普通包
+// 会被拒绝（'intrinsic' declarations are only allowed in the standard library）。
+// 标准库（std/primitives.koral）的写法：
+//   public type intrinsic Int;
+//   public let unsafe intrinsic alloc_memory[T: Any](capacity: UInt): *mutable T;
+// 原始内存内建函数（alloc_memory / dealloc_memory / init_memory /
+// deinit_memory / take_memory / copy_memory / move_memory / compare_memory）
+// 都是 `let unsafe intrinsic`——调用它们需要 unsafe 上下文。
