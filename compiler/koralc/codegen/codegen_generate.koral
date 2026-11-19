@@ -313,20 +313,38 @@ given CodeGen {
     };
 
     user_defined_drop_for_type_name(self, type_name: String): Option[String] = {
+        return when self.user_drop_fn_by_type_name.get(type_name) in {
+            .Some(name) then Option[String].Some(name),
+            .None() then Option[String].None(),
+        };
+    };
+
+    /// 一次预热用户 drop 方法反查索引（`user_drop_fn_by_type_name`）。
+    ///
+    /// 原实现每次查询按四段顺序全表扫描：globals 的 Drop 实现（Given）>
+    /// concrete callable 元数据 > `"<Type>_drop"` 函数名 belt（MIR functions）>
+    /// 同名 belt（MIR globals 显式函数项）。这里在 CodeGen 构造时跑一遍折成
+    /// 一张表；段间与段内的先后都用「先到先得」保持，与原逐段 return 的首命中
+    /// 一致。消灭的是 O(查询次数×全表) —— 查询点包括**每个枚举构造表达式**
+    /// （codegen_mir 空 case 静态化的门禁，那里只问存在性）。
+    ///
+    /// 返回名的上下文：`callable_c_name` 是 owner 敏感的，本索引在构造时
+    /// （owner = None）取名，与使用返回值的 prelude 发射点（类型声明/drop
+    /// glue，owner 同为 None）一致；热路径只做 `is_some()`，与 owner 无关。
+    build_user_drop_index(self): Void = {
+        // 段 1：globals 里的 Drop 实现（派生 drop glue 的 Given）。
         for global in self.program.globals then {
             when global in {
                 .Given(target_type, _, _, methods, trait_def_id) then {
-                    let is_drop_trait = self.is_std_drop_impl(trait_def_id);
-                    if is_drop_trait and self.is_concrete_nominal_instance(target_type) and self.user_defined_drop_type_key(
-                        target_type,
-                    ) == type_name then {
+                    if self.is_std_drop_impl(trait_def_id) and self.is_concrete_nominal_instance(target_type) then {
+                        let key = self.user_defined_drop_type_key(target_type);
                         for method in methods then {
-                            if self.context.symbol_name(method) == "drop" then {
-                                return Option[String].Some(
-                                    self.emitted_user_defined_drop_method_name(
-                                        target_type,
-                                        method.def_id,
-                                    ),
+                            if self.context.symbol_name(method) == "drop" and not self.user_drop_fn_by_type_name.contains_key(
+                                key,
+                            ) then {
+                                self.user_drop_fn_by_type_name.insert(
+                                    key,
+                                    self.emitted_user_defined_drop_method_name(target_type, method.def_id),
                                 );
                             };
                         };
@@ -336,6 +354,7 @@ given CodeGen {
             };
         };
 
+        // 段 2：concrete callable 元数据里的 Drop 实现。
         for entry in self.program.concrete_callables_by_def_id then {
             let def_id = entry.first;
             let concrete = entry.second;
@@ -345,15 +364,14 @@ given CodeGen {
                         if self.is_std_drop_impl(concrete.trait_conformance_def_id) then {
                             when concrete.owner_type in {
                                 .Some(owner_type) then {
-                                    if self.is_concrete_nominal_instance(owner_type) and self.user_defined_drop_type_key(
-                                        owner_type,
-                                    ) == type_name then {
-                                        return Option[String].Some(
-                                            self.emitted_user_defined_drop_method_name(
-                                                owner_type,
-                                                def_id,
-                                            ),
-                                        );
+                                    if self.is_concrete_nominal_instance(owner_type) then {
+                                        let key = self.user_defined_drop_type_key(owner_type);
+                                        if not self.user_drop_fn_by_type_name.contains_key(key) then {
+                                            self.user_drop_fn_by_type_name.insert(
+                                                key,
+                                                self.emitted_user_defined_drop_method_name(owner_type, def_id),
+                                            );
+                                        };
                                     };
                                 },
                                 .None() then {},
@@ -365,30 +383,37 @@ given CodeGen {
             };
         };
 
-        // Fallback: some concrete generic drop methods may be emitted as plain
-        // global functions but miss concrete-callable metadata linkage.
-        // If a direct "<Type>_drop" function exists in MIR functions, use it.
-        let fallback_name = "\(type_name)_drop";
+        // 段 3：`"<Type>_drop"` 函数名 belt（MIR functions）—— 单态化后带
+        // DefId 后缀的名字（`Type_drop_dNN`）不匹配，与原精确比较一致。
         for fn_ref in self.program.functions then {
             let fn_name = self.context.symbol_name(fn_ref.identifier);
-            if fn_name == fallback_name then {
-                return Option[String].Some(self.callable_c_name(fn_ref.identifier));
+            when fn_name.strip_suffix("_drop") in {
+                .Some(key) then {
+                    if not self.user_drop_fn_by_type_name.contains_key(key) then {
+                        self.user_drop_fn_by_type_name.insert(key, self.callable_c_name(fn_ref.identifier));
+                    };
+                },
+                .None() then {},
             };
         };
 
-        // As a secondary fallback, scan MIR globals for explicit function entries.
+        // 段 4：`"<Type>_drop"` 函数名 belt（MIR globals 的显式函数项）。
         for global in self.program.globals then {
             when global in {
                 .Function(symbol, _, _, _) then {
-                    if self.context.symbol_name(symbol) == fallback_name then {
-                        return Option[String].Some(self.callable_c_name(symbol));
+                    let fn_name = self.context.symbol_name(symbol);
+                    when fn_name.strip_suffix("_drop") in {
+                        .Some(key) then {
+                            if not self.user_drop_fn_by_type_name.contains_key(key) then {
+                                self.user_drop_fn_by_type_name.insert(key, self.callable_c_name(symbol));
+                            };
+                        },
+                        .None() then {},
                     };
                 },
                 _ then {},
             };
         };
-
-        return Option[String].None();
     };
 
     // ── 主入口 ────────────────────────────────────────────────────────────────

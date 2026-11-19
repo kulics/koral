@@ -116,6 +116,13 @@ public type mutable CodeGen(
     mutable impure_function_ids: Dict[UInt, Bool],
     // 析构跑用户码的名义类型闭包（P5 末次使用移动的放行判据；不动点缓存）。
     mutable observable_drop_defs: Dict[UInt, Bool],
+
+    // ── 用户 drop 方法反查索引 ────────────────────────────────────────────
+    // user_defined_drop_for_type_name 原先每次查询扫 4 遍全表（globals×2 +
+    // concrete_callables + functions），而查询点包括**每个枚举构造表达式**
+    // （空 case 静态化的门禁）—— O(查询次数×全表) 是 emit-c 的最大热点。
+    // 构造时预热一次、按类型名 O(1) 查表；段间优先级与原四段扫描一致。
+    mutable user_drop_fn_by_type_name: Dict[String, String],
 );
 
 given CodeGen {
@@ -175,8 +182,11 @@ given CodeGen {
             Dict[UInt, Bool].new(),
             // observable_drop_defs
             Dict[UInt, Bool].new(),
+            // user_drop_fn_by_type_name
+            Dict[String, String].new(),
         );
         cg.build_def_id_indices();
+        cg.build_user_drop_index();
         // 析构可观察性闭包先算：借用槽的消费时序门要用它（borrowed 参数
         // 约定只对析构可观察的类型钉住 owned）。
         cg.observable_drop_defs = compute_observable_drop_defs(cg);

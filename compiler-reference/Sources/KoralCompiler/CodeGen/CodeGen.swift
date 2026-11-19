@@ -37,6 +37,13 @@ public class CodeGen {
   /// 按需物化的 drop thunk 定义，最后 splice 进 `dropThunkMarker` 处。
   private var dropThunkDefs: [(name: String, body: String)] = []
   private var dropThunkNameByTypeKey: [String: String] = [:]
+
+  // MARK: - User Drop Method Index
+  /// `getUserDefinedDrop` 原先每次查询全扫 `mirProgram.globals`，而查询点包括
+  /// **每个枚举构造表达式**（无字段 case 静态化的门禁）—— O(查询次数×全表)
+  /// 是种子 emit-c 的最大热点。一次建索引、之后 O(1)。
+  private var userDefinedDropIndex: [String: String] = [:]
+  private var userDefinedDropIndexBuilt = false
   
   /// 用户定义的 main 函数的限定名（如 "hello_main"）
   /// 如果用户没有定义 main 函数，则为 nil
@@ -2221,8 +2228,21 @@ public class CodeGen {
     buffer += text
   }
   
-  /// Get user defined drop function for a type
+  /// Get user defined drop function for a type.
+  ///
+  /// 一次建索引、之后 O(1)：原实现每次查询全扫 `mirProgram.globals`，而查询
+  /// 点包括**每个枚举构造表达式**（无字段 case 静态化的门禁）—— O(查询次数×
+  /// 全表) 是种子 emit-c 的最大热点。索引按 globals 原顺序「先到先得」填充，
+  /// 与原逐节点 return 的首命中一致（Given 与 function 按同一节点序竞争）。
   func getUserDefinedDrop(for typeName: String) -> String? {
+    if !userDefinedDropIndexBuilt {
+      buildUserDefinedDropIndex()
+      userDefinedDropIndexBuilt = true
+    }
+    return userDefinedDropIndex[typeName]
+  }
+
+  private func buildUserDefinedDropIndex() {
     func isStdDropTraitConformance(_ trait: TypedTraitConformance?) -> Bool {
       guard let trait else { return false }
       return isStdDropTraitDefId(trait.traitDefId)
@@ -2249,20 +2269,16 @@ public class CodeGen {
     for node in mirProgram.globals {
       if case .given(let type, let trait, let methods) = node,
          isStdDropTraitConformance(trait),
-         dropOwnerTypeName(type) == typeName {
+         let key = dropOwnerTypeName(type) {
         for method in methods {
           let logicalName = mirProgram.receiverMethodDispatch[method.defId]?.methodName
             ?? context.getName(method.defId)
-          if logicalName == "drop" {
-            return cIdentifier(for: method)
+          if logicalName == "drop", userDefinedDropIndex[key] == nil {
+            userDefinedDropIndex[key] = cIdentifier(for: method)
           }
         }
       }
 
-      if case .function(let identifier, _, _) = node,
-         let dispatch = mirProgram.receiverMethodDispatch[identifier.defId],
-         dispatch.methodName == "drop" {
-      }
       if case .function(let identifier, _, _) = node,
          let dispatch = mirProgram.receiverMethodDispatch[identifier.defId],
          dispatch.methodName == "drop",
@@ -2274,13 +2290,11 @@ public class CodeGen {
         //
         // The owner must be matched as the INSTANTIATION (`Holder_I_d171`), not
         // as its template (`Holder`) -- `ownerDefId` resolves to the template.
-        if dropOwnerTypeName(ownerType) == typeName {
-          return cIdentifier(for: identifier)
+        if let key = dropOwnerTypeName(ownerType), userDefinedDropIndex[key] == nil {
+          userDefinedDropIndex[key] = cIdentifier(for: identifier)
         }
       }
     }
-
-    return nil
   }
 
 }

@@ -108,14 +108,29 @@ clang "$WORK/s2/koralc.c" std/koral_runtime.c -I std -o "$WORK/s2/koralc$EXE" \
 
 "$WORK/s2/koralc$EXE" emit-c \
   --package-config compiler/koral.json --target-module koralc -o "$WORK/s3"
-clang "$WORK/s3/koralc.c" std/koral_runtime.c -I std -o "$WORK/s3/koralc$EXE" \
-  -Wno-everything -O1 $WIN_LIBS $WIN_STACK
 
-"$WORK/s3/koralc$EXE" emit-c \
-  --package-config compiler/koral.json --target-module koralc -o "$WORK/s4"
+# The self-hosted binary the pins below exercise. When s2 == s3 the s3 build
+# would be byte-identical to s2's (same C text, same clang, deterministic), so
+# s2's binary IS the self-hosted compiler at its fixed point.
+PIN_KORALC="$WORK/s2/koralc$EXE"
 
-cmp "$WORK/s3/koralc.c" "$WORK/s4/koralc.c"
-echo "FIXED POINT"
+# Fixed point. When the self-built stage reproduces the seed-built stage's C
+# byte-for-byte (s2 == s3) the chain has already converged: s4 = emit(binary(s3.c))
+# = emit(binary(s2.c)) = s3.c holds trivially (deterministic clang + emit), so
+# the third emit-c -- and the s3 binary itself -- are redundant. Only when
+# s2 != s3 fall back to the explicit s3 -> s4 self-reproduction probe, building
+# s3's binary for it.
+if cmp -s "$WORK/s2/koralc.c" "$WORK/s3/koralc.c"; then
+  echo "FIXED POINT (s2 == s3)"
+else
+  clang "$WORK/s3/koralc.c" std/koral_runtime.c -I std -o "$WORK/s3/koralc$EXE" \
+    -Wno-everything -O1 $WIN_LIBS $WIN_STACK
+  PIN_KORALC="$WORK/s3/koralc$EXE"
+  "$WORK/s3/koralc$EXE" emit-c \
+    --package-config compiler/koral.json --target-module koralc -o "$WORK/s4"
+  cmp "$WORK/s3/koralc.c" "$WORK/s4/koralc.c"
+  echo "FIXED POINT (s3 -> s4)"
+fi
 
 # A line that is a bare `name();` is a declaration with no definition -- the
 # compiler emitted a call it never resolved.
@@ -133,13 +148,13 @@ test "${dangling}" = "0"
 say "4b. self-check memory pin"
 if [ "$WINDOWS" = "0" ] && [ -x /usr/bin/time ]; then
   if [ "$(uname -s)" = "Darwin" ]; then
-    /usr/bin/time -l "$WORK/s3/koralc$EXE" check \
+    /usr/bin/time -l "$PIN_KORALC" check \
       --package-config compiler/koral.json --target-module koralc \
       > "$WORK/4b-check.log" 2> "$WORK/4b-time.txt"
     rss_bytes=$(awk '/maximum resident set size/ {print $1}' "$WORK/4b-time.txt")
     rss_kb=$((rss_bytes / 1024))
   else
-    /usr/bin/time -v "$WORK/s3/koralc$EXE" check \
+    /usr/bin/time -v "$PIN_KORALC" check \
       --package-config compiler/koral.json --target-module koralc \
       > "$WORK/4b-check.log" 2> "$WORK/4b-time.txt"
     rss_kb=$(awk -F': ' '/Maximum resident set size/ {print $2}' "$WORK/4b-time.txt")
@@ -161,7 +176,7 @@ fi
 # accessor has no interp temporaries and calls the helper from its failure
 # branch only.
 say "4c. cold panic pin"
-"$WORK/s3/koralc$EXE" emit-c \
+"$PIN_KORALC" emit-c \
   tests/compiler-cases/panic_index_value_context.koral -o "$WORK/cold-panic"
 SLOT_C="$WORK/cold-panic/panic_index_value_context.c"
 test -s "$SLOT_C"
