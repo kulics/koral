@@ -870,6 +870,40 @@ given TypeChecker {
     ): Type = {
         when expected in {
             .Some(et) then {
+                // Echo guard: when the expected's element slot is still a
+                // GENERIC PARAMETER (a generic call's `List[T]` argument
+                // position), the expected carries no element information --
+                // returning it verbatim would give the argument the type
+                // `List[T]` and the call's binding would see T bound to
+                // itself ("expected inferred type for T, got unknown").
+                // Derive the element from the elements and rebuild the family
+                // around it, so `first_of([1, 2])` types as `List[Int]` and
+                // binds T = Int. Inside a generic body the elements carry the
+                // parameter (`[x]`, x: T) and the rebuild reproduces the
+                // expected unchanged.
+                when self.extract_collection_element_type(et) in {
+                    .Some(elem) then {
+                        if self.contains_generic_parameter(elem) then {
+                            let mutable joined = Type.Unknown();
+                            for e in typed_elems then {
+                                let candidate = self.concretize_default_literal_type(e.expr_type);
+                                if not self.is_unresolved_expr_type(candidate) then {
+                                    joined = candidate;
+                                };
+                            };
+                            if not self.is_unresolved_expr_type(joined) then {
+                                let mutable bind_args = List[Type].new();
+                                bind_args.push(joined);
+                                return when et in {
+                                    .GenericStruct(head, _) then Type.GenericStruct(head, bind_args),
+                                    .GenericEnum(head, _) then Type.GenericEnum(head, bind_args),
+                                    _ then et,
+                                };
+                            };
+                        };
+                    },
+                    .None() then {},
+                };
                 return et;
             },
             .None() then {},

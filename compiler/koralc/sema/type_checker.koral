@@ -4903,6 +4903,28 @@ given TypeChecker {
             target_type,
             conformance_trait_name,
         );
+        // Stamp declaration identity + visibility metadata HERE in the first
+        // pass, before any body is checked: an unregistered DefId has no home,
+        // so a use that textually PRECEDES the given would otherwise fail the
+        // locality comparison ("Cannot access internal method '...'"). The
+        // body-checking pass stamps the same metadata again (idempotent); this
+        // pre-stamp is what makes accessibility definition-order independent,
+        // matching the seed. See the stamp block in check_given_members.
+        let pre_stamp_trait_def_id = when conformance_trait_name in {
+            .Some(name) then self.trait_def_id_of(name),
+            .None() then Option[DefId].None(),
+        };
+        for pre_stamp_member in id_members then {
+            let pre_stamp_access = self.conformance_member_registration_access(
+                pre_stamp_trait_def_id,
+                pre_stamp_member.name,
+                pre_stamp_member.access,
+            );
+            self.context().set_module_path(pre_stamp_member.def_id, self.storage.module_path);
+            self.context().set_source_file(pre_stamp_member.def_id, self.storage.file_path);
+            self.context().set_package_id(pre_stamp_member.def_id, self.storage.package_id);
+            self.context().set_access(pre_stamp_member.def_id, pre_stamp_access);
+        };
         for m in id_members then {
             if self.sema_progress_debug_enabled() then {
                 println(

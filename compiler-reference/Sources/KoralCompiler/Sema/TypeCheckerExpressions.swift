@@ -3507,15 +3507,60 @@ extension TypeChecker {
     }
   }
 
+  /// Whether the classified target's element slot is still a generic
+  /// parameter (`List[T]` at a generic call's argument position).
+  private func collectionTargetElementIsGeneric(_ kind: CollectionTargetKind) -> Bool {
+    switch kind {
+    case .list(let e), .set(let e), .frozenList(let e), .frozenSet(let e), .range(let e):
+      if case .genericParameter = e { return true }
+      return false
+    case .map, .frozenDict, .fixedArray:
+      return false
+    }
+  }
+
+  /// Keep the family, swap the element slot.
+  private func retargetCollectionElement(_ kind: CollectionTargetKind, to element: Type) -> CollectionTargetKind {
+    switch kind {
+    case .list: return .list(element: element)
+    case .set: return .set(element: element)
+    case .frozenList: return .frozenList(element: element)
+    case .frozenSet: return .frozenSet(element: element)
+    case .range: return .range(element: element)
+    case .map, .frozenDict, .fixedArray:
+      return kind
+    }
+  }
+
+  private func isGenericParameterType(_ type: Type) -> Bool {
+    if case .genericParameter = type { return true }
+    return false
+  }
+
   private func inferCollectionLiteral(
     elements: [ExpressionNode],
     span: SourceSpan,
     expectedType: Type?
-  ) throws -> TypedExpressionNode {
-    let target: CollectionTargetKind
+  ) throws -> TypedExpressionNode {    let target: CollectionTargetKind
 
     if let expectedType, let classified = try classifyCollectionTarget(expectedType, span: span) {
-      target = classified
+      // Echo guard (mirrors koralc's infer_collection_literal_result_type):
+      // a family target whose element slot is still a GENERIC PARAMETER -- a
+      // generic call's `List[T]` argument position -- carries no element
+      // information. Keeping it would build a `List[T]` container (whose
+      // construction call cannot resolve `T` outside the template -- the
+      // `Undefined type: T` leak) and the call's binding would see T bound to
+      // itself. Derive the element from the elements and keep the family, so
+      // `first_of([1, 2])` types as List[Int] and binds T = Int. Inside a
+      // generic body the elements carry the parameter (`[x]`, x: T) and the
+      // derivation reproduces the target unchanged.
+      var reclassified = classified
+      if collectionTargetElementIsGeneric(classified), !elements.isEmpty,
+         let derived = try? inferCommonElementType(elements: elements, span: span),
+         !isGenericParameterType(derived) {
+        reclassified = retargetCollectionElement(classified, to: derived)
+      }
+      target = reclassified
     } else {
       // No family target (a generic parameter, a user type, no expectation at
       // all): the sequence literal DEFAULTS to `List` -- `List` is `Iterable`,
