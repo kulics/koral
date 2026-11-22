@@ -757,6 +757,45 @@ given TypeChecker {
         return self.storage.method_table.lookup(owner, method_name);
     };
 
+    /// Instance-scoped method lookup: the `given List[Int] { … }` slot declared
+    /// for exactly `self_args`. No fallback -- an instance slot answers for one
+    /// instantiation alone, and the universal table is consulted separately.
+    lookup_instance_method_signature(
+        self,
+        owner: MethodOwner,
+        method_name: String,
+        self_args: List[Type],
+    ): Option[Symbol] = {
+        return self.storage.method_table.lookup_instance(owner, method_name, self_args);
+    };
+
+    /// METHOD FACE (§3.4) for an instance-scoped slot: inherent is always open;
+    /// a trait-delivered slot needs its trait in scope here.
+    instance_method_face_allows(
+        self,
+        owner: MethodOwner,
+        method_name: String,
+        self_args: List[Type],
+    ): Bool = {
+        when self.storage.method_table.instance_slot(owner, method_name, self_args) in {
+            .Some(slot) then {
+                if slot.inherent then {
+                    return true;
+                };
+                if slot.providing_traits.is_empty() then {
+                    return true;
+                };
+                for trait_def_id in slot.providing_traits then {
+                    if self.trait_in_scope(trait_def_id) then {
+                        return true;
+                    };
+                };
+                return false;
+            },
+            .None() then return true,
+        };
+    };
+
     /// METHOD FACE (§3.4) for a method sitting in the method table.
     ///
     /// Inherent (`given X { m }`) is always open. A method stamped by a trait
@@ -4812,6 +4851,23 @@ given TypeChecker {
         // The call is typed from what the slot holds, as it would be for an
         // uncontested name.
         let type_key = self.extension_template_key(inner_type);
+        // An instance-scoped slot (`given List[Int] { … }`) answers first and
+        // for exactly this instantiation: it shadows the universal table and
+        // the template registry here, and no other instantiation ever sees it.
+        let receiver_args = self.context().method_owner_and_args(inner_type).second;
+        if self.lookup_instance_method_signature(
+            type_key,
+            method_name,
+            receiver_args,
+        ) is .Some(raw_method) and self.instance_method_face_allows(
+            type_key,
+            method_name,
+            receiver_args,
+        ) then {
+            return Option[Symbol].Some(
+                self.bind_direct_method_signature(base_type, method_name, raw_method),
+            );
+        };
         if self.lookup_method_signature(type_key, method_name) is .Some(raw_method) and self.method_table_face_allows(
             type_key,
             method_name,

@@ -215,15 +215,15 @@ given File: Reader {
     /// Read bytes into the target list over the given span and return how many were read.
     /// Unbuffered: each call hits the file descriptor and errors surface immediately.
     public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int] = {
-        let span = into.slice_spec(span);
-        let start = span.start();
-        let end = span.end();
+        let span = span.resolve_span(into.count());
+        let start = span.first;
+        let end = span.first + span.second;
         if end <= start then {
             return Result[Int].Ok(0);
         };
         let n = unsafe {
             let data_ptr = into.borrow_mut_ptr() + start;
-            __koral_read(self.storage.fd, data_ptr, UInt(span.len()))
+            __koral_read(self.storage.fd, data_ptr, UInt(span.second))
         };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
@@ -238,15 +238,15 @@ given File: Writer {
     /// Write bytes from the source list over the given span and return how many were written.
     /// Unbuffered: each call hits the file descriptor and errors surface immediately.
     public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int] = {
-        let span = from.slice_spec(span);
-        let start = span.start();
-        let end = span.end();
+        let span = span.resolve_span(from.count());
+        let start = span.first;
+        let end = span.first + span.second;
         if end <= start then {
             return Result[Int].Ok(0);
         };
         let n = unsafe {
             let data_ptr = from.borrow_ptr() + start;
-            __koral_write(self.storage.fd, data_ptr, UInt(span.len()))
+            __koral_write(self.storage.fd, data_ptr, UInt(span.second))
         };
         if n < 0 then {
             return Result[Int].Error(last_error_message());

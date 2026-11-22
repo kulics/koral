@@ -2078,6 +2078,11 @@ extension TypeChecker {
         // Registry keys are OWNER IDENTITIES. `typeName` stays for display and
         // for the std-lib locality check, which ask about the spelling.
         let methodOwnerKey = context.methodOwner(of: type)
+        // A specialized target (`given List[Int] { … }`) scopes its methods to
+        // that instantiation alone.
+        let selfArgs = context.methodOwnerAndArgs(of: type).args
+        let instanceScoped = typeParams.isEmpty && !selfArgs.isEmpty
+            && !selfArgs.contains(where: { context.containsGenericParameter($0) })
 
         if enforceTypeDeclarationModuleLocality, let owner = typeInfo.owner {
           try enforceGivenOwnerLocality(owner, span: span)
@@ -2096,7 +2101,7 @@ extension TypeChecker {
             method,
             access: registeredGivenMemberAccess(
               traitDefId: providingTrait, methodName: method.name, ownAccess: method.access),
-            ownerKey: methodOwnerKey.display)
+            ownerKey: methodInstanceOwnerKey(type))
           let methodType = try withNewScope {
             for typeParam in registeredMethod.typeParameters {
               currentScope.defineGenericParameter(
@@ -2134,7 +2139,7 @@ extension TypeChecker {
             name: registeredMethod.name,
             type: methodType,
             access: registeredMethod.access,
-            ownerKey: methodLabelKey(type),
+            ownerKey: methodInstanceOwnerKey(type),
             preferredDefId: registeredMethod.defId,
             typeParameters: registeredMethod.typeParameters
           )
@@ -2148,23 +2153,39 @@ extension TypeChecker {
           )
 
           if registeredMethod.typeParameters.isEmpty {
-            // Check for duplicate method name on this type. An inherent method
-            // (or a trait REQUIREMENT witness) owns its name -- colliding with
-            // one is a definition error in every registration order. A trait
-            // TOOL copy never owns the name: the inherent method overrides it.
-            if extensionMethods[methodOwnerKey]![registeredMethod.name] != nil,
-               slotOwnedByInherentOrRequirement(owner: methodOwnerKey, name: registeredMethod.name) {
-              throw SemanticError.duplicateDefinition(registeredMethod.name, span: span)
-            }
-
-            extensionMethods[methodOwnerKey]![registeredMethod.name] = methodSymbol
-            // METHOD FACE (§3.4): a conformance member travels with its trait;
-            // an inherent member is always callable.
-            if let providingTrait {
-              markTraitProvidedMethod(
-                owner: methodOwnerKey, name: registeredMethod.name, traitDefId: providingTrait)
+            if instanceScoped {
+              // Check for duplicate method name on THIS instantiation. An
+              // inherent method (or a trait REQUIREMENT witness) owns its name
+              // -- colliding with one is a definition error in every
+              // registration order. A trait TOOL copy never owns the name: the
+              // inherent method overrides it.
+              if instanceMethodSlot(owner: methodOwnerKey, name: registeredMethod.name, selfArgs: selfArgs) != nil,
+                 instanceSlotOwnedByInherentOrRequirement(owner: methodOwnerKey, name: registeredMethod.name, selfArgs: selfArgs) {
+                throw SemanticError.duplicateDefinition(registeredMethod.name, span: span)
+              }
+              registerInstanceMethod(
+                owner: methodOwnerKey, name: registeredMethod.name, selfArgs: selfArgs,
+                symbol: methodSymbol, sourceDefId: methodSymbol.defId,
+                inherent: providingTrait == nil, providingTrait: providingTrait)
             } else {
-              markInherentMethod(owner: methodOwnerKey, name: registeredMethod.name)
+              // Check for duplicate method name on this type. An inherent method
+              // (or a trait REQUIREMENT witness) owns its name -- colliding with
+              // one is a definition error in every registration order. A trait
+              // TOOL copy never owns the name: the inherent method overrides it.
+              if extensionMethods[methodOwnerKey]![registeredMethod.name] != nil,
+                 slotOwnedByInherentOrRequirement(owner: methodOwnerKey, name: registeredMethod.name) {
+                throw SemanticError.duplicateDefinition(registeredMethod.name, span: span)
+              }
+
+              extensionMethods[methodOwnerKey]![registeredMethod.name] = methodSymbol
+              // METHOD FACE (§3.4): a conformance member travels with its trait;
+              // an inherent member is always callable.
+              if let providingTrait {
+                markTraitProvidedMethod(
+                  owner: methodOwnerKey, name: registeredMethod.name, traitDefId: providingTrait)
+              } else {
+                markInherentMethod(owner: methodOwnerKey, name: registeredMethod.name)
+              }
             }
           } else {
             let existsInGeneric = genericExtensionMethods[methodOwnerKey]!.contains(where: { $0.method.name == registeredMethod.name })
@@ -4000,6 +4021,11 @@ extension TypeChecker {
       }
       let typeName = typeInfo.name
       let methodOwnerKey = context.methodOwner(of: type)
+      // A specialized target (`given List[Int] { … }`) scopes its methods to
+      // that instantiation alone.
+      let selfArgs = context.methodOwnerAndArgs(of: type).args
+      let instanceScoped = !selfArgs.isEmpty
+        && !selfArgs.contains(where: { context.containsGenericParameter($0) })
 
       if let owner = typeInfo.owner {
         try enforceGivenOwnerLocality(owner, span: span)
@@ -4086,7 +4112,7 @@ extension TypeChecker {
           name: method.name,  // Use original method name, Monomorphizer will mangle it
           type: methodType,
           access: method.access,
-          ownerKey: methodLabelKey(type),
+          ownerKey: methodInstanceOwnerKey(type),
           typeParameters: method.typeParameters
         )
         registerReceiverStyleMethod(
@@ -4096,7 +4122,14 @@ extension TypeChecker {
           owner: .concreteType(ownerType: type)
         )
 
-        extensionMethods[methodOwnerKey]![method.name] = methodSymbol
+        if instanceScoped {
+          registerInstanceMethod(
+            owner: methodOwnerKey, name: method.name, selfArgs: selfArgs,
+            symbol: methodSymbol, sourceDefId: methodSymbol.defId,
+            inherent: true, providingTrait: nil)
+        } else {
+          extensionMethods[methodOwnerKey]![method.name] = methodSymbol
+        }
         methodInfos.append(
           GivenMethodInfo(
             method: method, symbol: methodSymbol, params: params, returnType: returnType)
@@ -4973,6 +5006,10 @@ extension TypeChecker {
       switch selfType {
       case .structure(let defId), .`enum`(let defId):
         concreteTypeName = context.getName(defId) ?? ""
+      case .genericStruct(let templateDefId, _), .genericEnum(let templateDefId, _):
+        // A specialized target (`given List[Int] as T { … }`) is as concrete as
+        // a nominal: it names one instantiation of one template.
+        concreteTypeName = context.getName(templateDefId) ?? selfType.description
       case .int, .int8, .int16, .int32, .int64,
            .uint, .uint8, .uint16, .uint32, .uint64,
            .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
@@ -4986,8 +5023,14 @@ extension TypeChecker {
           type2: ""
         )
       }
+      _ = concreteTypeName
 
       let methodOwnerKey = context.methodOwner(of: selfType)
+      // A specialized target (`given List[Int] as T { … }`) scopes its methods
+      // to that instantiation alone.
+      let selfArgs = context.methodOwnerAndArgs(of: selfType).args
+      let instanceScoped = !selfArgs.isEmpty
+        && !selfArgs.contains(where: { context.containsGenericParameter($0) })
       if extensionMethods[methodOwnerKey] == nil {
         extensionMethods[methodOwnerKey] = [:]
       }
@@ -5036,6 +5079,25 @@ extension TypeChecker {
           continue
         }
 
+        if instanceScoped {
+          if let existing = instanceMethodSlot(owner: methodOwnerKey, name: info.method.name, selfArgs: selfArgs) {
+            if existing.symbol.type == info.symbol.type {
+              registerInstanceMethod(
+                owner: methodOwnerKey, name: info.method.name, selfArgs: selfArgs,
+                symbol: info.symbol, sourceDefId: info.symbol.defId,
+                inherent: false, providingTrait: traitDefId)
+              continue
+            }
+            throw SemanticError(.generic(
+              "Duplicate method '\(info.method.name)' in implementation 'given \(selfType) \(traitName)'"
+            ), span: span)
+          }
+          registerInstanceMethod(
+            owner: methodOwnerKey, name: info.method.name, selfArgs: selfArgs,
+            symbol: info.symbol, sourceDefId: info.symbol.defId,
+            inherent: false, providingTrait: traitDefId)
+          continue
+        }
         if let existing = extensionMethods[methodOwnerKey]?[info.method.name] {
           if existing.type == info.symbol.type {
             extensionMethods[methodOwnerKey]?[info.method.name] = info.symbol

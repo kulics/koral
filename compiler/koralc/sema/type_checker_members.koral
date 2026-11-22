@@ -317,11 +317,22 @@ given TypeChecker {
 
     /// The declaration identity of `method_name` on `receiver_type`, when one
     /// has already been assigned. Mirrors Swift's `methodDefIdsByOwner` /
-    /// `methodSymbolDefId(ownerKey:name:)`: the SAME (owner, name) always yields
-    /// the same DefId, so a call site's symbol and the registered instance table
-    /// agree. Minting a fresh DefId per call is how the two drifted apart.
+    /// `methodSymbolDefId(ownerKey:name:)`: the SAME (owner, instantiation,
+    /// name) always yields the same DefId, so a call site's symbol and the
+    /// registered instance table agree. Minting a fresh DefId per call is how
+    /// the two drifted apart. The bare (owner, name) alias is the fallback for
+    /// a generic given's shared template declaration, which call sites on any
+    /// instantiation reach through.
     declared_method_def_id(self, receiver_type: Type, method_name: String): DefId = {
-        let map_key = "\(self.context().method_owner_of(receiver_type).display())#\(method_name)";
+        let owner_display = self.context().method_owner_of(receiver_type).display();
+        let args_key = stable_type_list_key(
+            self.context().method_owner_and_args(receiver_type).second,
+        );
+        let precise_key = "\(owner_display)#\(args_key)#\(method_name)";
+        if self.storage.given_member_def_ids.contains_key(precise_key) then {
+            return self.storage.given_member_def_ids.get(precise_key) or else def_id_invalid();
+        };
+        let map_key = "\(owner_display)#\(method_name)";
         return self.storage.given_member_def_ids.get(map_key) or else def_id_invalid();
     };
 

@@ -78,9 +78,90 @@ extension TypeChecker {
     return ok
   }
 
+  /// The instance slot declaring `name` for exactly `selfArgs`, if any. No
+  /// fallback: an instance slot answers for one instantiation only. Mirrors
+  /// koralc `MethodTable.instance_slot`.
+  func instanceMethodSlot(owner: MethodOwner, name: String, selfArgs: [Type]) -> InstanceMethodSlot? {
+    guard let slots = instanceExtensionMethods[owner]?[name] else { return nil }
+    return slots.first(where: { $0.selfArgs == selfArgs })
+  }
+
+  /// Register `symbol` for the single instantiation named by `selfArgs`
+  /// (`given List[Int] { … }`): the slot replaces the same-args entry, exactly
+  /// as the universal map's last-write-wins, and never touches another
+  /// instantiation's slot. `inherent` stamps the method as always callable; a
+  /// `providingTrait` stamps the trait that delivers it.
+  func registerInstanceMethod(
+    owner: MethodOwner, name: String, selfArgs: [Type], symbol: Symbol,
+    sourceDefId: DefId, inherent: Bool, providingTrait: DefId?
+  ) {
+    var byName = instanceExtensionMethods[owner] ?? [:]
+    var slots = byName[name] ?? []
+    var traits: [DefId] = []
+    if let idx = slots.firstIndex(where: { $0.selfArgs == selfArgs }) {
+      traits = slots[idx].providingTraits
+    }
+    if let providingTrait, !traits.contains(providingTrait) {
+      traits.append(providingTrait)
+    }
+    let slot = InstanceMethodSlot(
+      selfArgs: selfArgs, symbol: symbol, sourceDefId: sourceDefId,
+      inherent: inherent, providingTraits: traits)
+    if let idx = slots.firstIndex(where: { $0.selfArgs == selfArgs }) {
+      slots[idx] = slot
+    } else {
+      slots.append(slot)
+    }
+    byName[name] = slots
+    instanceExtensionMethods[owner] = byName
+  }
+
+  /// METHOD FACE (§3.4) for an instance-scoped slot: inherent is always open;
+  /// a trait-delivered slot needs its trait in scope here.
+  func instanceFaceAllows(_ slot: InstanceMethodSlot) -> Bool {
+    if slot.inherent { return true }
+    if slot.providingTraits.isEmpty { return true }
+    return slot.providingTraits.contains(where: { traitInScope($0) })
+  }
+
+  /// Does the instance slot for exactly `selfArgs` own its name (an inherent
+  /// method or a trait REQUIREMENT witness)? The instance twin of
+  /// `slotOwnedByInherentOrRequirement`.
+  func instanceSlotOwnedByInherentOrRequirement(owner: MethodOwner, name: String, selfArgs: [Type]) -> Bool {
+    guard let slot = instanceMethodSlot(owner: owner, name: name, selfArgs: selfArgs) else {
+      return false
+    }
+    if slot.inherent { return true }
+    for traitDefId in slot.providingTraits {
+      if traitMethodDefId(traitDefId: traitDefId, methodName: name) != nil {
+        return true
+      }
+    }
+    return false
+  }
+
+  /// A method-table read with no face gate, instance slots first. Mirrors the
+  /// raw `extensionMethods[...]` reads at the static-member sites.
+  func rawDeclaredMethod(on selfType: Type, name: String) -> Symbol? {
+    let owner = context.methodOwner(of: selfType)
+    let selfArgs = context.methodOwnerAndArgs(of: selfType).args
+    if let slot = instanceMethodSlot(owner: owner, name: name, selfArgs: selfArgs) {
+      return slot.symbol
+    }
+    return extensionMethods[owner]?[name]
+  }
+
   /// A method-table read that honours the method face (§3.4).
   func visibleDeclaredMethod(on selfType: Type, name: String) -> Symbol? {
     let owner = context.methodOwner(of: selfType)
+    let selfArgs = context.methodOwnerAndArgs(of: selfType).args
+    // An instance-scoped slot (`given List[Int] { … }`) answers first and for
+    // exactly this instantiation: it shadows the universal slot here, and no
+    // other instantiation ever sees it.
+    if let slot = instanceMethodSlot(owner: owner, name: name, selfArgs: selfArgs) {
+      guard instanceFaceAllows(slot) else { return nil }
+      return slot.symbol
+    }
     guard let sym = extensionMethods[owner]?[name] else { return nil }
     guard methodFaceAllows(owner: owner, name: name) else { return nil }
     return sym

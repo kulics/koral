@@ -60,6 +60,16 @@ extension TypeChecker {
         name,
         GivenOwner(kind: .type, displayName: name, modulePath: modulePath)
       )
+    case .genericStruct(let templateDefId, _), .genericEnum(let templateDefId, _):
+      // A specialized target (`given List[Int] { ... }`) is as concrete as a
+      // nominal: it names one instantiation of one template, and its locality
+      // is the TEMPLATE declaration's module.
+      let name = context.getName(templateDefId) ?? type.description
+      let modulePath = context.getModulePath(templateDefId) ?? []
+      return (
+        name,
+        GivenOwner(kind: .type, displayName: name, modulePath: modulePath)
+      )
     case .int, .int8, .int16, .int32, .int64,
       .uint, .uint8, .uint16, .uint32, .uint64,
       .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,

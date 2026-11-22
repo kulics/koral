@@ -3370,6 +3370,37 @@ given TypeChecker {
         return false;
     };
 
+    /// The same ownership question for the INSTANCE slot declaring
+    /// `method_name` for exactly `self_args`.
+    instance_slot_owned_by_inherent_or_requirement(
+        self,
+        type_key: MethodOwner,
+        method_name: String,
+        self_args: List[Type],
+    ): Bool = {
+        if self.storage.method_table.instance_is_inherent(
+            type_key,
+            method_name,
+            self_args,
+        ) then {
+            return true;
+        };
+        for trait_def_id in self.storage.method_table.instance_providing_traits(
+            type_key,
+            method_name,
+            self_args,
+        ) then {
+            if self.trait_declares_requirement_in_trait(
+                trait_def_id,
+                method_name,
+                Set[UInt].new(),
+            ) then {
+                return true;
+            };
+        };
+        return false;
+    };
+
     // Swift `ownRequirements` — methods a trait declares as requirements, as opposed
     // to trait-tool entity methods. Parent requirements are inherited, so recurse.
     trait_declares_requirement(self, trait_name: String, method_name: String): Bool = {
@@ -4832,9 +4863,19 @@ given TypeChecker {
         // longer tell two declarations apart -- which is exactly what
         // `trait_same_name_method_conflict` has to report.
         let trait_part = conformance_trait_name or else "";
+        // Two `given` blocks may name the same method on two INSTANTIATIONS of
+        // one generic type (`given List[Int] { m }` / `given List[Rune] { m }`):
+        // they are two declarations and must mint two DefIds (rustc's `Instance`
+        // forking). The instantiation's arguments are part of the declaration
+        // key; a generic given's own type parameters key it as before, one
+        // shared template declaration.
+        let owner_display = self.context().method_owner_of(target_type).display();
+        let args_key = stable_type_list_key(
+            self.context().method_owner_and_args(target_type).second,
+        );
         let mutable out = List[GivenMember].with_capacity(members.count());
         for member in members then {
-            let map_key = "\(self.context().method_owner_of(target_type).display())#\(trait_part)#\(member.name)";
+            let map_key = "\(owner_display)#\(args_key)#\(trait_part)#\(member.name)";
             let member_id = when member.def_id.is_valid() in {
                 true then member.def_id,
                 false then self.storage.given_member_def_ids.get(map_key) or else {
@@ -4846,8 +4887,18 @@ given TypeChecker {
                     // A call site that does not name the trait still needs a
                     // declaration identity. The first writer wins this
                     // alias; two same-named trait methods colliding here is
-                    // already an error reported at registration.
-                    let alias_key = "\(self.context().method_owner_of(target_type).display())#\(member.name)";
+                    // already an error reported at registration. The precise
+                    // (args-carrying) alias is written first so a call site on
+                    // one instantiation can find that instantiation's own
+                    // declaration.
+                    let precise_alias_key = "\(owner_display)#\(args_key)#\(member.name)";
+                    if not self.storage.given_member_def_ids.contains_key(precise_alias_key) then {
+                        self.storage.given_member_def_ids.insert(
+                            precise_alias_key,
+                            allocated,
+                        );
+                    };
+                    let alias_key = "\(owner_display)#\(member.name)";
                     if not self.storage.given_member_def_ids.contains_key(alias_key) then {
                         self.storage.given_member_def_ids.insert(
                             alias_key,
@@ -4895,6 +4946,12 @@ given TypeChecker {
         };
         self.storage.current_scope = sig_scope;
         let type_key = self.extension_template_key(target_type);
+        // The declared target's INSTANTIATION arguments: `given List[Int] { … }`
+        // scopes its methods to `List[Int]` alone (rustc's `impl` on a concrete
+        // instantiation), while an empty list is the universal declaration of a
+        // non-generic target or a generic given's template.
+        let owner_args = self.context().method_owner_and_args(target_type).second;
+        let instance_scoped = owner_type_params.is_empty() and not owner_args.is_empty();
         let mutable seen_names = List[String].new();
         // Same member list the body-checking pass will see, with each member's
         // DECLARATION identity already assigned and stable.
@@ -4948,7 +5005,23 @@ given TypeChecker {
                 // with a trait REQUIREMENT witness is a definition error in
                 // every registration order. A trait TOOL occupying the name is
                 // not a conflict: the inherent method simply overrides it.
-                if self.lookup_method_signature(type_key, m.name) is .Some(_)
+                if instance_scoped then {
+                    if self.lookup_instance_method_signature(
+                        type_key,
+                        m.name,
+                        owner_args,
+                    ) is .Some(_) and self.instance_slot_owned_by_inherent_or_requirement(
+                        type_key,
+                        m.name,
+                        owner_args,
+                    ) then {
+                        self.push_diagnostic(
+                            self.duplicate_definition_message(m.name),
+                            unknown_span(),
+                        );
+                        continue;
+                    };
+                } else if self.lookup_method_signature(type_key, m.name) is .Some(_)
                     and self.slot_owned_by_inherent_or_requirement(type_key, m.name) then {
                     self.push_diagnostic(
                         self.duplicate_definition_message(m.name),
@@ -5010,19 +5083,18 @@ given TypeChecker {
                     // ONLY when the slot is EMPTY: a second, distinct declaration
                     // reaching one slot must stay visible to pass 3's ambiguity
                     // report, so this never consumes that collision.
-                    if self.lookup_method_signature(type_key, m.name) is .None() then {
+                    let slot_empty = if instance_scoped then self.lookup_instance_method_signature(
+                        type_key,
+                        m.name,
+                        owner_args,
+                    ) is .None() else self.lookup_method_signature(type_key, m.name) is .None();
+                    if slot_empty then {
                         let conformance_symbol = Symbol(
                             m.def_id,
                             make_function_type(param_types, ret),
                             SymbolKind.Function(),
                         );
                         let source_def_id = self.context().get_original_def_id(m.def_id) or else m.def_id;
-                        let _ = self.storage.method_table.register_with_source(
-                            type_key,
-                            m.name,
-                            conformance_symbol,
-                            source_def_id,
-                        );
                         let conformance_trait_def_id = when conformance_trait_name in {
                             .Some(trait_name) then self.trait_def_id_of(trait_name),
                             .None() then Option[DefId].None(),
@@ -5043,13 +5115,33 @@ given TypeChecker {
                             m.access,
                         );
                         self.context().set_access(m.def_id, stamp_access);
-                        when conformance_trait_def_id in {
-                            .Some(tid) then self.storage.method_table.register_providing_trait(
+                        if instance_scoped then {
+                            // The conformance member of `given List[Int] as T { … }`
+                            // serves `List[Int]` alone.
+                            let _ = self.storage.method_table.register_instance(
                                 type_key,
                                 m.name,
-                                tid,
-                            ),
-                            .None() then {},
+                                owner_args,
+                                conformance_symbol,
+                                source_def_id,
+                                false,
+                                conformance_trait_def_id,
+                            );
+                        } else {
+                            let _ = self.storage.method_table.register_with_source(
+                                type_key,
+                                m.name,
+                                conformance_symbol,
+                                source_def_id,
+                            );
+                            when conformance_trait_def_id in {
+                                .Some(tid) then self.storage.method_table.register_providing_trait(
+                                    type_key,
+                                    m.name,
+                                    tid,
+                                ),
+                                .None() then {},
+                            };
                         };
                     } else {
                         // The slot is taken. A REQUIREMENT witness may not share
@@ -5060,10 +5152,15 @@ given TypeChecker {
                         // silent here; pass 3 reports the ambiguity.
                         when conformance_trait_name in {
                             .Some(trait_name) then {
-                                if self.storage.method_table.is_inherent(
+                                let slot_inherent = if instance_scoped then self.storage.method_table.instance_is_inherent(
                                     type_key,
                                     m.name,
-                                ) and self.trait_declares_requirement(trait_name, m.name) then {
+                                    owner_args,
+                                ) else self.storage.method_table.is_inherent(
+                                    type_key,
+                                    m.name,
+                                );
+                                if slot_inherent and self.trait_declares_requirement(trait_name, m.name) then {
                                     self.push_diagnostic(
                                         self.duplicate_definition_message(m.name),
                                         unknown_span(),
@@ -5100,11 +5197,25 @@ given TypeChecker {
                 if self.sema_progress_debug_enabled() then {
                     println("[sema-pass2-given-step] member=\(m.name) step=register");
                 };
-                self.storage.method_table.register(type_key, m.name, method_symbol);
-                // Mark the slot INHERENT at the signature pass already: a later
-                // tool materialization must see it (an inherent method owns the
-                // name) no matter which pass or module order runs first.
-                self.storage.method_table.mark_inherent(type_key, m.name);
+                if instance_scoped then {
+                    // `given List[Int] { … }` serves `List[Int]` alone: an
+                    // instance slot, not the universal table.
+                    let _ = self.storage.method_table.register_instance(
+                        type_key,
+                        m.name,
+                        owner_args,
+                        method_symbol,
+                        m.def_id,
+                        true,
+                        Option[DefId].None(),
+                    );
+                } else {
+                    self.storage.method_table.register(type_key, m.name, method_symbol);
+                    // Mark the slot INHERENT at the signature pass already: a later
+                    // tool materialization must see it (an inherent method owns the
+                    // name) no matter which pass or module order runs first.
+                    self.storage.method_table.mark_inherent(type_key, m.name);
+                };
             };
         };
     };

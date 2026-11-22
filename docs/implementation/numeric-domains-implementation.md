@@ -93,4 +93,4 @@
 | 同宽符号互转（常规） | 受检，越域 panic | `numeric_conversion_same_width_sign_panic*` |
 | 同宽符号互转（回绕） | 回绕（模 2^N） | `numeric_conversion_same_width_checked_test` |
 | 浮点→整数截断边界 | 先截断后受检 | `numeric_conversion_float_trunc_bounds_test`、`*_2p63_panic` |
-| `slice_spec` 负界/哨兵 | 负界越界 panic；哨兵按 `Int.max_value()` 判别 | 由 `substring`/`slice_spec` 族既有用例覆盖 |
+| `resolve_span` 负界/哨兵 | 负界越界 panic；哨兵按 `Int.max_value()` 判别 | 由 `substring`/`sublist` 族既有用例覆盖 |

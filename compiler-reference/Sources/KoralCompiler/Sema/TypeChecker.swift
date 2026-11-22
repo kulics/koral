@@ -270,6 +270,19 @@ public class TypeChecker {
   // not to a type NAME: two modules may each declare `Plain`, and
   // `given Plain { tag }` in each is a different method on a different type.
   var extensionMethods: [MethodOwner: [String: Symbol]] = [:]
+  /// One method declared for a SPECIFIC instantiation of a generic owner
+  /// (`given List[Int] { ... }`): it answers for exactly `selfArgs` and for no
+  /// other instantiation -- the `GenericArgs` half of rustc's `Instance { def,
+  /// args }` on the declaration side. Mirrors koralc's
+  /// `MethodTable.instance_methods`.
+  struct InstanceMethodSlot {
+    var selfArgs: [Type]
+    var symbol: Symbol
+    var sourceDefId: DefId
+    var inherent: Bool
+    var providingTraits: [DefId]
+  }
+  var instanceExtensionMethods: [MethodOwner: [String: [InstanceMethodSlot]]] = [:]
   // Owner IDENTITY -> MethodName -> [MethodDefId]: tracks which method
   // declarations provide an extension slot so repeated trait paths can reuse the
   // same source without being treated as ambiguous.
@@ -1002,6 +1015,23 @@ public class TypeChecker {
   /// same-named types from different modules would otherwise share labels.
   public func methodLabelKey(_ t: Type) -> String {
     return context.methodOwner(of: t).display
+    }
+
+  /// The declaration key of a method on `t` for DefId minting: the owner
+  /// identity PLUS the owner's instantiation arguments, so two `given` blocks
+  /// naming the same method on two INSTANTIATIONS of one generic type
+  /// (`given List[Int] { m }` / `given List[Rune] { m }`) mint two DefIds --
+  /// they are two declarations, unlike a generic given's shared template
+  /// declaration identity (rustc's `Instance` forking). Mirrors koralc's
+  /// `members_with_def_ids` key.
+  public func methodInstanceOwnerKey(_ t: Type) -> String {
+    let pair = context.methodOwnerAndArgs(of: t)
+    guard !pair.args.isEmpty else { return methodLabelKey(t) }
+    var hasher = Hasher()
+    for arg in pair.args {
+      hasher.combine(arg)
+    }
+    return "\(methodLabelKey(t))#args\(hasher.finalize())"
     }
 
   /// The registry key for a method: the same identity `registerReceiverStyleMethod`

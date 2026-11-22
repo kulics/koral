@@ -29,25 +29,6 @@ public type sendable Range[T: Ord] {
     Full(), // ...    : min <= x <= max
 };
 
-/// A slice descriptor: where a slice starts and how many elements it covers.
-public type sendable SliceSpec(private slice_offset: Int, private slice_len: Int);
-
-/// Construction and accessors for `SliceSpec`.
-given SliceSpec {
-
-    /// Create a spec for the `len` elements starting at `offset`.
-    public new(offset: Int =, len: Int =): SliceSpec = SliceSpec(offset, len);
-
-    /// Return the slice's start offset.
-    public start(self): Int = self.slice_offset;
-
-    /// Return the offset just past the slice's last element.
-    public end(self): Int = self.slice_offset + self.slice_len;
-
-    /// Return the number of elements the slice covers.
-    public len(self): Int = self.slice_len;
-};
-
 /// Containment and emptiness checks for `Range` intervals.
 given[T: Ord] Range[T] {
 
@@ -77,6 +58,123 @@ given[T: Ord] Range[T] {
         .To(_) then false,
         .Until(_) then false,
         .Full() then false,
+    };
+};
+
+// ============================================================================
+// Span resolution
+// ============================================================================
+// The bounds panic lives out of line with the other cold helpers (see
+// std/list.koral): the message is only built on the failing path.
+
+private let panic_resolve_span_bounds(count: Int): Never = {
+    panic("Range.resolve_span out of bounds: count \(count)");
+};
+
+private let panic_resolve_span_range(s: Int, e: Int): Never = {
+    panic("Range.resolve_span invalid range: start \(s) > end \(e)");
+};
+
+/// Resolution of `Range[Int]` intervals over a container of `count` elements.
+given Range[Int] {
+
+    /// Resolve `self` against a container of `count` elements into the span it
+    /// names -- `(start, length)`, honoring each variant's bound style.
+    /// Panics when the interval is invalid (its bounds cross) or reaches
+    /// outside `0..<count`.
+    public resolve_span(self, count: Int): Pair[Int, Int] = when self in {
+        .Closed(s, e) then {
+            if s < 0 or e < 0 then {
+                panic_resolve_span_bounds(count);
+            };
+            if s > e then {
+                panic_resolve_span_range(s, e);
+            };
+            if e >= count then {
+                panic_resolve_span_bounds(count);
+            };
+            Pair[Int, Int](s, e - s + 1)
+        },
+        .ClosedOpen(s, e) then {
+            if s < 0 or e < 0 then {
+                panic_resolve_span_bounds(count);
+            };
+            if s > e then {
+                panic_resolve_span_range(s, e);
+            };
+            if e > count then {
+                panic_resolve_span_bounds(count);
+            };
+            Pair[Int, Int](s, e - s)
+        },
+        .OpenClosed(s, e) then {
+            if s < 0 or e < 0 then {
+                panic_resolve_span_bounds(count);
+            };
+            if s > e then {
+                panic_resolve_span_range(s, e);
+            };
+            if s == Int.max_value() or e >= count then {
+                panic_resolve_span_bounds(count);
+            };
+            Pair[Int, Int](s + 1, e - s)
+        },
+        .Open(s, e) then {
+            if s < 0 or e < 0 then {
+                panic_resolve_span_bounds(count);
+            };
+            if s > e then {
+                panic_resolve_span_range(s, e);
+            };
+            if s == Int.max_value() or e > count then {
+                panic_resolve_span_bounds(count);
+            };
+            // Open(s, s) names no elements: the empty span at s, exactly
+            // like ClosedOpen(s, s). (start = s + 1 would push an empty
+            // span past the end when s == count.)
+            if s == e then {
+                Pair[Int, Int](s, 0)
+            } else {
+                Pair[Int, Int](s + 1, e - s - 1)
+            }
+        },
+        .From(s) then {
+            if s < 0 then {
+                panic_resolve_span_bounds(count);
+            };
+            if s > count then {
+                panic_resolve_span_bounds(count);
+            };
+            Pair[Int, Int](s, count - s)
+        },
+        .After(s) then {
+            if s < 0 then {
+                panic_resolve_span_bounds(count);
+            };
+            if s >= count then {
+                panic_resolve_span_bounds(count);
+            };
+            Pair[Int, Int](s + 1, count - s - 1)
+        },
+        .To(e) then {
+            if e < 0 then {
+                panic_resolve_span_bounds(count);
+            };
+            if e >= count then {
+                panic_resolve_span_bounds(count);
+            };
+            Pair[Int, Int](0, e + 1)
+        },
+        .Until(e) then {
+            if e < 0 then {
+                panic_resolve_span_bounds(count);
+            };
+            if e > count then {
+                panic_resolve_span_bounds(count);
+            };
+            Pair[Int, Int](0, e)
+        },
+        .Full() then Pair[Int, Int](0, count),
     };
 };
 

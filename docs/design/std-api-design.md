@@ -305,7 +305,7 @@ Receiver choice and method naming should reinforce each other:
 签名里的数分两个域，按**这个数是什么**分，不按实现方便分：
 
 - **计数域用 `Int`**：下标、长度、计数、偏移（含 seek 位置、match 起止）、区间位置
-  （`Range[Int]`、`SliceSpec`）、查找结果（`find`/`position`/`binary_search`）、字节数
+  （`Range[Int]`、`resolve_span` 解析出的 `(start, length)`）、查找结果（`find`/`position`/`binary_search`）、字节数
   （读写传输数、`Rune.byte_count`）、match group 索引与 span、容量族（`with_capacity`/
   `reserve`/`make_bytes`）、迭代器位置（`enumerate` 的下标）、嵌套深度、格式宽度。
   判据：数的是「第几个 / 多少个 / 在哪里」，天然要与负值检查搭配。

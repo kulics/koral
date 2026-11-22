@@ -4268,8 +4268,7 @@ extension TypeChecker {
     switch expectedType {
     case .structure(let defId):
       let typeName = context.getName(defId) ?? ""
-      guard let methods = extensionMethods[context.methodOwner(of: expectedType)],
-            let methodSym = methods[memberName] else {
+      guard let methodSym = rawDeclaredMethod(on: expectedType, name: memberName) else {
         return nil
       }
       
@@ -7672,7 +7671,7 @@ extension TypeChecker {
 
       if case .structure(let defId) = type {
         let name = context.getName(defId) ?? ""
-        if let methods = extensionMethods[context.methodOwner(of: type)], let sym = methods[memberName] {
+        if let sym = rawDeclaredMethod(on: type, name: memberName) {
           methodSymbol = sym
         }
       }
@@ -8491,7 +8490,7 @@ extension TypeChecker {
       lookupTypeName = type.description
     }
 
-    if let methods = extensionMethods[context.methodOwner(of: type)], let methodSym = methods[methodName] {
+    if let methodSym = rawDeclaredMethod(on: type, name: methodName) {
       try ensureMethodAccessibleForMemberAccess(methodSym, memberName: methodName)
       // unsafe 契约准入（docs/design/unsafe-design.md §B1/B2）：静态/关联方法
       // 与实例方法同一条规则，按声明的 DefId 判标记（koralc 静态调用入口

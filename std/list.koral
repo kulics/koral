@@ -52,14 +52,6 @@ private let panic_list_slice(start: Int, count: Int, len: Int): Never = {
     panic("List slice out of bounds: start \(start), count \(count), list length \(len)");
 };
 
-private let panic_list_slice_spec_bounds(len: Int): Never = {
-    panic("List.slice_spec out of bounds: length \(len)");
-};
-
-private let panic_list_slice_spec_range(s: Int, e: Int): Never = {
-    panic("List.slice_spec invalid range: start \(s) > end \(e)");
-};
-
 // ============================================================================
 // List Methods
 // ============================================================================
@@ -141,9 +133,9 @@ given[T: Any] List[T] {
     /// Append the slice of `other` picked by `span`, defaulting to the whole list
     /// -- the same span shape as `Reader.read` / `Writer.write` in `std/io/traits.koral`.
     public push_list(self, other: List[T], span: Range[Int] = ...): Void = unsafe {
-        let spec = other.slice_spec(span);
-        let start = spec.start();
-        let end = spec.end();
+        let spec = span.resolve_span(other.len);
+        let start = spec.first;
+        let end = spec.first + spec.second;
         if end <= start then {
             return;
         };
@@ -178,10 +170,10 @@ given[T: Any] List[T] {
         if index < 0 or index > self.len then {
             panic_list_at_index("insert_list_at", index, self.len);
         };
-        let spec = other.slice_spec(span);
-        let start = spec.start();
-        let end = spec.end();
-        let other_len = spec.len();
+        let spec = span.resolve_span(other.len);
+        let start = spec.first;
+        let end = spec.first + spec.second;
+        let other_len = spec.second;
         if other_len == 0 then {
             return;
         };
@@ -363,127 +355,12 @@ given[T: Any] List[T] {
         return result;
     };
 
-    /// Resolve `range` against this list's length into a `SliceSpec` (start + length).
-    /// Panics when the range is invalid or reaches past the end.
-    public slice_spec(self, range: Range[Int]): SliceSpec = {
-        let len = self.len;
-        let mutable start = 0;
-        let mutable end = 0;
-
-        when range in {
-            .Closed(s, e) then {
-                if s < 0 or e < 0 then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                if s > e then {
-                    panic_list_slice_spec_range(s, e);
-                };
-                if e >= len then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                start = s;
-                end = e + 1;
-            },
-            .ClosedOpen(s, e) then {
-                if s < 0 or e < 0 then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                if s > e then {
-                    panic_list_slice_spec_range(s, e);
-                };
-                if e > len then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                start = s;
-                end = e;
-            },
-            .OpenClosed(s, e) then {
-                if s < 0 or e < 0 then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                if s > e then {
-                    panic_list_slice_spec_range(s, e);
-                };
-                if s == Int.max_value() or e >= len then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                start = s + 1;
-                end = e + 1;
-            },
-            .Open(s, e) then {
-                if s < 0 or e < 0 then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                if s > e then {
-                    panic_list_slice_spec_range(s, e);
-                };
-                if s == Int.max_value() or e > len then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                // Open(s, s) names no elements: the empty slice at s, exactly
-                // like ClosedOpen(s, s). (start = s + 1 would push an empty
-                // spec past the end when s == len.)
-                if s == e then {
-                    start = s;
-                } else {
-                    start = s + 1;
-                };
-                end = e;
-            },
-            .From(s) then {
-                if s < 0 then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                if s > len then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                start = s;
-                end = len;
-            },
-            .After(s) then {
-                if s < 0 then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                if s >= len then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                start = s + 1;
-                end = len;
-            },
-            .To(e) then {
-                if e < 0 then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                if e >= len then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                start = 0;
-                end = e + 1;
-            },
-            .Until(e) then {
-                if e < 0 then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                if e > len then {
-                    panic_list_slice_spec_bounds(len);
-                };
-                start = 0;
-                end = e;
-            },
-            .Full() then {
-                start = 0;
-                end = len;
-            },
-        };
-
-        return SliceSpec.new(offset = start, len = end - start);
-    };
 
     /// Return a new list holding the `range` slice of this one (elements shared
     /// one level); this list is left untouched. Panics on an invalid or out-of-bounds range.
     public sublist(self, range: Range[Int]): List[T] = {
-        let span = self.slice_spec(range);
-        return self.make_slice(span.start(), span.len());
+        let span = range.resolve_span(self.len);
+        return self.make_slice(span.first, span.second);
     };
 
     /// Concatenation: returns a new list, leaving both inputs usable.

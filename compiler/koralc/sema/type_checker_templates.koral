@@ -791,6 +791,11 @@ given TypeChecker {
         trait_def_id: Option[DefId],
     ): Void = {
         let type_key = self.extension_template_key(target_type);
+        // A specialized target (`given List[Int] { … }`) scopes its methods to
+        // that instantiation alone; only a target with no instantiation
+        // arguments claims the universal slot.
+        let owner_args = self.context().method_owner_and_args(target_type).second;
+        let instance_scoped = not owner_args.is_empty();
         for member_ref in members then {
             let member = member_ref;
             let mutable param_types = List[Type].new();
@@ -814,11 +819,18 @@ given TypeChecker {
             // "inherent wins over trait tool methods" hold in every
             // registration order; the collision report itself happens once, in
             // `collect_given_signatures`.
-            if not mark_inherent and self.storage.method_table.is_inherent(
-                type_key,
-                member.name,
-            ) then {
-                continue;
+            if not mark_inherent then {
+                let slot_owned = if instance_scoped then self.storage.method_table.instance_is_inherent(
+                    type_key,
+                    member.name,
+                    owner_args,
+                ) else self.storage.method_table.is_inherent(
+                    type_key,
+                    member.name,
+                );
+                if slot_owned then {
+                    continue;
+                };
             };
             // Registered ONCE, under the owner identity. An instance resolves to
             // its template's declaration and a plain nominal to its own, so this
@@ -826,6 +838,25 @@ given TypeChecker {
             // bare-name aliases this used to also write were pure collision
             // surface: two modules' `Plain` landed in one slot.
             self.context().register_method_param_specs(type_key, member.name, param_specs);
+            if instance_scoped then {
+                let made_ambiguous = self.storage.method_table.register_instance(
+                    type_key,
+                    member.name,
+                    owner_args,
+                    method_symbol,
+                    source_def_id,
+                    mark_inherent,
+                    trait_def_id,
+                );
+                if made_ambiguous and not mark_inherent then {
+                    self.push_ambiguous_trait_extension_method_diagnostic(
+                        target_type,
+                        member.name,
+                        self.storage.current_span,
+                    );
+                };
+                continue;
+            };
             let made_ambiguous = self.storage.method_table.register_with_source(
                 type_key,
                 member.name,

@@ -219,9 +219,9 @@ given StringBuilder {
         if span is .Full() then {
             copy_len = other.len;
         } else {
-            let spec = other.slice_spec(span);
-            start = spec.start();
-            copy_len = spec.len();
+            let spec = span.resolve_span(other.len);
+            start = spec.first;
+            copy_len = spec.second;
         };
         if copy_len == 0 then {
             return;
@@ -606,128 +606,12 @@ given String {
         };
     };
 
-    /// Resolve `range` into the byte span it names, panicking when the range is
-    /// invalid or out of bounds or lands off a rune boundary.
-    public slice_spec(self, range: Range[Int]): SliceSpec = {
-        let len = self.len;
-        let mutable start = 0;
-        let mutable end = 0;
-
-        when range in {
-            .Closed(s, e) then {
-                if s < 0 or e < 0 then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                if s > e then {
-                    panic_string_slice_spec_range(s, e);
-                };
-                if e >= len then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                start = s;
-                end = e + 1;
-            },
-            .ClosedOpen(s, e) then {
-                if s < 0 or e < 0 then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                if s > e then {
-                    panic_string_slice_spec_range(s, e);
-                };
-                if e > len then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                start = s;
-                end = e;
-            },
-            .OpenClosed(s, e) then {
-                if s < 0 or e < 0 then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                if s > e then {
-                    panic_string_slice_spec_range(s, e);
-                };
-                if s == Int.max_value() or e >= len then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                start = s + 1;
-                end = e + 1;
-            },
-            .Open(s, e) then {
-                if s < 0 or e < 0 then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                if s > e then {
-                    panic_string_slice_spec_range(s, e);
-                };
-                if s == Int.max_value() or e > len then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                // Open(s, s) names no bytes: the empty slice at s, exactly like
-                // ClosedOpen(s, s). (start = s + 1 would push an empty spec
-                // past the end when s == len.)
-                if s == e then {
-                    start = s;
-                } else {
-                    start = s + 1;
-                };
-                end = e;
-            },
-            .From(s) then {
-                if s < 0 then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                if s > len then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                start = s;
-                end = len;
-            },
-            .After(s) then {
-                if s < 0 then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                if s >= len then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                start = s + 1;
-                end = len;
-            },
-            .To(e) then {
-                if e < 0 then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                if e >= len then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                start = 0;
-                end = e + 1;
-            },
-            .Until(e) then {
-                if e < 0 then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                if e > len then {
-                    panic_string_slice_spec_bounds(len);
-                };
-                start = 0;
-                end = e;
-            },
-            .Full() then {
-                start = 0;
-                end = len;
-            },
-        };
-
-        self.validate_substring_bounds(start, end);
-        return SliceSpec.new(offset = start, len = end - start);
-    };
-
     /// Return the substring that `range` names.
     /// Panics when the range is invalid, out of bounds, or off a rune boundary.
     public substring(self, range: Range[Int]): String = {
-        let span = self.slice_spec(range);
-        return self.make_substring(span.start(), span.len());
+        let span = range.resolve_span(self.len);
+        self.validate_substring_bounds(span.first, span.first + span.second);
+        return self.make_substring(span.first, span.second);
     };
 
     /// Return the string with leading ASCII whitespace removed.
@@ -1334,10 +1218,3 @@ private let panic_substring_rune_boundaries(start: Int, end: Int): Never = {
     panic("substring boundaries must be rune boundaries: start \(start), end \(end)");
 };
 
-private let panic_string_slice_spec_bounds(len: Int): Never = {
-    panic("String.slice_spec out of bounds: length \(len)");
-};
-
-private let panic_string_slice_spec_range(s: Int, e: Int): Never = {
-    panic("String.slice_spec invalid range: start \(s) > end \(e)");
-};

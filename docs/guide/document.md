@@ -1773,6 +1773,23 @@ given[T: Any] Option[T] {
 };
 ```
 
+#### Methods on One Instantiation
+
+A `given` whose target is a concrete instantiation of a generic type declares
+methods for exactly that instantiation, like rustc's `impl` on a concrete
+instantiation. Nothing leaks to the other instantiations, which are free to
+declare the same method names:
+
+```koral
+given List[Int] {
+    public byte_len(self): Int = self.count() * 8;
+};
+```
+
+`List[Int]` gains `byte_len`; `List[String]` does not. When an instantiation
+method and a generic-given method share a name, the instantiation method wins
+for that instantiation alone and the generic one still serves the rest.
+
 #### `Never` Type Restrictions
 
 The `Never` type represents computations that never return (e.g., infinite loops, panics). It is the bottom type.

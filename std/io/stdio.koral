@@ -51,15 +51,15 @@ given Stdin: Reader {
     /// Unbuffered: directly calls the OS read, errors returned immediately.
     /// Returns the number of bytes transferred; `Ok(0)` means EOF.
     public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int] = {
-        let span = into.slice_spec(span);
-        let start = span.start();
-        let end = span.end();
+        let span = span.resolve_span(into.count());
+        let start = span.first;
+        let end = span.first + span.second;
         if end <= start then {
             return Result[Int].Ok(0);
         };
         let n = unsafe {
             let data_ptr = into.borrow_mut_ptr() + start;
-            __koral_read(self.handle, data_ptr, UInt(span.len()))
+            __koral_read(self.handle, data_ptr, UInt(span.second))
         };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
@@ -99,16 +99,16 @@ given Stdout: Writer {
     /// errors returned immediately. Returns the number of bytes transferred;
     /// short writes are possible.
     public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int] = {
-        let span = from.slice_spec(span);
-        let start = span.start();
-        let end = span.end();
+        let span = span.resolve_span(from.count());
+        let start = span.first;
+        let end = span.first + span.second;
         if end <= start then {
             return Result[Int].Ok(0);
         };
         let data_ptr = unsafe { from.borrow_ptr() + start };
         self.write_lock.lock();
         defer self.write_lock.unlock();
-        let n = unsafe { __koral_write(self.handle, data_ptr, UInt(span.len())) };
+        let n = unsafe { __koral_write(self.handle, data_ptr, UInt(span.second)) };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
         };
@@ -155,16 +155,16 @@ given Stderr: Writer {
     /// errors returned immediately. Returns the number of bytes transferred;
     /// short writes are possible.
     public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int] = {
-        let span = from.slice_spec(span);
-        let start = span.start();
-        let end = span.end();
+        let span = span.resolve_span(from.count());
+        let start = span.first;
+        let end = span.first + span.second;
         if end <= start then {
             return Result[Int].Ok(0);
         };
         let data_ptr = unsafe { from.borrow_ptr() + start };
         self.write_lock.lock();
         defer self.write_lock.unlock();
-        let n = unsafe { __koral_write(self.handle, data_ptr, UInt(span.len())) };
+        let n = unsafe { __koral_write(self.handle, data_ptr, UInt(span.second)) };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
         };

@@ -496,9 +496,6 @@ public type sendable Range[T: Ord] {
     Full(), // ...    : min <= x <= max
 };
 
-/// A slice descriptor: where a slice starts and how many elements it covers.
-public type sendable SliceSpec;
-
 /// Iterator that steps a range's values one at a time, from its start bound to
 /// its end bound.
 public type mutable RangeIterator[T: Step];
@@ -3104,9 +3101,6 @@ given[T: Any] List[T] {
     public map[U: Any](self, fn: (T) -> U): List[U];
     /// Reverse the element order in place. O(n).
     public reverse(self): Void;
-    /// Resolve `range` against this list's length into a `SliceSpec` (start + length).
-    /// Panics when the range is invalid or reaches past the end.
-    public slice_spec(self, range: Range[Int]): SliceSpec;
     /// Return a new list holding the `range` slice of this one (elements shared
     /// one level); this list is left untouched. Panics on an invalid or out-of-bounds range.
     public sublist(self, range: Range[Int]): List[T];
@@ -3439,18 +3433,6 @@ given Int16 {};
 /// Inherent extensions for `Int8`.
 given Int8 {};
 
-/// Construction and accessors for `SliceSpec`.
-given SliceSpec {
-    /// Create a spec for the `len` elements starting at `offset`.
-    public new(offset: Int =, len: Int =): SliceSpec;
-    /// Return the slice's start offset.
-    public start(self): Int;
-    /// Return the offset just past the slice's last element.
-    public end(self): Int;
-    /// Return the number of elements the slice covers.
-    public len(self): Int;
-};
-
 /// Containment and emptiness checks for `Range` intervals.
 given[T: Ord] Range[T] {
     /// Return whether `value` lies within the range, honoring each variant's
@@ -3459,6 +3441,15 @@ given[T: Ord] Range[T] {
     /// Return whether the range contains no values; the open-ended and full
     /// forms never do, while a bounded form is empty once its bounds cross.
     public is_empty(self): Bool;
+};
+
+/// Resolution of `Range[Int]` intervals over a container of `count` elements.
+given Range[Int] {
+    /// Resolve `self` against a container of `count` elements into the span it
+    /// names -- `(start, length)`, honoring each variant's bound style.
+    /// Panics when the interval is invalid (its bounds cross) or reaches
+    /// outside `0..<count`.
+    public resolve_span(self, count: Int): Pair[Int, Int];
 };
 
 /// `Step` for `Int`: steps by one, yielding `None` at the type's bounds.
@@ -3871,9 +3862,6 @@ given String {
     /// Whether `byte_index` falls on a rune boundary: 0, the byte length, or the
     /// start of a UTF-8 sequence; `false` when the index is past the end.
     public is_rune_boundary(self, byte_index: Int): Bool;
-    /// Resolve `range` into the byte span it names, panicking when the range is
-    /// invalid or out of bounds or lands off a rune boundary.
-    public slice_spec(self, range: Range[Int]): SliceSpec;
     /// Return the substring that `range` names.
     /// Panics when the range is invalid, out of bounds, or off a rune boundary.
     public substring(self, range: Range[Int]): String;

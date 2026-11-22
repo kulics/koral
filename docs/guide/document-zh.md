@@ -1712,6 +1712,20 @@ given[T: Any] Option[T] {
 };
 ```
 
+#### 某个具体实例的方法
+
+目标是泛型类型**具体实例**的 `given` 只为该实例声明方法，等价于 rustc 对具体
+实例化写 `impl`。方法不会泄漏到其他实例，其他实例可以自由声明同名方法：
+
+```koral
+given List[Int] {
+    public byte_len(self): Int = self.count() * 8;
+};
+```
+
+`List[Int]` 获得 `byte_len`，`List[String]` 没有。当实例方法与泛型 `given`
+方法同名时，该实例上实例方法胜出，其余实例仍由泛型方法服务。
+
 #### `Never` 类型限制
 
 `Never` 类型表示永不返回的计算（如无限循环、panic）。它是最底类型。
