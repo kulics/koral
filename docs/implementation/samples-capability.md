@@ -1,9 +1,10 @@
 # samples 能力验证 —— 判据、缺口与被否的下沉
 
-> **状态**：`cat`、`sha256sum`、`expr-eval`、`grep` 已落地；`grep-j` / `http` 未开工。
-> `cat`、`sha256sum`、`grep` 有黄金参照；`expr-eval` 是登记在案的例外（见「验证」）。
-> 未决：缺口表三项（`grep` 轮关闭了 stdin/stdout 流句柄一项），以及 `grep-j` 的拆法
-> （见「各样本要点与坑」）。本文记**当前**的判据与裁定。
+> **状态**：`cat`、`sha256sum`、`expr-eval`、`grep`、`grep-j` 已落地；`http` 未开工。
+> `cat`、`sha256sum`、`grep`、`grep-j` 有黄金参照；`expr-eval` 是登记在案的例外（见「验证」）。
+> 未决：缺口表两项（`grep` 轮关闭了 stdin/stdout 流句柄、`grep-j` 轮关闭了 `Send`/`Sync`
+> 一项，`grep-j` 轮新记一项）；`grep-j` 的拆法已裁定（见「各样本要点与坑」）。
+> 本文记**当前**的判据与裁定。
 
 ## 为什么用样本
 
@@ -55,8 +56,8 @@
 | 缺口 | 影响 |
 |---|---|
 | **常量表没有不可变集合类型** | 模块级 `let` 能放数据常量（2026-10-14 起），但 `List` 是 `type mutable` 共享对象，`let` 保护绑定不保护内容——常量表只能靠 `private` + 不改动的纪律（`sha256sum` 的 K 表即此） |
-| **无 `Send` / `Sync`** | `run_task` 能捕获任意 `type mutable`，共享引用计数只是存活计数，不构成载荷的线程间转移判定；并行样本没法表达「只能在线程间转移」 |
 | **无非阻塞 / poll** | `std/net` 是纯阻塞面；线程每连接的网络样本今天能写，事件驱动 / 大规模并发表达不了 |
+| **无 CPU 核数 / 硬件并发度查询**（`grep-j` 轮新记） | runtime 里有处理器数查询（`koral_runtime.c` 的 `dwNumberOfProcessors` / `_SC_NPROCESSORS_ONLN`）但 std 未暴露——`grep-j -j` 的默认值只能定 1（compiler-runner 同此），并行工具拿不到「默认 = 核数」 |
 
 ## 各样本要点与坑
 
@@ -91,12 +92,33 @@ ERE 匹配 + stdin / 文件行流 + 多文件前缀。黄金参照是 **`grep -E
   **末行无换行原样回写**（`grep` 语义，也是字节保真的钉扎点）。
 - 退出码：0 有匹配 / 1 无匹配 / 2 出错（坏模式、文件打不开）。
 
-### `grep-j`（未开工，最该做）
+### `grep-j`（已落地）
 
-并行版 grep，撞并发面。**并发压力不需要正则引擎**——固定字符串匹配
-（`grep -F` 语义）就能撞出 `Send` / `Sync` 缺口和 worker pool，与正则引擎解耦成
-两个独立项目；黄金参照用 `grep -F`，还没有 ERE 方言问题。
-worker pool 会和 `http` 重复（该不该抽象看分界判据，大概率先留在 sample）。
+并行版 grep，撞并发面。固定字符串匹配（`grep -F` 语义），与正则引擎解耦；
+黄金参照 `grep -F`（期望值取自 `grep -F` 实测；本机 Git Bash 的 grep 3.0 在
+`-Fi` 上 SIGABRT，`-i` 两例按语义手定）。45 例全绿，其中 5 例钉**并行不变量**。
+
+- **拆法（裁定）**：两层——串行 `-F` 核心（`grep_stream`，每文件产出一个输出块 +
+  matched）与并行外壳（`run_parallel`）分离。核心不碰线程，外壳不碰匹配语义；
+  `-j 1` 与 `-j N` 走同一个核心，黄金用例双路同钉。
+- **`-j NUM`**：worker 线程数，默认 1（无核数 API，见缺口表）；`-j 0` 报
+  `invalid count argument`。stdin 永远串行（单流无从并行）。
+- **外壳形状**：`AtomicInt.fetch_add` 认领文件序号 + `FrozenList` 共享
+  patterns/files/flags（`type sendable RunFlags` 快照）+ 每文件**恰一条**
+  `FileOutcome`（`type sendable` 结构体，带 `Option[String]` 错误槽）。
+  协调者按操作数序重排放大器回放输出块——stdout 与串行逐字节一致，不论
+  worker 何时完成。**终止靠计数**（outcome 数 = 文件数），不需要哨兵消息或
+  关闭序。错误文件在操作数序处截断：之前的块照发、之后的块丢弃、stderr 一条、
+  exit 2，与串行逐字节一致（含 stderr）。
+- **`-F` 扫描规则**（GNU 实测定型）：位置从左到右推进，命中才越过匹配尾——
+  所以 `-w` 还能看到被未定界重叠遮住的出现（`a-a` 在 `a-a-a` 的 offset 2），
+  `-Fo` 只打印非重叠的定界出现。空模式是零宽出现集（选中每行；`-o` 零输出；
+  `-w` 按零宽位置判界，`a  b` 夹缝成立）。`-o`×`-w`：只打印词界定界出现。
+- 与 GNU 的有意分歧记录在 `grep_j.koral` 头注（`-o`+`-v` 用法错、`-o` 按模式
+  逐个打印不去重、`-m` 带末匹配的尾上下文、`-i` 仅 ASCII fold、`-j` 是扩展）。
+- worker pool **留在 sample**：分界判据的第二个用例在 `http`；compiler-runner
+  的 scheduler 是树内第三个消费者（形状同源：原子计数 + FrozenList + 事件通道），
+  三个用例聚齐后按判据再议下沉。
 
 ### `http`（未开工）
 
