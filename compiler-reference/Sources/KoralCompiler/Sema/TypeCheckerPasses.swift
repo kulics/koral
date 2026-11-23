@@ -1954,6 +1954,15 @@ extension TypeChecker {
 
         // Register all method signatures (without checking bodies)
         for method in methods {
+          // NO OVERLAP between a universal given and an instantiation-target
+          // one: generic given methods already serve every instantiation of the
+          // owner, so a same-named instance method would be a second definition
+          // on its instantiation -- reported as the duplicate it is, never
+          // resolved by priority. Recorded on BOTH sides so either declaration
+          // order blames the later one (koralc `collect_given_signatures`).
+          if noteGivenUniversalMethodName(owner: genericOwnerKey, name: method.name) {
+            throw SemanticError.duplicateDefinition(method.name, span: span)
+          }
           // A generic trait-tool member (`given[T] Trait[T] { ... }`) joins the
           // trait's interface -- trait objects dispatch through it -- and its
           // level follows the container's (traits-and-givens.md): omitted
@@ -2097,6 +2106,17 @@ extension TypeChecker {
 
         // Pre-register method signatures (without checking bodies)
         for method in methods {
+          // NO OVERLAP between an instantiation-target given and a generic
+          // one (see the generic branch above). An instance member joins the
+          // instance side of the rule whatever shape it has -- a method-generic
+          // member is as much a member of its instance given as a plain one.
+          // A plain `given Plain { … }` participates in neither book.
+          let overlapsGivenName = instanceScoped
+            ? noteGivenInstanceMethodName(owner: methodOwnerKey, name: method.name)
+            : false
+          if overlapsGivenName {
+            throw SemanticError.duplicateDefinition(method.name, span: span)
+          }
           let registeredMethod = registeredMethodDeclaration(
             method,
             access: registeredGivenMemberAccess(
@@ -2511,6 +2531,11 @@ extension TypeChecker {
         }
 
         for m in methods {
+          // NO OVERLAP with instance-target givens (the generic intrinsic path
+          // mirrors the generic ordinary one).
+          if noteGivenUniversalMethodName(owner: genericOwnerKey, name: m.name) {
+            throw SemanticError.duplicateDefinition(m.name, span: span)
+          }
           // Check for duplicate method name on this type
           let allExisting = (genericExtensionMethods[genericOwnerKey] ?? []).map { $0.method.name }
             + genericIntrinsicExtensionMethods[genericOwnerKey]!.map { $0.method.name }

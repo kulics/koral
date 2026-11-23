@@ -167,6 +167,18 @@ type mutable TypeCheckerStorage(
     /// call position (`p.nope()` plus more diagnostics afterwards). The
     /// member-not-found pushes consult this to pick the channel.
     mutable call_callee_check_depth: Int,
+    // Method names declared per owner by INSTANCE-target given blocks
+    // (`given List[Int] { m }`) and by GENERIC given blocks (`given[T] List[T]
+    // { m }`). The two kinds of `given` may not declare the same name for one
+    // owner: a generic given's methods already serve every instantiation, so a
+    // same-named instance method would be a second definition on its
+    // instantiation -- a duplicate, never a specialization. Disjoint INSTANCES
+    // may still share names (each name is scoped to its own instantiation); a
+    // plain `given Plain { … }` participates in neither book (it claims no
+    // instantiation a generic given could already serve), and trait tool blocks
+    // (`given Trait { … }`) take no part either.
+    mutable given_instance_method_names: Dict[MethodOwner, Set[String]],
+    mutable given_universal_method_names: Dict[MethodOwner, Set[String]],
 );
 
 /// A dot-form pattern that names nothing the subject can be: a case-miss, or
@@ -381,6 +393,8 @@ given TypeChecker {
             Option[PatternCaseMiss].None(),
             false,
             0,
+            Dict[MethodOwner, Set[String]].new(),
+            Dict[MethodOwner, Set[String]].new(),
         );
         return TypeChecker(s);
     };
@@ -476,6 +490,36 @@ given TypeChecker {
         message.push_string("Duplicate definition: ");
         message.push_string(name);
         return message.to_string();
+    };
+
+    /// Record a method name an INSTANCE-target given member declares on `owner`
+    /// (`given List[Int] { m }`). Returns true when a universal given already
+    /// declares the same name on this owner -- the two kinds of `given` may not
+    /// overlap on one owner's method namespace (see the storage fields).
+    note_given_instance_method_name(self, owner: MethodOwner, method_name: String): Bool = {
+        let universal = self.storage.given_universal_method_names.get(owner) or else Set[
+            String,
+        ].new();
+        let mutable instance = self.storage.given_instance_method_names.get(owner) or else Set[
+            String,
+        ].new();
+        instance.insert(method_name);
+        self.storage.given_instance_method_names.insert(owner, instance);
+        return universal.contains(method_name);
+    };
+
+    /// The universal side of `note_given_instance_method_name`: record a method
+    /// name a GENERIC given member declares on `owner` and return true when an
+    /// instance given already claims it.
+    note_given_universal_method_name(self, owner: MethodOwner, method_name: String): Bool = {
+        let instance = self.storage.given_instance_method_names.get(owner) or else Set[String].new(
+        );
+        let mutable universal = self.storage.given_universal_method_names.get(owner) or else Set[
+            String,
+        ].new();
+        universal.insert(method_name);
+        self.storage.given_universal_method_names.insert(owner, universal);
+        return instance.contains(method_name);
     };
 
     invalidate_trait_requirement_caches(self): Void = {
@@ -4713,6 +4757,22 @@ given TypeChecker {
                         );
                     };
                     for member in members then {
+                        // A GENERIC intrinsic given defers signature collection
+                        // to instantiation, so the no-overlap rule against
+                        // instance-target givens is enforced here (the generic
+                        // ordinary path gets it in `collect_given_signatures`).
+                        if not type_params.is_empty() then {
+                            if self.note_given_universal_method_name(
+                                extension_type_key,
+                                member.name,
+                            ) then {
+                                self.push_diagnostic(
+                                    self.duplicate_definition_message(member.name),
+                                    unknown_span(),
+                                );
+                                continue;
+                            };
+                        };
                         let should_register_template = if not type_params.is_empty() then true
                         else if not member.type_params.is_empty() then true
                         else when resolved_target in {
@@ -4999,6 +5059,28 @@ given TypeChecker {
                 continue;
             };
             seen_names.push(m.name);
+            // NO OVERLAP between an instantiation-target given and a generic
+            // one: a generic given's methods already serve every instantiation
+            // of the owner, so a same-named instance method would be a second
+            // definition on its instantiation -- reported as the duplicate it
+            // is, never resolved by priority. Reported at the declaration (the
+            // slot has no diagnostic channel), like every method-table
+            // collision; recorded on BOTH sides so either declaration order
+            // blames the later one.
+            let name_overlaps = if instance_scoped then self.note_given_instance_method_name(
+                type_key,
+                m.name,
+            ) else if not owner_type_params.is_empty() then self.note_given_universal_method_name(
+                type_key,
+                m.name,
+            ) else false;
+            if name_overlaps then {
+                self.push_diagnostic(
+                    self.duplicate_definition_message(m.name),
+                    unknown_span(),
+                );
+                continue;
+            };
             let should_register_as_inherent = when conformance_trait_name in {
                 .Some(_) then false,
                 .None() then owner_type_params.is_empty() and m.type_params.is_empty(),

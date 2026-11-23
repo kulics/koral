@@ -283,6 +283,18 @@ public class TypeChecker {
     var providingTraits: [DefId]
   }
   var instanceExtensionMethods: [MethodOwner: [String: [InstanceMethodSlot]]] = [:]
+  /// Method names declared per owner by INSTANCE-target given blocks
+  /// (`given List[Int] { m }`) and by GENERIC given blocks (`given[T] List[T]
+  /// { m }`). The two kinds of `given` may not declare the same name for one
+  /// owner: a generic given's methods already serve every instantiation, so a
+  /// same-named instance method would be a second definition on its
+  /// instantiation -- a duplicate, never a specialization. Disjoint INSTANCES
+  /// may still share names (each name is scoped to its own instantiation); a
+  /// plain `given Plain { … }` participates in neither book (it claims no
+  /// instantiation a generic given could already serve), and trait tool blocks
+  /// (`given Trait { … }`) take no part either.
+  var givenInstanceMethodNames: [MethodOwner: Set<String>] = [:]
+  var givenUniversalMethodNames: [MethodOwner: Set<String>] = [:]
   // Owner IDENTITY -> MethodName -> [MethodDefId]: tracks which method
   // declarations provide an extension slot so repeated trait paths can reuse the
   // same source without being treated as ambiguous.

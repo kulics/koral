@@ -1786,9 +1786,12 @@ given List[Int] {
 };
 ```
 
-`List[Int]` gains `byte_len`; `List[String]` does not. When an instantiation
-method and a generic-given method share a name, the instantiation method wins
-for that instantiation alone and the generic one still serves the rest.
+`List[Int]` gains `byte_len`; `List[String]` does not. An instantiation-target
+`given` and a generic `given` may NOT declare the same method name: the generic
+method already serves every instantiation, so a same-named instantiation method
+would be a second definition on its instantiation -- rejected as the duplicate
+it is (`Duplicate definition: …`), never settled by priority. Disjoint
+instantiations may still share names with each other.
 
 #### `Never` Type Restrictions
 

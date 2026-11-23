@@ -32,6 +32,7 @@
 | `flow-operator-forms.md` | 流程算子的操作数形态（链式/绑定/裸）；`it` 为何删除；`and then` 为何折叠、判定为何看声明类型 | 分组规则 → `flow-logical-layers.md`；求值顺序/短路 → `control-flow.md`；文法与写法 → `guide/` |
 | `generics-and-monomorphization.md` | 为何单态化；模板身份是声明；实例键为何带 `owner_args`；类型身份为何不得依赖声明顺序 | 泛型写法 → `guide/document.md` |
 | `traits-and-givens.md` | trait 身份是 DefId 且含实参；witness 按实例记；`given` 为何独立；`Any` 两个位的区别 | trait 写法 → `guide/document.md` §5 |
+| `method-namespace.md` | 方法声明的适用范围（整族/单实例）与出处（inherent/要求见证/工具）模型；声明期冲突代数（重叠 = 接收者集合相交）；查找为何与来源顺序无关 | 方法面（可调性）→ `module-design.md` §3.4；witness 身份与 conformance 形态 → `traits-and-givens.md`；实例键与模板身份 → `generics-and-monomorphization.md`；用户向规则 → `guide/document.md`；施工 → `../implementation/`（未建） |
 | `name-resolution.md` | 符号是 `(module, name)`；解析顺序；裸名不是解析；禁止名字兜底；可见性默认值 | 模块/包设计 → `module-design.md` |
 | `std-api-design.md` | `self` 接收者规则；消耗语义；命名契约；登记在案的遗留例外 | std 具体 API → `../api/std/` |
 | `design-axioms.md` | 复杂度预算与拒绝清单；设计公理本身；提案过闸顺序 | 技术前提（身份）→ 本 README「共同前提」；子系统取舍 → 各子系统文档 |
@@ -69,6 +70,7 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 | [`flow-operator-forms.md`](flow-operator-forms.md) —— 流程算子的形态与折叠 | Implemented | [`../implementation/flow-operator-forms-implementation.md`](../implementation/flow-operator-forms-implementation.md) | 2026-10-24 |
 | [`generics-and-monomorphization.md`](generics-and-monomorphization.md) —— 泛型与单态化 | Implemented | [`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §6–§7 | 2026-10 |
 | [`traits-and-givens.md`](traits-and-givens.md) —— trait / given / trait object | Implemented | 同上 §6–§7、§14、§21 | 2026-10 |
+| [`method-namespace.md`](method-namespace.md) —— 方法声明命名空间 | Accepted（冲突代数「实例 × 泛型禁止重叠」一行已先行落地 2026-11-23；命名空间重构未实施） | 未建（重构落地时补 `../implementation/method-namespace-implementation.md`） | 2026-11-23 |
 | [`name-resolution.md`](name-resolution.md) —— 名字解析与身份边界 | Implemented | 同上 §15–§24 | 2026-10 |
 | [`std-api-design.md`](std-api-design.md) —— 标准库 API 设计约定 | Implemented | 无单独记录（随 `std/` API 落地） | 2026-10 |
 | [`design-axioms.md`](design-axioms.md) —— 设计公理与复杂度预算 | Accepted | 无独立记录（贯穿性规则，由各设计文档的取舍看护） | 2026-10-24 |

@@ -86,6 +86,29 @@ extension TypeChecker {
     return slots.first(where: { $0.selfArgs == selfArgs })
   }
 
+  /// Record a method name an INSTANCE-target given member declares on `owner`
+  /// (`given List[Int] { m }`) and answer whether a universal given already
+  /// declares it -- the two kinds of `given` may not overlap on one owner's
+  /// method namespace. Mirrors koralc `note_given_instance_method_name`.
+  func noteGivenInstanceMethodName(owner: MethodOwner, name: String) -> Bool {
+    let universal = givenUniversalMethodNames[owner] ?? []
+    var instance = givenInstanceMethodNames[owner] ?? []
+    instance.insert(name)
+    givenInstanceMethodNames[owner] = instance
+    return universal.contains(name)
+  }
+
+  /// The universal side of `noteGivenInstanceMethodName`: record a method name
+  /// a GENERIC given member declares on `owner` and answer whether an instance
+  /// given already claims it. Mirrors koralc `note_given_universal_method_name`.
+  func noteGivenUniversalMethodName(owner: MethodOwner, name: String) -> Bool {
+    let instance = givenInstanceMethodNames[owner] ?? []
+    var universal = givenUniversalMethodNames[owner] ?? []
+    universal.insert(name)
+    givenUniversalMethodNames[owner] = universal
+    return instance.contains(name)
+  }
+
   /// Register `symbol` for the single instantiation named by `selfArgs`
   /// (`given List[Int] { … }`): the slot replaces the same-args entry, exactly
   /// as the universal map's last-write-wins, and never touches another
@@ -156,8 +179,9 @@ extension TypeChecker {
     let owner = context.methodOwner(of: selfType)
     let selfArgs = context.methodOwnerAndArgs(of: selfType).args
     // An instance-scoped slot (`given List[Int] { … }`) answers first and for
-    // exactly this instantiation: it shadows the universal slot here, and no
-    // other instantiation ever sees it.
+    // exactly this instantiation; no other instantiation ever sees it. An
+    // overlap with a universal name is a declaration error (the no-overlap
+    // rule), so the ordering never picks between same-named contenders.
     if let slot = instanceMethodSlot(owner: owner, name: name, selfArgs: selfArgs) {
       guard instanceFaceAllows(slot) else { return nil }
       return slot.symbol

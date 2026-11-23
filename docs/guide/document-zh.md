@@ -1723,8 +1723,10 @@ given List[Int] {
 };
 ```
 
-`List[Int]` 获得 `byte_len`，`List[String]` 没有。当实例方法与泛型 `given`
-方法同名时，该实例上实例方法胜出，其余实例仍由泛型方法服务。
+`List[Int]` 获得 `byte_len`，`List[String]` 没有。实例化目标的 `given` 与泛型
+`given` **不能声明同名方法**：泛型方法本来就服务该类型的每个实例，实例上再声明
+同名方法就是同一实例的第二个定义——按重复定义拒绝（`Duplicate definition: …`），
+绝不靠优先级裁决。互不相交的实例之间仍可同名。
 
 #### `Never` 类型限制
 
