@@ -17,7 +17,7 @@ Import the module with `using "std/sync" { ... };`.
 /// capacity 为 0 时是无缓冲的会合通道（rendezvous）：send() 阻塞到某个
 /// 接收方取走该消息才返回，用于严格的交接与同步场景。
 /// capacity 为负时 panic。
-public let make_channel[T: Any](capacity: Int): Pair[SendChannel[T], RecvChannel[T]];
+public let make_channel[T: sendable](capacity: Int): Pair[SendChannel[T], RecvChannel[T]];
 ```
 
 ## Traits
@@ -47,10 +47,10 @@ public type unsafe sendable mutable AtomicUInt;
 public type unsafe sendable mutable AtomicCell[T: sendable];
 
 /// The sending half of a bounded channel; dropping it closes the channel for receivers.
-public type unsafe sendable mutable SendChannel[T: Any];
+public type unsafe sendable mutable SendChannel[T: sendable];
 
 /// The receiving half of a bounded channel; dropping it closes the channel for senders.
-public type unsafe sendable mutable RecvChannel[T: Any];
+public type unsafe sendable mutable RecvChannel[T: sendable];
 
 /// A shared `sendable` double-ended queue with atomic per-operation access.
 /// Sendable contract: self-synchronized.
@@ -222,13 +222,13 @@ given[T: Eq and sendable] AtomicCell[T] {
 };
 
 /// Implements `Drop`, closing the send side and waking waiting receivers.
-given[T: Any] SendChannel[T]: Drop {};
+given[T: sendable] SendChannel[T]: Drop {};
 
 /// Implements `Drop`, closing the receive side and waking waiting senders.
-given[T: Any] RecvChannel[T]: Drop {};
+given[T: sendable] RecvChannel[T]: Drop {};
 
 /// Sends values, blocking for space or returning without blocking.
-given[T: Any] SendChannel[T] {
+given[T: sendable] SendChannel[T] {
     /// 发送消息（阻塞，直到有空间或通道关闭）
     /// 容量为 0 的会合通道上，send 阻塞到某个接收方取走该消息才返回。
     public send(self, value: T): Result[Void];
@@ -237,7 +237,7 @@ given[T: Any] SendChannel[T] {
 };
 
 /// Receives values, blocking for a message or returning without blocking.
-given[T: Any] RecvChannel[T] {
+given[T: sendable] RecvChannel[T] {
     /// 接收消息（阻塞，直到有消息或通道关闭）
     public recv(self): Result[T];
     /// 非阻塞接收

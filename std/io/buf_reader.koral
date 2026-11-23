@@ -43,6 +43,14 @@ given[R: Reader] BufReader[R] {
         self.end = 0;
         return when self.inner.read(into = self.buf, span = 0..<self.cap) in {
             .Ok(n) then {
+                // The buffer pointers are indexed raw at the call sites; a
+                // fill that reports more bytes than the buffer holds would
+                // send them past the allocation. The reader's contract is
+                // `0 <= n <= span length` -- fail loudly here, never read
+                // out of bounds later.
+                if n < 0 or n > self.cap then {
+                    panic("BufReader.fill_buf: reader returned \(n) bytes for a \(self.cap)-byte buffer");
+                };
                 self.end = n;
                 Result[Int].Ok(n)
             },
@@ -167,8 +175,6 @@ given[R: Reader] BufReader[R] {
             return Result[Int].Ok(0);
         };
 
-        let dst_ptr = into.borrow_mut_ptr();
-
         while out_pos < out_end then {
             when self.fill_buf() in {
                 .Ok(avail) then {
@@ -176,7 +182,14 @@ given[R: Reader] BufReader[R] {
                         return Result[Int].Ok(out_pos - base);
                     };
 
+                    // Both pointers are taken afresh AFTER every fill and
+                    // never held across one: a fill runs the inner reader, and
+                    // `borrow_ptr`'s contract invalidates a held pointer on
+                    // any reallocation. `fill_buf` has already bounds-checked
+                    // the fill (`start <= end <= cap`); the scan and copy stay
+                    // within `avail` and the output remainder.
                     let src_ptr = self.buf.borrow_ptr();
+                    let dst_ptr = into.borrow_mut_ptr();
 
                     let mutable i = 0;
                     let mutable found = false;
@@ -283,15 +296,16 @@ given[R: Reader] BufReader[R]: Reader {
             return Result[Int].Ok(0);
         };
 
-        let dst_ptr = into.borrow_mut_ptr();
-
         while out_pos < out_end then {
             when self.fill_buf() in {
                 .Ok(avail) then {
                     if avail == 0 then {
                         return Result[Int].Ok(out_pos - base);
                     };
+                    // Pointers fresh per fill, never across one -- see
+                    // `read_until`.
                     let src_ptr = self.buf.borrow_ptr();
+                    let dst_ptr = into.borrow_mut_ptr();
                     let remain_out = out_end - out_pos;
                     let take = if avail < remain_out then avail else remain_out;
                     unsafe { copy_memory(dst_ptr + out_pos, src_ptr + self.start, UInt(take)) };

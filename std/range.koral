@@ -79,102 +79,65 @@ private let panic_resolve_span_range(s: Int, e: Int): Never = {
 given Range[Int] {
 
     /// Resolve `self` against a container of `count` elements into the span it
-    /// names -- `(start, length)`, honoring each variant's bound style.
-    /// Panics when the interval is invalid (its bounds cross) or reaches
-    /// outside `0..<count`.
-    public resolve_span(self, count: Int): Pair[Int, Int] = when self in {
-        .Closed(s, e) then {
-            if s < 0 or e < 0 then {
-                panic_resolve_span_bounds(count);
-            };
-            if s > e then {
-                panic_resolve_span_range(s, e);
-            };
-            if e >= count then {
-                panic_resolve_span_bounds(count);
-            };
-            Pair[Int, Int](s, e - s + 1)
-        },
-        .ClosedOpen(s, e) then {
-            if s < 0 or e < 0 then {
-                panic_resolve_span_bounds(count);
-            };
-            if s > e then {
-                panic_resolve_span_range(s, e);
-            };
-            if e > count then {
-                panic_resolve_span_bounds(count);
-            };
-            Pair[Int, Int](s, e - s)
-        },
-        .OpenClosed(s, e) then {
-            if s < 0 or e < 0 then {
-                panic_resolve_span_bounds(count);
-            };
-            if s > e then {
-                panic_resolve_span_range(s, e);
-            };
-            if s == Int.max_value() or e >= count then {
-                panic_resolve_span_bounds(count);
-            };
-            Pair[Int, Int](s + 1, e - s)
-        },
-        .Open(s, e) then {
-            if s < 0 or e < 0 then {
-                panic_resolve_span_bounds(count);
-            };
-            if s > e then {
-                panic_resolve_span_range(s, e);
-            };
-            if s == Int.max_value() or e > count then {
-                panic_resolve_span_bounds(count);
-            };
-            // Open(s, s) names no elements: the empty span at s, exactly
-            // like ClosedOpen(s, s). (start = s + 1 would push an empty
-            // span past the end when s == count.)
-            if s == e then {
-                Pair[Int, Int](s, 0)
-            } else {
-                Pair[Int, Int](s + 1, e - s - 1)
-            }
-        },
-        .From(s) then {
-            if s < 0 then {
-                panic_resolve_span_bounds(count);
-            };
-            if s > count then {
-                panic_resolve_span_bounds(count);
-            };
-            Pair[Int, Int](s, count - s)
-        },
-        .After(s) then {
-            if s < 0 then {
-                panic_resolve_span_bounds(count);
-            };
-            if s >= count then {
-                panic_resolve_span_bounds(count);
-            };
-            Pair[Int, Int](s + 1, count - s - 1)
-        },
-        .To(e) then {
-            if e < 0 then {
-                panic_resolve_span_bounds(count);
-            };
-            if e >= count then {
-                panic_resolve_span_bounds(count);
-            };
-            Pair[Int, Int](0, e + 1)
-        },
-        .Until(e) then {
-            if e < 0 then {
-                panic_resolve_span_bounds(count);
-            };
-            if e > count then {
-                panic_resolve_span_bounds(count);
-            };
-            Pair[Int, Int](0, e)
-        },
-        .Full() then Pair[Int, Int](0, count),
+    /// names -- `(start, length)`.
+    ///
+    /// Rust's slice-index rule, in two steps: normalize the interval to the
+    /// half-open `[lo, hi)` it names (`a..b` -> `[a, b+1)`, `a<..<b` ->
+    /// `[a+1, b)`, `a...` -> `[a, count)`, `...b` -> `[0, b+1)`, `...` ->
+    /// `[0, count)`, ...), then require `lo <= hi <= count` over `0..<count`.
+    /// A crossing interval panics as invalid -- including `a<..<a`, which
+    /// normalizes to the crossing `[a+1, a)` and has no empty reading -- while
+    /// one reaching outside the container panics as out of bounds.
+    /// `a..a-1` normalizes to the empty `[a, a)`.
+    public resolve_span(self, count: Int): Pair[Int, Int] = {
+        let half = when self in {
+            .Closed(s, e) then {
+                if e == Int.max_value() then {
+                    panic_resolve_span_bounds(count);
+                };
+                Pair[Int, Int](s, e + 1)
+            },
+            .ClosedOpen(s, e) then Pair[Int, Int](s, e),
+            .OpenClosed(s, e) then {
+                if s == Int.max_value() or e == Int.max_value() then {
+                    panic_resolve_span_bounds(count);
+                };
+                Pair[Int, Int](s + 1, e + 1)
+            },
+            .Open(s, e) then {
+                if s == Int.max_value() then {
+                    panic_resolve_span_bounds(count);
+                };
+                Pair[Int, Int](s + 1, e)
+            },
+            .From(s) then Pair[Int, Int](s, count),
+            .After(s) then {
+                if s == Int.max_value() then {
+                    panic_resolve_span_bounds(count);
+                };
+                Pair[Int, Int](s + 1, count)
+            },
+            .To(e) then {
+                if e == Int.max_value() then {
+                    panic_resolve_span_bounds(count);
+                };
+                Pair[Int, Int](0, e + 1)
+            },
+            .Until(e) then Pair[Int, Int](0, e),
+            .Full() then Pair[Int, Int](0, count),
+        };
+        let lo = half.first;
+        let hi = half.second;
+        // The chain `lo <= hi <= count` over the nonnegative indices a
+        // container names: a crossing interval is invalid (reported with the
+        // normalized bounds it failed on), a reach outside is out of bounds.
+        if lo > hi then {
+            panic_resolve_span_range(lo, hi);
+        };
+        if lo < 0 or hi > count then {
+            panic_resolve_span_bounds(count);
+        };
+        return Pair[Int, Int](lo, hi - lo);
     };
 };
 
