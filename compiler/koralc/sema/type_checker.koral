@@ -167,18 +167,6 @@ type mutable TypeCheckerStorage(
     /// call position (`p.nope()` plus more diagnostics afterwards). The
     /// member-not-found pushes consult this to pick the channel.
     mutable call_callee_check_depth: Int,
-    // Method names declared per owner by INSTANCE-target given blocks
-    // (`given List[Int] { m }`) and by GENERIC given blocks (`given[T] List[T]
-    // { m }`). The two kinds of `given` may not declare the same name for one
-    // owner: a generic given's methods already serve every instantiation, so a
-    // same-named instance method would be a second definition on its
-    // instantiation -- a duplicate, never a specialization. Disjoint INSTANCES
-    // may still share names (each name is scoped to its own instantiation); a
-    // plain `given Plain { … }` participates in neither book (it claims no
-    // instantiation a generic given could already serve), and trait tool blocks
-    // (`given Trait { … }`) take no part either.
-    mutable given_instance_method_names: Dict[MethodOwner, Set[String]],
-    mutable given_universal_method_names: Dict[MethodOwner, Set[String]],
 );
 
 /// A dot-form pattern that names nothing the subject can be: a case-miss, or
@@ -393,8 +381,6 @@ given TypeChecker {
             Option[PatternCaseMiss].None(),
             false,
             0,
-            Dict[MethodOwner, Set[String]].new(),
-            Dict[MethodOwner, Set[String]].new(),
         );
         return TypeChecker(s);
     };
@@ -490,36 +476,6 @@ given TypeChecker {
         message.push_string("Duplicate definition: ");
         message.push_string(name);
         return message.to_string();
-    };
-
-    /// Record a method name an INSTANCE-target given member declares on `owner`
-    /// (`given List[Int] { m }`). Returns true when a universal given already
-    /// declares the same name on this owner -- the two kinds of `given` may not
-    /// overlap on one owner's method namespace (see the storage fields).
-    note_given_instance_method_name(self, owner: MethodOwner, method_name: String): Bool = {
-        let universal = self.storage.given_universal_method_names.get(owner) or else Set[
-            String,
-        ].new();
-        let mutable instance = self.storage.given_instance_method_names.get(owner) or else Set[
-            String,
-        ].new();
-        instance.insert(method_name);
-        self.storage.given_instance_method_names.insert(owner, instance);
-        return universal.contains(method_name);
-    };
-
-    /// The universal side of `note_given_instance_method_name`: record a method
-    /// name a GENERIC given member declares on `owner` and return true when an
-    /// instance given already claims it.
-    note_given_universal_method_name(self, owner: MethodOwner, method_name: String): Bool = {
-        let instance = self.storage.given_instance_method_names.get(owner) or else Set[String].new(
-        );
-        let mutable universal = self.storage.given_universal_method_names.get(owner) or else Set[
-            String,
-        ].new();
-        universal.insert(method_name);
-        self.storage.given_universal_method_names.insert(owner, universal);
-        return instance.contains(method_name);
     };
 
     invalidate_trait_requirement_caches(self): Void = {
@@ -3384,67 +3340,6 @@ given TypeChecker {
         return true;
     };
 
-    /// Who owns a method name on a concrete type's method table.
-    ///
-    /// An INHERENT method (`given X { m }`) or a trait REQUIREMENT witness owns
-    /// the name; a materialized trait TOOL never does -- an inherent method
-    /// simply overrides a tool (guide: "Inherent type methods win over trait
-    /// tool methods"). An inherent name colliding with a requirement name is a
-    /// definition error in every registration order, never a priority contest.
-    slot_owned_by_inherent_or_requirement(
-        self,
-        type_key: MethodOwner,
-        method_name: String,
-    ): Bool = {
-        if self.storage.method_table.is_inherent(type_key, method_name) then {
-            return true;
-        };
-        for trait_def_id in self.storage.method_table.providing_traits(
-            type_key,
-            method_name,
-        ) then {
-            if self.trait_declares_requirement_in_trait(
-                trait_def_id,
-                method_name,
-                Set[UInt].new(),
-            ) then {
-                return true;
-            };
-        };
-        return false;
-    };
-
-    /// The same ownership question for the INSTANCE slot declaring
-    /// `method_name` for exactly `self_args`.
-    instance_slot_owned_by_inherent_or_requirement(
-        self,
-        type_key: MethodOwner,
-        method_name: String,
-        self_args: List[Type],
-    ): Bool = {
-        if self.storage.method_table.instance_is_inherent(
-            type_key,
-            method_name,
-            self_args,
-        ) then {
-            return true;
-        };
-        for trait_def_id in self.storage.method_table.instance_providing_traits(
-            type_key,
-            method_name,
-            self_args,
-        ) then {
-            if self.trait_declares_requirement_in_trait(
-                trait_def_id,
-                method_name,
-                Set[UInt].new(),
-            ) then {
-                return true;
-            };
-        };
-        return false;
-    };
-
     // Swift `ownRequirements` — methods a trait declares as requirements, as opposed
     // to trait-tool entity methods. Parent requirements are inherited, so recurse.
     trait_declares_requirement(self, trait_name: String, method_name: String): Bool = {
@@ -4758,19 +4653,45 @@ given TypeChecker {
                     };
                     for member in members then {
                         // A GENERIC intrinsic given defers signature collection
-                        // to instantiation, so the no-overlap rule against
-                        // instance-target givens is enforced here (the generic
-                        // ordinary path gets it in `collect_given_signatures`).
+                        // to instantiation, so the namespace algebra runs here
+                        // instead of in `collect_given_signatures`.
                         if not type_params.is_empty() then {
-                            if self.note_given_universal_method_name(
-                                extension_type_key,
-                                member.name,
-                            ) then {
-                                self.push_diagnostic(
-                                    self.duplicate_definition_message(member.name),
-                                    unknown_span(),
-                                );
-                                continue;
+                            let intrinsic_source = self.context().get_original_def_id(
+                                member.def_id,
+                            ) or else member.def_id;
+                            let verdict = self.storage.method_table.declare_method(
+                                MethodDeclRecord(
+                                    extension_type_key,
+                                    member.name,
+                                    MethodScope.Family(),
+                                    MethodDeclKind.Inherent(),
+                                    intrinsic_source,
+                                ),
+                            );
+                            when verdict in {
+                                .Some(conflict) then {
+                                    when conflict in {
+                                        .Duplicate() then {
+                                            self.push_diagnostic(
+                                                self.duplicate_definition_message(member.name),
+                                                unknown_span(),
+                                            );
+                                            continue;
+                                        },
+                                        .Ambiguous() then {
+                                            self.push_ambiguous_trait_extension_method_diagnostic(
+                                                resolved_target,
+                                                member.name,
+                                                self.storage.current_span,
+                                            );
+                                            continue;
+                                        },
+                                        .ToolDefers() then {
+                                            continue;
+                                        },
+                                    };
+                                },
+                                .None() then {},
                             };
                         };
                         let should_register_template = if not type_params.is_empty() then true
@@ -5015,7 +4936,10 @@ given TypeChecker {
         // non-generic target or a generic given's template.
         let owner_args = self.context().method_owner_and_args(target_type).second;
         let instance_scoped = owner_type_params.is_empty() and not owner_args.is_empty();
-        let mutable seen_names = List[String].new();
+        // The declaration's scope in the method namespace (method-namespace.md):
+        // one instantiation, or the whole family.
+        let decl_scope = if instance_scoped then MethodScope.Instance(owner_args)
+        else MethodScope.Family();
         // Same member list the body-checking pass will see, with each member's
         // DECLARATION identity already assigned and stable.
         let id_members = self.members_with_def_ids(
@@ -5051,69 +4975,60 @@ given TypeChecker {
                     "[sema-pass2-given] target=\(self.context().type_display_name(target_type)) member=\(m.name)",
                 );
             };
-            if self.string_list_contains(seen_names, m.name) then {
-                self.push_diagnostic(
-                    self.duplicate_definition_message(m.name),
-                    unknown_span(),
-                );
-                continue;
+            // ONE declaration-time authority for name conflicts
+            // (docs/design/method-namespace.md): the namespace's conflict
+            // algebra replaces the per-site duplicate checks -- within-block
+            // repeats, cross-block same-instance, inherent-vs-witness,
+            // requirement ambiguity, and the Instance x Family no-overlap rule
+            // are all rows of one table. A method a trait delivers without
+            // declaring it (a tool copy, a conformance helper) never owns its
+            // name and defers to one that does.
+            let source_def_id = self.context().get_original_def_id(m.def_id) or else m.def_id;
+            let decl_is_requirement = when conformance_trait_name in {
+                .Some(trait_name) then self.trait_declares_requirement(trait_name, m.name),
+                .None() then false,
             };
-            seen_names.push(m.name);
-            // NO OVERLAP between an instantiation-target given and a generic
-            // one: a generic given's methods already serve every instantiation
-            // of the owner, so a same-named instance method would be a second
-            // definition on its instantiation -- reported as the duplicate it
-            // is, never resolved by priority. Reported at the declaration (the
-            // slot has no diagnostic channel), like every method-table
-            // collision; recorded on BOTH sides so either declaration order
-            // blames the later one.
-            let name_overlaps = if instance_scoped then self.note_given_instance_method_name(
-                type_key,
-                m.name,
-            ) else if not owner_type_params.is_empty() then self.note_given_universal_method_name(
-                type_key,
-                m.name,
-            ) else false;
-            if name_overlaps then {
-                self.push_diagnostic(
-                    self.duplicate_definition_message(m.name),
-                    unknown_span(),
-                );
-                continue;
+            let decl_trait_def = when conformance_trait_name in {
+                .Some(trait_name) then self.trait_def_id_of(trait_name) or else DefId(UInt(0)),
+                .None() then DefId(UInt(0)),
+            };
+            let decl_kind = if conformance_trait_name is .Some(_) then {
+                if decl_is_requirement then MethodDeclKind.Requirement(decl_trait_def)
+                else MethodDeclKind.Tool(decl_trait_def)
+            } else {
+                MethodDeclKind.Inherent()
+            };
+            let verdict = self.storage.method_table.declare_method(
+                MethodDeclRecord(type_key, m.name, decl_scope, decl_kind, source_def_id),
+            );
+            when verdict in {
+                .Some(conflict) then {
+                    when conflict in {
+                        .Duplicate() then {
+                            self.push_diagnostic(
+                                self.duplicate_definition_message(m.name),
+                                unknown_span(),
+                            );
+                            continue;
+                        },
+                        .Ambiguous() then {
+                            self.push_ambiguous_trait_extension_method_diagnostic(
+                                target_type,
+                                m.name,
+                                self.storage.current_span,
+                            );
+                            continue;
+                        },
+                        .ToolDefers() then {
+                            continue;
+                        },
+                    };
+                },
+                .None() then {},
             };
             let should_register_as_inherent = when conformance_trait_name in {
                 .Some(_) then false,
                 .None() then owner_type_params.is_empty() and m.type_params.is_empty(),
-            };
-            if should_register_as_inherent then {
-                // An inherent method colliding with another INHERENT method or
-                // with a trait REQUIREMENT witness is a definition error in
-                // every registration order. A trait TOOL occupying the name is
-                // not a conflict: the inherent method simply overrides it.
-                if instance_scoped then {
-                    if self.lookup_instance_method_signature(
-                        type_key,
-                        m.name,
-                        owner_args,
-                    ) is .Some(_) and self.instance_slot_owned_by_inherent_or_requirement(
-                        type_key,
-                        m.name,
-                        owner_args,
-                    ) then {
-                        self.push_diagnostic(
-                            self.duplicate_definition_message(m.name),
-                            unknown_span(),
-                        );
-                        continue;
-                    };
-                } else if self.lookup_method_signature(type_key, m.name) is .Some(_)
-                    and self.slot_owned_by_inherent_or_requirement(type_key, m.name) then {
-                    self.push_diagnostic(
-                        self.duplicate_definition_message(m.name),
-                        unknown_span(),
-                    );
-                    continue;
-                };
             };
             // Always resolve types for all members (inherent + conformance)
             // so cross-references within the same given block work.
@@ -5230,31 +5145,11 @@ given TypeChecker {
                             };
                         };
                     } else {
-                        // The slot is taken. A REQUIREMENT witness may not share
-                        // its name with an INHERENT method on the same type --
-                        // that is a definition error in every declaration order
-                        // (the reverse order is caught by the inherent path
-                        // above), never a priority contest. Other occupants stay
-                        // silent here; pass 3 reports the ambiguity.
-                        when conformance_trait_name in {
-                            .Some(trait_name) then {
-                                let slot_inherent = if instance_scoped then self.storage.method_table.instance_is_inherent(
-                                    type_key,
-                                    m.name,
-                                    owner_args,
-                                ) else self.storage.method_table.is_inherent(
-                                    type_key,
-                                    m.name,
-                                );
-                                if slot_inherent and self.trait_declares_requirement(trait_name, m.name) then {
-                                    self.push_diagnostic(
-                                        self.duplicate_definition_message(m.name),
-                                        unknown_span(),
-                                    );
-                                };
-                            },
-                            .None() then {},
-                        };
+                        // The slot is taken; the DECLARATION was already judged
+                        // by the namespace algebra at the member loop above
+                        // (verdict reported there). Only the registration is
+                        // skipped here -- pass 3 re-attempts it and the slot
+                        // settles as the algebra decided.
                     };
                 };
                 continue;

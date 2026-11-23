@@ -1954,14 +1954,28 @@ extension TypeChecker {
 
         // Register all method signatures (without checking bodies)
         for method in methods {
-          // NO OVERLAP between a universal given and an instantiation-target
-          // one: generic given methods already serve every instantiation of the
-          // owner, so a same-named instance method would be a second definition
-          // on its instantiation -- reported as the duplicate it is, never
-          // resolved by priority. Recorded on BOTH sides so either declaration
-          // order blames the later one (koralc `collect_given_signatures`).
-          if noteGivenUniversalMethodName(owner: genericOwnerKey, name: method.name) {
+          // ONE declaration-time authority for name conflicts
+          // (docs/design/method-namespace.md): the namespace's conflict
+          // algebra replaces the per-site duplicate checks. Mirrors koralc
+          // `collect_given_signatures`'s member loop.
+          let verdict = declareMethod(MethodDeclRecord(
+            owner: genericOwnerKey,
+            name: method.name,
+            scope: .family,
+            kind: givenMemberDeclKind(providingTrait: providingTrait, methodName: method.name),
+            sourceDefId: method.defId))
+          switch verdict {
+          case .some(.duplicate):
             throw SemanticError.duplicateDefinition(method.name, span: span)
+          case .some(.ambiguous):
+            try handleError(SemanticError(.generic(
+              "Ambiguous method '\(method.name)' for type '\(genericSelfType.description)' via trait extensions"
+            ), span: span))
+            continue
+          case .some(.toolDefers):
+            continue
+          case .none:
+            break
           }
           // A generic trait-tool member (`given[T] Trait[T] { ... }`) joins the
           // trait's interface -- trait objects dispatch through it -- and its
@@ -2025,13 +2039,6 @@ extension TypeChecker {
             }
 
             return (params, returnType)
-          }
-
-          // Check for duplicate method name on this type
-          let existsInGeneric = genericExtensionMethods[genericOwnerKey]!.contains(where: { $0.method.name == method.name })
-          let existsInIntrinsic = (genericIntrinsicExtensionMethods[genericOwnerKey] ?? []).contains(where: { $0.method.name == method.name })
-          if existsInGeneric || existsInIntrinsic {
-            throw SemanticError.duplicateDefinition(method.name, span: span)
           }
 
           // Register the method template (without checked body).
@@ -2106,16 +2113,28 @@ extension TypeChecker {
 
         // Pre-register method signatures (without checking bodies)
         for method in methods {
-          // NO OVERLAP between an instantiation-target given and a generic
-          // one (see the generic branch above). An instance member joins the
-          // instance side of the rule whatever shape it has -- a method-generic
-          // member is as much a member of its instance given as a plain one.
-          // A plain `given Plain { … }` participates in neither book.
-          let overlapsGivenName = instanceScoped
-            ? noteGivenInstanceMethodName(owner: methodOwnerKey, name: method.name)
-            : false
-          if overlapsGivenName {
+          // ONE declaration-time authority (docs/design/method-namespace.md) --
+          // see the generic branch above. An instance member joins the
+          // instance scope whatever shape it has; a plain `given Plain { … }`
+          // is family-scoped like a generic given.
+          let verdict = declareMethod(MethodDeclRecord(
+            owner: methodOwnerKey,
+            name: method.name,
+            scope: instanceScoped ? .instance(args: selfArgs) : .family,
+            kind: givenMemberDeclKind(providingTrait: providingTrait, methodName: method.name),
+            sourceDefId: method.defId))
+          switch verdict {
+          case .some(.duplicate):
             throw SemanticError.duplicateDefinition(method.name, span: span)
+          case .some(.ambiguous):
+            try handleError(SemanticError(.generic(
+              "Ambiguous method '\(method.name)' for type '\(type.description)' via trait extensions"
+            ), span: span))
+            continue
+          case .some(.toolDefers):
+            continue
+          case .none:
+            break
           }
           let registeredMethod = registeredMethodDeclaration(
             method,
@@ -2174,29 +2193,11 @@ extension TypeChecker {
 
           if registeredMethod.typeParameters.isEmpty {
             if instanceScoped {
-              // Check for duplicate method name on THIS instantiation. An
-              // inherent method (or a trait REQUIREMENT witness) owns its name
-              // -- colliding with one is a definition error in every
-              // registration order. A trait TOOL copy never owns the name: the
-              // inherent method overrides it.
-              if instanceMethodSlot(owner: methodOwnerKey, name: registeredMethod.name, selfArgs: selfArgs) != nil,
-                 instanceSlotOwnedByInherentOrRequirement(owner: methodOwnerKey, name: registeredMethod.name, selfArgs: selfArgs) {
-                throw SemanticError.duplicateDefinition(registeredMethod.name, span: span)
-              }
               registerInstanceMethod(
                 owner: methodOwnerKey, name: registeredMethod.name, selfArgs: selfArgs,
                 symbol: methodSymbol, sourceDefId: methodSymbol.defId,
                 inherent: providingTrait == nil, providingTrait: providingTrait)
             } else {
-              // Check for duplicate method name on this type. An inherent method
-              // (or a trait REQUIREMENT witness) owns its name -- colliding with
-              // one is a definition error in every registration order. A trait
-              // TOOL copy never owns the name: the inherent method overrides it.
-              if extensionMethods[methodOwnerKey]![registeredMethod.name] != nil,
-                 slotOwnedByInherentOrRequirement(owner: methodOwnerKey, name: registeredMethod.name) {
-                throw SemanticError.duplicateDefinition(registeredMethod.name, span: span)
-              }
-
               extensionMethods[methodOwnerKey]![registeredMethod.name] = methodSymbol
               // METHOD FACE (§3.4): a conformance member travels with its trait;
               // an inherent member is always callable.
@@ -2208,12 +2209,6 @@ extension TypeChecker {
               }
             }
           } else {
-            let existsInGeneric = genericExtensionMethods[methodOwnerKey]!.contains(where: { $0.method.name == registeredMethod.name })
-            let existsInIntrinsic = (genericIntrinsicExtensionMethods[methodOwnerKey] ?? []).contains(where: { $0.method.name == registeredMethod.name })
-            if existsInGeneric || existsInIntrinsic {
-              throw SemanticError.duplicateDefinition(registeredMethod.name, span: span)
-            }
-
             genericExtensionMethods[methodOwnerKey]!.append(GenericExtensionMethodTemplate(
               typeParams: [],
               selfTypeArgs: instanceScoped ? selfArgs : [],
@@ -2427,6 +2422,7 @@ extension TypeChecker {
             }
           }
         } else {
+          let methodOwnerKey = context.methodOwner(of: selfType)
           let typeName: String? = {
             switch selfType {
             case .structure(let defId), .`enum`(let defId):
@@ -2442,12 +2438,12 @@ extension TypeChecker {
             }
           }()
           if let typeName {
-            let methodOwnerKey = context.methodOwner(of: selfType)
             let existingConcrete = Set((extensionMethods[methodOwnerKey] ?? [:]).keys)
             hasExistingMethodSignature = preRegisteredMethods.contains { existingConcrete.contains($0.name) }
             // Track concrete extension slots by method declaration identity so one
             // declaration reaching the same type through multiple trait paths can
-            // be reused without being reported as ambiguous.
+            // be reused without being reported as ambiguous. (The ambiguity
+            // itself is reported by the namespace algebra above.)
             for method in preRegisteredMethods {
               if extensionMethodTraitSources[methodOwnerKey] == nil {
                 extensionMethodTraitSources[methodOwnerKey] = [:]
@@ -2457,14 +2453,6 @@ extension TypeChecker {
               }
               let existingSources = extensionMethodTraitSources[methodOwnerKey]![method.name]!
               if !existingSources.contains(method.defId) {
-                // If another trait already provides this method, it's ambiguous
-                if existingConcrete.contains(method.name) && !existingSources.isEmpty {
-                  // The conflict is one problem among several the file may
-                  // have; stopping here would skip every later declaration.
-                  try handleError(SemanticError(.generic(
-                    "Ambiguous method '\(method.name)' for type '\(typeName)' via trait extensions"
-                  ), span: span))
-                }
                 extensionMethodTraitSources[methodOwnerKey]![method.name]!.append(method.defId)
               }
             }
@@ -2477,24 +2465,48 @@ extension TypeChecker {
             enforceTypeDeclarationModuleLocality: false,
             providingTrait: visibleTraitInfo(traitName)?.defId
           )
-        } else if let traitInfo = visibleTraitInfo(traitName) {
-          // The name is already taken on this type. A REQUIREMENT witness may
-          // not share its name with an INHERENT method -- that is a definition
-          // error in every declaration order (the reverse order is caught by
-          // the registration above), never a priority contest. A trait TOOL
-          // occupying the name is fine: the inherent method simply overrides it.
-          let methodOwnerKey = context.methodOwner(of: selfType)
-          // Requirements of the trait AND its parents: the collision rule is
-          // "every registration order", and an inherited requirement occupies
-          // the name exactly as the trait's own does (koralc's
-          // `trait_declares_requirement` recurses parents).
-          let requirementNames = Set(
-            ((try? flattenedTraitMethods(forDefId: traitInfo.defId))?.keys).map { Array($0) }
-              ?? traitInfo.methods.map { $0.name }
-          )
-          for method in preRegisteredMethods where requirementNames.contains(method.name) {
-            if inherentMethodNames[methodOwnerKey]?.contains(method.name) == true {
+        } else {
+          // These members bypass `collectGivenSignatures`; run the namespace
+          // algebra here (same keys and scope the collect branches derive) so
+          // they still take part in name conflicts. A name already taken on
+          // this type is settled by that algebra: requirement-vs-inherent is
+          // its Duplicate row, in every declaration order.
+          let skipOwnerKey: MethodOwner
+          let skipScope: MethodScope
+          if !typeParams.isEmpty {
+            let skipBaseName: String
+            if case .generic(let name, _, _) = typeNode {
+              skipBaseName = name
+            } else {
+              skipBaseName = modifierBaseName(for: typeNode) ?? ""
+            }
+            skipOwnerKey = methodOwnerForName(skipBaseName) ?? .builtin(skipBaseName)
+            skipScope = .family
+          } else {
+            skipOwnerKey = context.methodOwner(of: selfType)
+            let skipArgs = context.methodOwnerAndArgs(of: selfType).args
+            skipScope = (!skipArgs.isEmpty
+              && !skipArgs.contains(where: { context.containsGenericParameter($0) }))
+              ? .instance(args: skipArgs) : .family
+          }
+          let skipProvidingDefId = visibleTraitInfo(traitName)?.defId
+          for method in preRegisteredMethods {
+            let verdict = declareMethod(MethodDeclRecord(
+              owner: skipOwnerKey,
+              name: method.name,
+              scope: skipScope,
+              kind: givenMemberDeclKind(
+                providingTrait: skipProvidingDefId, methodName: method.name),
+              sourceDefId: method.defId))
+            switch verdict {
+            case .some(.duplicate):
               throw SemanticError.duplicateDefinition(method.name, span: span)
+            case .some(.ambiguous):
+              try handleError(SemanticError(.generic(
+                "Ambiguous method '\(method.name)' for type '\(selfType.description)' via trait extensions"
+              ), span: span))
+            case .some(.toolDefers), .none:
+              break
             }
           }
         }
@@ -2531,18 +2543,32 @@ extension TypeChecker {
         }
 
         for m in methods {
-          // NO OVERLAP with instance-target givens (the generic intrinsic path
-          // mirrors the generic ordinary one).
-          if noteGivenUniversalMethodName(owner: genericOwnerKey, name: m.name) {
+          // ONE declaration-time authority (docs/design/method-namespace.md) --
+          // the generic intrinsic path mirrors the generic ordinary one.
+          let verdict = declareMethod(MethodDeclRecord(
+            owner: genericOwnerKey,
+            name: m.name,
+            scope: .family,
+            kind: MethodDeclKind.inherent,
+            // `IntrinsicMethodDeclaration` carries no DefId; mint one so each
+            // declaration keeps its own namespace identity.
+            sourceDefId: context.allocateDefId(
+              modulePath: currentModulePath, name: m.name, kind: .function,
+              sourceFile: currentSourceFile)))
+          switch verdict {
+          case .some(.duplicate):
             throw SemanticError.duplicateDefinition(m.name, span: span)
+          case .some(.ambiguous):
+            try handleError(SemanticError(.generic(
+              "Ambiguous method '\(m.name)' for type '\(baseName)' via trait extensions"
+            ), span: span))
+            continue
+          case .some(.toolDefers):
+            continue
+          case .none:
+            break
           }
-          // Check for duplicate method name on this type
-          let allExisting = (genericExtensionMethods[genericOwnerKey] ?? []).map { $0.method.name }
-            + genericIntrinsicExtensionMethods[genericOwnerKey]!.map { $0.method.name }
-          if allExisting.contains(m.name) {
-            throw SemanticError.duplicateDefinition(m.name, span: span)
-          }
-          
+
           genericIntrinsicExtensionMethods[genericOwnerKey]!.append((typeParams: typeParams, method: m))
         }
       } else {
@@ -2574,6 +2600,30 @@ extension TypeChecker {
         
         // Pre-register method signatures (without checking bodies)
         for method in methods {
+          // ONE declaration-time authority (docs/design/method-namespace.md).
+          let verdict = declareMethod(MethodDeclRecord(
+            owner: methodOwnerKey,
+            name: method.name,
+            scope: .family,
+            kind: MethodDeclKind.inherent,
+            // `IntrinsicMethodDeclaration` carries no DefId; mint one so each
+            // declaration keeps its own namespace identity.
+            sourceDefId: context.allocateDefId(
+              modulePath: currentModulePath, name: method.name, kind: .function,
+              sourceFile: currentSourceFile)))
+          switch verdict {
+          case .some(.duplicate):
+            throw SemanticError.duplicateDefinition(method.name, span: span)
+          case .some(.ambiguous):
+            try handleError(SemanticError(.generic(
+              "Ambiguous method '\(method.name)' for type '\(type.description)' via trait extensions"
+            ), span: span))
+            continue
+          case .some(.toolDefers):
+            continue
+          case .none:
+            break
+          }
           let methodType = try withNewScope {
             try currentScope.defineType("Self", type: type)
             // Method-level type parameters are binders for the signature
@@ -2613,22 +2663,12 @@ extension TypeChecker {
           // `resolveGenericMethodWithExplicitTypeArgs` consults. Same split the
           // ordinary `given` path makes.
           if method.typeParameters.isEmpty {
-            // Check for duplicate method name on this type
-            if extensionMethods[methodOwnerKey]![method.name] != nil {
-              throw SemanticError.duplicateDefinition(method.name, span: span)
-            }
-
             extensionMethods[methodOwnerKey]![method.name] = methodSymbol
             // `given intrinsic X { … }` is inherent: no face gate (§3.4).
             markInherentMethod(owner: methodOwnerKey, name: method.name)
           } else {
             if genericExtensionMethods[methodOwnerKey] == nil {
               genericExtensionMethods[methodOwnerKey] = []
-            }
-            let existsInGeneric = genericExtensionMethods[methodOwnerKey]!.contains(where: { $0.method.name == method.name })
-            let existsInIntrinsic = (genericIntrinsicExtensionMethods[methodOwnerKey] ?? []).contains(where: { $0.method.name == method.name })
-            if existsInGeneric || existsInIntrinsic {
-              throw SemanticError.duplicateDefinition(method.name, span: span)
             }
             // An intrinsic method has no body; the placeholder never runs
             // because the call lowers to a scalar op before codegen.

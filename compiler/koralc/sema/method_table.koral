@@ -16,6 +16,116 @@ public type MethodInstanceSlot(
     providing_traits: List[DefId],
 );
 
+// ── Declaration namespace (docs/design/method-namespace.md) ───────────────────
+
+/// Where a method declaration applies: every instantiation of its owner
+/// (`Family`), or exactly one (`Instance(args)`). Disjoint instances may
+/// declare the same names; `Family` meets every instance.
+public type MethodScope {
+    Family(),
+    Instance(args: List[Type]),
+};
+
+/// Who provides a method declaration.
+public type MethodDeclKind {
+    Inherent(),
+    Requirement(trait_def_id: DefId),
+    Tool(trait_def_id: DefId),
+};
+
+/// A method declaration's semantic identity in the namespace: WHAT it applies
+/// to and WHO provides it, keyed by the declaration itself.
+public type MethodDeclRecord(
+    owner: MethodOwner,
+    name: String,
+    scope: MethodScope,
+    kind: MethodDeclKind,
+    source_def_id: DefId,
+);
+
+/// The verdict `declare_method` answers. `.None()` = legal, proceed.
+public type DeclConflict {
+    /// A second definition on an overlapping receiver range -- the
+    /// `Duplicate definition: <name>` complaint, whichever scope kinds met
+    /// (`Instance` x `Family` included: the no-overlap rule).
+    Duplicate(),
+    /// Two DISTINCT declarations' requirement witnesses on one range: the
+    /// ambiguous-trait-extension complaint the method face resolves.
+    Ambiguous(),
+    /// A tool declaration meeting any occupant of the name: the tool never
+    /// owns the name and defers (guide: inherent type methods win over trait
+    /// tool methods).
+    ToolDefers(),
+};
+
+/// Do two scopes cover a common receiver?
+public let method_scopes_meet(a: MethodScope, b: MethodScope): Bool = {
+    return when a in {
+        .Family() then true,
+        .Instance(a_args) then when b in {
+            .Family() then true,
+            .Instance(b_args) then a_args == b_args,
+        },
+    };
+};
+
+/// One row of the conflict algebra: what `incoming` meeting `existing` means.
+/// Scope-disjoint pairs answer `.None()` before they ever get here.
+public let method_decl_conflict(
+    existing: MethodDeclRecord,
+    incoming: MethodDeclRecord,
+): Option[DeclConflict] = {
+    if not method_scopes_meet(existing.scope, incoming.scope) then {
+        return Option[DeclConflict].None();
+    };
+    when incoming.kind in {
+        .Tool(_) then return Option[DeclConflict].Some(DeclConflict.ToolDefers()),
+        _ then {},
+    };
+    when existing.kind in {
+        // A non-tool declaration overrides a tool occupant in any order.
+        .Tool(_) then return Option[DeclConflict].None(),
+        _ then {},
+    };
+    let cross_scope = when existing.scope in {
+        .Family() then incoming.scope is .Instance(_),
+        .Instance(_) then incoming.scope is .Family(),
+    };
+    // Both non-tool on one overlapping range: across scope kinds the
+    // no-overlap rule is a blanket duplicate; within one scope an inherent or
+    // requirement witness owns its name, and two requirement witnesses are
+    // the ambiguity the face resolves.
+    if cross_scope then {
+        return Option[DeclConflict].Some(DeclConflict.Duplicate());
+    };
+    if incoming.kind is .Inherent() or existing.kind is .Inherent() then {
+        return Option[DeclConflict].Some(DeclConflict.Duplicate());
+    };
+    return Option[DeclConflict].Some(DeclConflict.Ambiguous());
+};
+
+/// Rank verdicts for combine: the worse news wins.
+public let decl_conflict_rank(c: DeclConflict): Int = {
+    return when c in {
+        .Duplicate() then 2,
+        .Ambiguous() then 1,
+        .ToolDefers() then 0,
+    };
+};
+
+public let worse_decl_conflict(
+    a: Option[DeclConflict],
+    b: Option[DeclConflict],
+): Option[DeclConflict] = {
+    return when a in {
+        .Some(ac) then when b in {
+            .Some(bc) then if decl_conflict_rank(bc) > decl_conflict_rank(ac) then b else a,
+            .None() then a,
+        },
+        .None() then b,
+    };
+};
+
 public type mutable MethodTable(
     mutable methods: Dict[MethodOwner, Dict[String, Symbol]],
     // Instance-scoped slots: (owner -> method name -> slots). A slot matches a
@@ -36,6 +146,11 @@ public type mutable MethodTable(
     // traits is in scope at the call site (Rust: "items from traits can only be
     // used if the trait is in scope").
     mutable method_traits: Dict[MethodOwner, Dict[String, List[DefId]]],
+    // DECLARATION NAMESPACE (docs/design/method-namespace.md): every method
+    // declaration's scope x kind, keyed (owner, name). The conflict algebra
+    // runs against these records; the maps above are derived indexes for
+    // lookup and the method face.
+    mutable declared: Dict[MethodOwner, Dict[String, List[MethodDeclRecord]]],
 );
 
 given MethodTable {
@@ -46,6 +161,7 @@ given MethodTable {
             Dict[MethodOwner, Set[String]].new(),
             Dict[MethodOwner, Dict[String, List[DefId]]].new(),
             Dict[MethodOwner, Dict[String, List[DefId]]].new(),
+            Dict[MethodOwner, Dict[String, List[MethodDeclRecord]]].new(),
         );
     };
 
@@ -103,6 +219,33 @@ given MethodTable {
 
     public register(self, owner: MethodOwner, method_name: String, method: Symbol): Void = {
         let _ = self.register_with_source(owner, method_name, method, method.def_id);
+    };
+
+    /// Declare `record` in the namespace and answer the conflict verdict --
+    /// the single declaration-time authority (method-namespace.md).
+    ///
+    /// Scope-disjoint declarations never meet; a tool defers to any occupant
+    /// and a non-tool overrides a tool occupant; overlapping non-tool
+    /// declarations collide across scope kinds outright (`Instance` x `Family`
+    /// is the no-overlap rule) and within one scope by kind. Each call is one
+    /// declaration occurrence (the callers funnel a member exactly once), so
+    /// every arrival is judged -- two same-named members of one block meet
+    /// here exactly like two blocks do. The caller reports the verdict; this
+    /// table has no diagnostic channel.
+    public declare_method(self, record: MethodDeclRecord): Option[DeclConflict] = {
+        let mutable by_name = self.declared.get(record.owner) or else Dict[
+            String,
+            List[MethodDeclRecord],
+        ].new();
+        let mutable records = by_name.get(record.name) or else List[MethodDeclRecord].new();
+        let mutable verdict = Option[DeclConflict].None();
+        for existing in records then {
+            verdict = worse_decl_conflict(verdict, method_decl_conflict(existing, record));
+        };
+        records.push(record);
+        by_name.insert(record.name, records);
+        self.declared.insert(record.owner, by_name);
+        return verdict;
     };
 
     public lookup(self, owner: MethodOwner, method_name: String): Option[Symbol] = {

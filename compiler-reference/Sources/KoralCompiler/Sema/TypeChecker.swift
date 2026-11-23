@@ -283,18 +283,40 @@ public class TypeChecker {
     var providingTraits: [DefId]
   }
   var instanceExtensionMethods: [MethodOwner: [String: [InstanceMethodSlot]]] = [:]
-  /// Method names declared per owner by INSTANCE-target given blocks
-  /// (`given List[Int] { m }`) and by GENERIC given blocks (`given[T] List[T]
-  /// { m }`). The two kinds of `given` may not declare the same name for one
-  /// owner: a generic given's methods already serve every instantiation, so a
-  /// same-named instance method would be a second definition on its
-  /// instantiation -- a duplicate, never a specialization. Disjoint INSTANCES
-  /// may still share names (each name is scoped to its own instantiation); a
-  /// plain `given Plain { … }` participates in neither book (it claims no
-  /// instantiation a generic given could already serve), and trait tool blocks
-  /// (`given Trait { … }`) take no part either.
-  var givenInstanceMethodNames: [MethodOwner: Set<String>] = [:]
-  var givenUniversalMethodNames: [MethodOwner: Set<String>] = [:]
+  // ── Declaration namespace (docs/design/method-namespace.md) ─────────────────
+  /// Where a method declaration applies: every instantiation of its owner, or
+  /// exactly one. Disjoint instances may declare the same names; `family` meets
+  /// every instance.
+  enum MethodScope {
+    case family
+    case instance(args: [Type])
+  }
+  /// Who provides a method declaration. A method a trait delivers without
+  /// declaring it (a tool copy, a conformance helper) is `.tool` and never owns
+  /// its name.
+  enum MethodDeclKind {
+    case inherent
+    case requirement(trait: DefId)
+    case tool(trait: DefId)
+  }
+  /// A method declaration's semantic identity in the namespace.
+  struct MethodDeclRecord {
+    var owner: MethodOwner
+    var name: String
+    var scope: MethodScope
+    var kind: MethodDeclKind
+    var sourceDefId: DefId
+  }
+  /// The verdict `declareMethod` answers. `nil` = legal, proceed.
+  enum DeclConflict {
+    case duplicate
+    case ambiguous
+    case toolDefers
+  }
+  /// (owner, name) -> every declaration's scope x kind. The conflict algebra
+  /// runs against these records; the maps above are derived indexes for lookup
+  /// and the method face.
+  var declaredMethodRecords: [MethodOwner: [String: [MethodDeclRecord]]] = [:]
   // Owner IDENTITY -> MethodName -> [MethodDefId]: tracks which method
   // declarations provide an extension slot so repeated trait paths can reuse the
   // same source without being treated as ambiguous.

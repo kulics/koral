@@ -70,7 +70,7 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 | [`flow-operator-forms.md`](flow-operator-forms.md) —— 流程算子的形态与折叠 | Implemented | [`../implementation/flow-operator-forms-implementation.md`](../implementation/flow-operator-forms-implementation.md) | 2026-10-24 |
 | [`generics-and-monomorphization.md`](generics-and-monomorphization.md) —— 泛型与单态化 | Implemented | [`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §6–§7 | 2026-10 |
 | [`traits-and-givens.md`](traits-and-givens.md) —— trait / given / trait object | Implemented | 同上 §6–§7、§14、§21 | 2026-10 |
-| [`method-namespace.md`](method-namespace.md) —— 方法声明命名空间 | Accepted（冲突代数「实例 × 泛型禁止重叠」一行已先行落地 2026-11-23；命名空间重构未实施） | 未建（重构落地时补 `../implementation/method-namespace-implementation.md`） | 2026-11-23 |
+| [`method-namespace.md`](method-namespace.md) —— 方法声明命名空间 | Implemented（2026-11-24 冲突代数 + 注册漏斗落地；派生索引写入收拢未尽，见实现记录） | [`../implementation/method-namespace-implementation.md`](../implementation/method-namespace-implementation.md) | 2026-11-24 |
 | [`name-resolution.md`](name-resolution.md) —— 名字解析与身份边界 | Implemented | 同上 §15–§24 | 2026-10 |
 | [`std-api-design.md`](std-api-design.md) —— 标准库 API 设计约定 | Implemented | 无单独记录（随 `std/` API 落地） | 2026-10 |
 | [`design-axioms.md`](design-axioms.md) —— 设计公理与复杂度预算 | Accepted | 无独立记录（贯穿性规则，由各设计文档的取舍看护） | 2026-10-24 |

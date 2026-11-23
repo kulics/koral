@@ -1,6 +1,6 @@
 # 方法声明命名空间
 
-> **Status**：Accepted（冲突代数「实例 × 泛型禁止重叠」一行已先行落地 2026-11-23；命名空间重构未实施）· 2026-11-23 · 对应实现（未建，重构落地时补 `../implementation/method-namespace-implementation.md`）
+> **Status**：Implemented（冲突代数与注册漏斗 2026-11-24 落地；派生索引的写入收拢见实现记录「未尽」）· 2026-11-24 · 对应实现 [`../implementation/method-namespace-implementation.md`](../implementation/method-namespace-implementation.md)
 
 ## 摘要
 
@@ -143,9 +143,7 @@ scope 不相交则一律合法（不相交实例可同名）。scope 相交时�
 
 ## 实施
 
-独立改动，不与语义修复混批：引入 `MethodDeclRecord` / `MethodNamespace` 与注册
-漏斗（两个编译器同批），迁移散布查重到冲突代数，删除被吸收的补丁表——含 2026-11-23
-修复引入的两本名册（`given_instance_method_names` / `given_universal_method_names`
-及种子镜像，它们是本模型的临时桥）。落地时建
-`../implementation/method-namespace-implementation.md` 记录施工与保真核对，
-并把本文 Status 改为 Implemented。
+2026-11-24 落地（独立一笔）：`MethodDeclRecord` / 命名空间 / 注册漏斗进两个编译器，
+散布查重迁入冲突代数，两本临时名册收编删除。施工对照表、角落统一清单与保真核对见
+[`../implementation/method-namespace-implementation.md`](../implementation/method-namespace-implementation.md)；
+派生索引的写入点收拢与 `inherent_keys` 等字段吸收留在后续（实现记录「未尽」）。

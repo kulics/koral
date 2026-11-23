@@ -46,25 +46,6 @@ extension TypeChecker {
       currentSourceFile: currentSourceFile.isEmpty ? nil : currentSourceFile)
   }
 
-  /// Who owns a method name on a type's extension table.
-  ///
-  /// An INHERENT method (`given X { m }`) or a trait REQUIREMENT witness owns
-  /// the name; a materialized trait TOOL never does -- an inherent method
-  /// simply overrides a tool (guide: "Inherent type methods win over trait tool
-  /// methods"). An inherent name colliding with a requirement name is a
-  /// definition error in every registration order, never a priority contest.
-  func slotOwnedByInherentOrRequirement(owner: MethodOwner, name: String) -> Bool {
-    if inherentMethodNames[owner]?.contains(name) == true {
-      return true
-    }
-    for traitDefId in methodProviderTraits[owner]?[name] ?? [] {
-      if traitMethodDefId(traitDefId: traitDefId, methodName: name) != nil {
-        return true
-      }
-    }
-    return false
-  }
-
   /// Does the method face admit `owner.name` here?
   func methodFaceAllows(owner: MethodOwner, name: String) -> Bool {
     if inherentMethodNames[owner]?.contains(name) == true {
@@ -86,27 +67,102 @@ extension TypeChecker {
     return slots.first(where: { $0.selfArgs == selfArgs })
   }
 
-  /// Record a method name an INSTANCE-target given member declares on `owner`
-  /// (`given List[Int] { m }`) and answer whether a universal given already
-  /// declares it -- the two kinds of `given` may not overlap on one owner's
-  /// method namespace. Mirrors koralc `note_given_instance_method_name`.
-  func noteGivenInstanceMethodName(owner: MethodOwner, name: String) -> Bool {
-    let universal = givenUniversalMethodNames[owner] ?? []
-    var instance = givenInstanceMethodNames[owner] ?? []
-    instance.insert(name)
-    givenInstanceMethodNames[owner] = instance
-    return universal.contains(name)
+  /// A given member's declaration kind: inherent (no trait), a REQUIREMENT
+  /// witness (the trait declares the method), or a trait-delivered helper/tool
+  /// copy that never owns its name. Mirrors koralc `collect_given_signatures`'s
+  /// `decl_kind`.
+  func givenMemberDeclKind(providingTrait: DefId?, methodName: String) -> MethodDeclKind {
+    guard let trait = providingTrait else { return .inherent }
+    if traitMethodDefId(traitDefId: trait, methodName: methodName) != nil {
+      return .requirement(trait: trait)
+    }
+    return .tool(trait: trait)
   }
 
-  /// The universal side of `noteGivenInstanceMethodName`: record a method name
-  /// a GENERIC given member declares on `owner` and answer whether an instance
-  /// given already claims it. Mirrors koralc `note_given_universal_method_name`.
-  func noteGivenUniversalMethodName(owner: MethodOwner, name: String) -> Bool {
-    let instance = givenInstanceMethodNames[owner] ?? []
-    var universal = givenUniversalMethodNames[owner] ?? []
-    universal.insert(name)
-    givenUniversalMethodNames[owner] = universal
-    return instance.contains(name)
+  /// Do two scopes cover a common receiver?
+  func methodScopesMeet(_ a: MethodScope, _ b: MethodScope) -> Bool {
+    switch (a, b) {
+    case (.family, _), (_, .family):
+      return true
+    case (.instance(let x), .instance(let y)):
+      return x == y
+    }
+  }
+
+  /// One row of the conflict algebra (docs/design/method-namespace.md).
+  /// Mirrors koralc `method_decl_conflict`.
+  func methodDeclConflict(_ existing: MethodDeclRecord, incoming: MethodDeclRecord) -> DeclConflict? {
+    guard methodScopesMeet(existing.scope, incoming.scope) else { return nil }
+    if case .tool = incoming.kind {
+      return .toolDefers
+    }
+    if case .tool = existing.kind {
+      // A non-tool declaration overrides a tool occupant in any order.
+      return nil
+    }
+    let crossScope: Bool
+    switch (existing.scope, incoming.scope) {
+    case (.family, .instance), (.instance, .family):
+      crossScope = true
+    default:
+      crossScope = false
+    }
+    // Both non-tool on one overlapping range: across scope kinds the
+    // no-overlap rule is a blanket duplicate; within one scope an inherent or
+    // requirement witness owns its name, and two requirement witnesses are
+    // the ambiguity the face resolves.
+    if crossScope {
+      return .duplicate
+    }
+    if case .inherent = incoming.kind {
+      return .duplicate
+    }
+    if case .inherent = existing.kind {
+      return .duplicate
+    }
+    return .ambiguous
+  }
+
+  /// Rank verdicts for combine: the worse news wins.
+  func declConflictRank(_ c: DeclConflict) -> Int {
+    switch c {
+    case .duplicate: return 2
+    case .ambiguous: return 1
+    case .toolDefers: return 0
+    }
+  }
+
+  func worseDeclConflict(_ a: DeclConflict?, _ b: DeclConflict?) -> DeclConflict? {
+    switch (a, b) {
+    case (.some(let x), .some(let y)):
+      return declConflictRank(y) > declConflictRank(x) ? b : a
+    case (.some, .none):
+      return a
+    default:
+      return b
+    }
+  }
+
+  /// Declare `record` in the namespace and answer the conflict verdict -- the
+  /// single declaration-time authority (docs/design/method-namespace.md).
+  /// Scope-disjoint declarations never meet; a tool defers to any occupant and
+  /// a non-tool overrides a tool occupant; overlapping non-tool declarations
+  /// collide across scope kinds outright and within one scope by kind. Each
+  /// call is one declaration occurrence (the callers funnel a member exactly
+  /// once), so every arrival is judged -- two same-named members of one block
+  /// meet here exactly like two blocks do. Mirrors koralc
+  /// `MethodTable.declare_method`.
+  func declareMethod(_ record: MethodDeclRecord) -> DeclConflict? {
+    var byName = declaredMethodRecords[record.owner] ?? [:]
+    var records = byName[record.name] ?? []
+    var verdict: DeclConflict? = nil
+    for existing in records {
+      verdict = worseDeclConflict(verdict, methodDeclConflict(existing, incoming: record))
+    }
+    records.append(record)
+    byName[record.name] = records
+    declaredMethodRecords[record.owner] = byName
+    return verdict
   }
 
   /// Register `symbol` for the single instantiation named by `selfArgs`
@@ -145,22 +201,6 @@ extension TypeChecker {
     if slot.inherent { return true }
     if slot.providingTraits.isEmpty { return true }
     return slot.providingTraits.contains(where: { traitInScope($0) })
-  }
-
-  /// Does the instance slot for exactly `selfArgs` own its name (an inherent
-  /// method or a trait REQUIREMENT witness)? The instance twin of
-  /// `slotOwnedByInherentOrRequirement`.
-  func instanceSlotOwnedByInherentOrRequirement(owner: MethodOwner, name: String, selfArgs: [Type]) -> Bool {
-    guard let slot = instanceMethodSlot(owner: owner, name: name, selfArgs: selfArgs) else {
-      return false
-    }
-    if slot.inherent { return true }
-    for traitDefId in slot.providingTraits {
-      if traitMethodDefId(traitDefId: traitDefId, methodName: name) != nil {
-        return true
-      }
-    }
-    return false
   }
 
   /// A method-table read with no face gate, instance slots first. Mirrors the
