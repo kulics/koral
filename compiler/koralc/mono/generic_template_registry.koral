@@ -206,6 +206,11 @@ public type mutable GenericFunctionTemplate(
 
 public type mutable GenericExtensionMethodTemplate(
     type_params: List[TypeParameterDecl],
+    // The target's INSTANTIATION arguments when the `given` names one
+    // (`given List[Int] { ... }` -> [Int]); empty for a universal target.
+    // An instance-scoped template answers for exactly these arguments and no
+    // other instantiation -- rustc's `impl` on a concrete instantiation.
+    owner_args: List[Type],
     method: MethodDeclaration,
     conformance_trait_name: Option[String],
     // Swift GenericExtensionMethodTemplate.conformanceTraitDefId — the trait's
@@ -294,7 +299,7 @@ given GenericTemplateRegistry {
         templates: List[GenericExtensionMethodTemplate],
         method_name: String,
         method_type_arg_count: Option[Int],
-        extension_type_arg_count: Option[Int],
+        extension_type_args: List[Type],
     ): Option[GenericExtensionMethodTemplate] = {
         // Swift Monomorphizer.selectExtensionTemplate: prefer a candidate whose
         // body has been checked, else the first candidate. The previous extra
@@ -313,15 +318,18 @@ given GenericTemplateRegistry {
                 },
                 .None() then {},
             };
-            when extension_type_arg_count in {
-                .Some(count) then {
-                    // Swift Monomorphizer.selectExtensionTemplate filters
-                    // `ext.typeParams.count != extensionTypeArgCount` unconditionally.
-                    if template_ref.type_params.count() != count then {
-                        continue;
-                    };
-                },
-                .None() then {},
+            // An instance-scoped template (`given List[Int] { … }`) answers
+            // for exactly its declared arguments. A universal template
+            // declares the target's type parameters, so the receiver must
+            // carry exactly that many arguments (Swift
+            // `selectExtensionTemplate`'s `ext.typeParams.count !=
+            // extensionTypeArgCount`).
+            if not template_ref.owner_args.is_empty() then {
+                if template_ref.owner_args != extension_type_args then {
+                    continue;
+                };
+            } else if template_ref.type_params.count() != extension_type_args.count() then {
+                continue;
             };
             if template_ref.checked_body is .Some(_) then {
                 return Option[GenericExtensionMethodTemplate].Some(template_ref);
@@ -735,7 +743,7 @@ given GenericTemplateRegistry {
         owner: MethodOwner,
         method_name: String,
         method_type_arg_count: Option[Int],
-        extension_type_arg_count: Option[Int],
+        extension_type_args: List[Type],
     ): Option[GenericExtensionMethodTemplate] = {
         when self.extension_methods.get(owner) in {
             .Some(templates) then {
@@ -743,7 +751,7 @@ given GenericTemplateRegistry {
                     templates,
                     method_name,
                     method_type_arg_count,
-                    extension_type_arg_count,
+                    extension_type_args,
                 );
             },
             .None() then {},

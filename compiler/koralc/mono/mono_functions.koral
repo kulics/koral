@@ -366,11 +366,50 @@ public let instantiate_function(
 //
 // Among matching candidates, prefer one with a checked body source.
 //
+/// The fresher copy of `template` itself (same DECLARATION identity), falling
+/// back to the name-and-shape match. A re-lookup must never cross-pick a
+/// same-named method of another instantiation.
+public let select_extension_template_for_method(
+    extensions: List[GenericExtensionMethodTemplate],
+    template: GenericExtensionMethodTemplate,
+): Option[GenericExtensionMethodTemplate] = {
+    let mutable first_shape_match = Option[GenericExtensionMethodTemplate].None();
+    for ext_ref in extensions then {
+        if ext_ref.method.def_id == template.method.def_id then {
+            if ext_ref.checked_body is .Some(_) then {
+                return Option[GenericExtensionMethodTemplate].Some(ext_ref);
+            };
+            when first_shape_match in {
+                .Some(_) then {},
+                .None() then {
+                    first_shape_match = Option[GenericExtensionMethodTemplate].Some(ext_ref);
+                },
+            };
+        };
+    };
+    when first_shape_match in {
+        .Some(_) then {
+            return first_shape_match;
+        },
+        .None() then {},
+    };
+    // No declaration match: a tool donor is a DIFFERENT declaration and is
+    // found by name and shape, exactly as before.
+    return select_extension_template(
+        extensions,
+        template.method.name,
+        Option[Int].Some(template.method.type_params.count()),
+        Option[Int].Some(template.type_params.count()),
+        Option[List[Type]].None(),
+    );
+};
+
 public let select_extension_template(
     extensions: List[GenericExtensionMethodTemplate],
     name: String,
     method_type_arg_count: Option[Int],
     extension_type_arg_count: Option[Int],
+    expected_owner_args: Option[List[Type]],
 ): Option[GenericExtensionMethodTemplate] = {
     let mutable first_match = Option[GenericExtensionMethodTemplate].None();
     for ext_ref in extensions then {
@@ -385,7 +424,21 @@ public let select_extension_template(
             },
             .None() then {},
         };
-        when extension_type_arg_count in {
+        // An instance-scoped template (a `given List[Int]` method) answers only
+        // for its declared arguments; without an argument expectation it is
+        // never the match. A universal template keeps the shape-count rule.
+        if not ext_ref.owner_args.is_empty() then {
+            when expected_owner_args in {
+                .Some(args) then {
+                    if ext_ref.owner_args != args then {
+                        continue;
+                    };
+                },
+                .None() then {
+                    continue;
+                },
+            };
+        } else when extension_type_arg_count in {
             .Some(count) then {
                 if ext_ref.type_params.count() != count then {
                     continue;
@@ -491,6 +544,7 @@ private let patched_extension_template_with_body(
 ): GenericExtensionMethodTemplate = {
     return GenericExtensionMethodTemplate(
         template.type_params,
+        template.owner_args,
         donor.method,
         template.conformance_trait_name,
         template.conformance_trait_def_id,
@@ -745,6 +799,7 @@ let select_trait_tool_template_cached(
             method_name,
             method_type_arg_count,
             trait_arg_count,
+            Option[List[Type]].None(),
         ),
         .None() then Option[GenericExtensionMethodTemplate].None(),
     };
@@ -1483,6 +1538,11 @@ public let instantiate_extension_method(
     type_args: List[Type],
     method_type_args: List[Type],
 ): Symbol = {
+    // An instance-scoped template (`given List[Int] { … }`) materializes for
+    // exactly its declared arguments and never for a sibling instantiation.
+    if not template.owner_args.is_empty() and template.owner_args != type_args then {
+        return Symbol(DefId(UInt(0)), Type.Unknown(), SymbolKind.Function());
+    };
     // 1. Resolve the base type if it's a parameterized type.
     let mutable resolved_base_type = resolve_parameterized_type(mono, base_type);
 
@@ -1587,12 +1647,7 @@ public let instantiate_extension_method(
     else {
         when mono.storage.generic_templates.lookup_extension_methods(owner) in {
             .Some(ext_list) then {
-                when select_extension_template(
-                    ext_list,
-                    template.method.name,
-                    Option[Int].Some(template.method.type_params.count()),
-                    Option[Int].Some(template.type_params.count()),
-                ) in {
+                when select_extension_template_for_method(ext_list, template) in {
                     .Some(latest) then latest,
                     .None() then template,
                 }
@@ -2855,6 +2910,7 @@ public let instantiate_extension_method_from_entry(
                     template.method.name,
                     Option[Int].Some(template.method.type_params.count()),
                     Option[Int].Some(template.type_params.count()),
+                    Option[List[Type]].None(),
                 ) in {
                     .Some(tool_template_ref) then patched_extension_template_with_body(
                         template,
@@ -3039,7 +3095,10 @@ public let instantiate_extension_method_from_entry(
         .None() then {},
     };
 
-    if type_args.count() != resolved_template.type_params.count() then {
+    // An instance-scoped template binds no owner parameters; its declared
+    // arguments already matched at the entry guard.
+    if resolved_template.owner_args.is_empty()
+        and type_args.count() != resolved_template.type_params.count() then {
         mono.storage.current_self_type = saved_self_type;
         return Symbol(DefId(UInt(0)), Type.Unknown(), SymbolKind.Function());
     };
@@ -4232,6 +4291,11 @@ public let extension_type_args_satisfy_constraints(
     template: GenericExtensionMethodTemplate,
     type_args: List[Type],
 ): Bool = {
+    // An instance-scoped template binds no owner parameters: its declared
+    // arguments ARE the concrete instantiation.
+    if not template.owner_args.is_empty() then {
+        return template.owner_args == type_args;
+    };
     if template.type_params.count() != type_args.count() then {
         return false;
     };
@@ -4505,7 +4569,11 @@ private let instantiate_trait_vtable_methods_core(
                             continue;
                         },
                     };
-                    if template_ref.type_params.count() != extension_type_args.count() then {
+                    if not template_ref.owner_args.is_empty() then {
+                        if template_ref.owner_args != extension_type_args then {
+                            continue;
+                        };
+                    } else if template_ref.type_params.count() != extension_type_args.count() then {
                         continue;
                     };
                     if not extension_type_args_satisfy_constraints(
@@ -4535,6 +4603,7 @@ private let instantiate_trait_vtable_methods_core(
                                     template_ref.method.type_params.count(),
                                 ),
                                 Option[Int].Some(trait_type_args.count()),
+                                Option[List[Type]].None(),
                             ) in {
                                 .Some(tool_template_ref) then {
                                     if extension_type_args_satisfy_constraints(
@@ -5034,6 +5103,7 @@ public let instantiate_trait_placeholder_method(
             method_name,
             method_type_arg_count,
             extension_type_arg_count,
+            Option[List[Type]].None(),
         ),
         .None() then select_conformance_extension_template(
             mono,

@@ -240,7 +240,7 @@ extension TypeChecker {
     case .reference(let inner):
       // New: look up Ref generic extension methods first
       if let extensions = genericExtensionMethods[.builtin("Ref")],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [inner]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -254,7 +254,7 @@ extension TypeChecker {
 
     case .borrowedReference(let inner):
       if let extensions = genericExtensionMethods[.builtin("Ref")],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [inner]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: .reference(inner: inner),
@@ -267,7 +267,7 @@ extension TypeChecker {
 
     case .mutableReference(let inner):
       if let extensions = genericExtensionMethods[.builtin("MutRef")],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [inner]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -277,7 +277,7 @@ extension TypeChecker {
         )
       }
       if let extensions = genericExtensionMethods[.builtin("Ref")],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [inner]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -290,7 +290,7 @@ extension TypeChecker {
 
     case .mutableBorrowedReference(let inner):
       if let extensions = genericExtensionMethods[.builtin("MutRef")],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [inner]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: .mutableReference(inner: inner),
@@ -300,7 +300,7 @@ extension TypeChecker {
         )
       }
       if let extensions = genericExtensionMethods[.builtin("Ref")],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [inner]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: .reference(inner: inner),
@@ -313,7 +313,7 @@ extension TypeChecker {
 
     case .weakReference(let inner):
       if let extensions = genericExtensionMethods[.builtin("WeakRef")],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [inner]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -439,7 +439,7 @@ extension TypeChecker {
       }
 
       if let extensions = genericExtensionMethods[.builtin("Ptr")],
-        let ext = extensions.first(where: { $0.method.name == name })
+        let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [element]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -471,7 +471,7 @@ extension TypeChecker {
         )
       }
       if let extensions = genericExtensionMethods[.builtin("MutWeakRef")],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [inner]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -481,7 +481,7 @@ extension TypeChecker {
         )
       }
       if let extensions = genericExtensionMethods[.builtin("WeakRef")],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [inner]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -515,7 +515,7 @@ extension TypeChecker {
       }
 
       if let extensions = genericExtensionMethods[.builtin("MutPtr")],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [element]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -525,7 +525,7 @@ extension TypeChecker {
         )
       }
       if let extensions = genericExtensionMethods[.builtin("Ptr")],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && $0.applies(toTypeArgs: [element]) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -937,11 +937,19 @@ extension TypeChecker {
     let typeParams = methodInfo.typeParams
     let method = methodInfo.method
     
-    guard typeParams.count == typeArgs.count else {
-      throw SemanticError.typeMismatch(
-        expected: "\(typeParams.count) type arguments",
-        got: "\(typeArgs.count)"
-      )
+    // An instance-scoped template binds no owner parameters: its declared
+    // arguments ARE the concrete instantiation, and no other instantiation
+    // may reach it (member-not-found there, matching the universal lookup).
+    if !methodInfo.selfTypeArgs.isEmpty && methodInfo.selfTypeArgs != typeArgs {
+      throw SemanticError(.generic("Member '\(methodInfo.method.name)' not found in type '\(baseType)'"))
+    }
+    if methodInfo.selfTypeArgs.isEmpty {
+      guard typeParams.count == typeArgs.count else {
+        throw SemanticError.typeMismatch(
+          expected: "\(typeParams.count) type arguments",
+          got: "\(typeArgs.count)"
+        )
+      }
     }
 
     try enforceGenericConstraints(typeParameters: typeParams, args: typeArgs)

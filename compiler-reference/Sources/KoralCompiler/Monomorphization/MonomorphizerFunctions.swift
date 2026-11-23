@@ -244,6 +244,12 @@ extension Monomorphizer {
         typeArgs: [Type],
         methodTypeArgs: [Type]
     ) throws -> Symbol {
+        // An instance-scoped template (a `given List[Int]` method) materializes
+        // for exactly its declared arguments and never for a sibling
+        // instantiation.
+        if !template.selfTypeArgs.isEmpty && template.selfTypeArgs != typeArgs {
+            return Symbol(defId: .invalid, type: .error, kind: .function)
+        }
         // Resolve the base type if it's a parameterized type
         let resolvedBaseType = canonicalReferenceLikeBaseType(resolveParameterizedType(baseType))
         
@@ -279,6 +285,7 @@ extension Monomorphizer {
            let latest = extensions.first(where: {
                $0.method.name == template.method.name &&
                $0.typeParams.count == template.typeParams.count &&
+               $0.selfTypeArgs == template.selfTypeArgs &&
                $0.checkedBody != nil
            }) {
             resolvedTemplate = latest
@@ -369,7 +376,9 @@ extension Monomorphizer {
         let methodTypeParams = methodInfo.method.typeParameters
         let method = methodInfo.method
 
-        if typeParams.count != genericArgs.count {
+        // An instance-scoped template binds no owner parameters: its declared
+        // arguments ARE the concrete instantiation.
+        if methodInfo.selfTypeArgs.isEmpty && typeParams.count != genericArgs.count {
             throw SemanticError.typeMismatch(
                 expected: "\(typeParams.count) args", got: "\(genericArgs.count)")
         }

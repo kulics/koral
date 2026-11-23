@@ -179,6 +179,7 @@ given TypeChecker {
     copied_extension_method_template(
         self,
         type_params: List[TypeParameterDecl],
+        owner_args: List[Type],
         method: MethodDeclaration,
         conformance_trait_name: Option[String],
         conformance_trait_def_id: Option[DefId],
@@ -196,6 +197,7 @@ given TypeChecker {
     ): GenericExtensionMethodTemplate = {
         return GenericExtensionMethodTemplate(
             self.copy_template_type_params(type_params),
+            self.copy_type_list(owner_args),
             self.copy_method_declaration(method),
             conformance_trait_name,
             conformance_trait_def_id,
@@ -216,6 +218,7 @@ given TypeChecker {
     boxed_extension_method_template(
         self,
         type_params: List[TypeParameterDecl],
+        owner_args: List[Type],
         method: MethodDeclaration,
         conformance_trait_name: Option[String],
         conformance_trait_def_id: Option[DefId],
@@ -234,6 +237,7 @@ given TypeChecker {
         let _ = self;
         return GenericExtensionMethodTemplate(
             type_params,
+            owner_args,
             method,
             conformance_trait_name,
             conformance_trait_def_id,
@@ -257,6 +261,12 @@ given TypeChecker {
             copied.push(value);
         };
         return copied;
+    };
+
+    single_type_arg_list(self, t: Type): List[Type] = {
+        let mutable out = List[Type].new();
+        out.push(t);
+        return out;
     };
 
     contains_generic_parameter(self, t: Type): Bool = {
@@ -557,6 +567,7 @@ given TypeChecker {
                             ) then current_ref.method.def_id else template.method.def_id;
                             updated[index] = self.copied_extension_method_template(
                                 template.type_params,
+                                template.owner_args,
                                 MethodDeclaration(
                                     template.method.name,
                                     template.method.access,
@@ -610,6 +621,45 @@ given TypeChecker {
         return self.context().method_owner_of(target_type);
     };
 
+    /// The INSTANTIATION arguments a `given` block's target names
+    /// (`given List[Int] { … }` -> [Int]), empty for a universal target: a
+    /// generic given's own type parameters, or a plain nominal. An
+    /// instance-scoped template answers for exactly these arguments.
+    instance_owner_args(
+        self,
+        target_type: Type,
+        owner_type_params: List[TypeParameter],
+    ): List[Type] = {
+        if not owner_type_params.is_empty() then {
+            return List[Type].new();
+        };
+        // A trait-object target (`given [Tag] { … }` tool blocks) or a
+        // modifier/reference target is universal whatever arguments it
+        // carries -- including when the trait object arrives wrapped in a
+        // reference modifier.
+        when target_type in {
+            .TraitObject(...)
+            or .ReferenceType(_)
+            or .MutableReferenceType(_)
+            or .BorrowedReferenceType(_)
+            or .MutableBorrowedReferenceType(_)
+            or .PointerType(_)
+            or .MutablePointerType(_)
+            or .WeakReferenceType(_)
+            or .MutableWeakReferenceType(_) then {
+                return List[Type].new();
+            },
+            _ then {},
+        };
+        let args = self.context().method_owner_and_args(target_type).second;
+        for arg in args then {
+            if self.contains_generic_parameter(arg) then {
+                return List[Type].new();
+            };
+        };
+        return args;
+    };
+
     /// The owner a `given` block's methods are registered under, when the block
     /// targets a TRAIT.
     ///
@@ -651,6 +701,7 @@ given TypeChecker {
         self,
         type_key: MethodOwner,
         owner_type_params: List[TypeParameter],
+        owner_args: List[Type],
         conformance_target_type: Option[Type],
         conformance_trait_args: List[Type],
         method_name: String,
@@ -701,6 +752,7 @@ given TypeChecker {
         };
         let primary_template = self.boxed_extension_method_template(
             self.to_template_type_params(owner_type_params),
+            owner_args,
             method_decl,
             conformance_trait_name,
             conformance_trait_def_id,
@@ -723,6 +775,7 @@ given TypeChecker {
         self,
         target_type: Type,
         owner_type_param_count: Int,
+        owner_args: List[Type],
         method_name: String,
         method_type_param_count: Int,
         conformance_trait_def_id: Option[DefId],
@@ -739,20 +792,44 @@ given TypeChecker {
         when self.storage.generic_templates.extension_methods.get(type_key) in {
             .Some(existing) then {
                 let mutable updated = existing;
+                // Identity: the conformance's trait DECLARATION. Two same-named
+                // traits from different modules are different traits, so a name
+                // cannot select it. Among shape matches prefer the exact
+                // instantiation (owner_args); fall back to the first shape
+                // match, whose registration and update paths may derive the
+                // arguments differently.
+                let mutable matched_index = Option[Int].None();
+                let mutable fallback_index = Option[Int].None();
                 for pair in updated.lazy().enumerate() then {
-                    let index = pair.first;
                     let current_ref = pair.second;
-                    // Identity: the conformance's trait DECLARATION. Two same-named traits
-                    // from different modules are different traits, so a name cannot select it.
                     if current_ref.method.name == method_name and current_ref.type_params.count(
                     ) == owner_type_param_count and current_ref.method.type_params.count(
                     ) == method_type_param_count and current_ref.conformance_trait_def_id == conformance_trait_def_id then {
+                        if current_ref.owner_args == owner_args then {
+                            matched_index = Option[Int].Some(pair.first);
+                        } else when fallback_index in {
+                            .None() then {
+                                fallback_index = Option[Int].Some(pair.first);
+                            },
+                            .Some(_) then {},
+                        };
+                    };
+                };
+                let chosen_index = when matched_index in {
+                    .Some(i) then Option[Int].Some(i),
+                    .None() then fallback_index,
+                };
+                for pair in updated.lazy().enumerate() then {
+                    let index = pair.first;
+                    let current_ref = pair.second;
+                    if chosen_index is .Some(chosen) and index == chosen then {
                         let new_checked_body = when checked_body in {
                             .Some(_) then checked_body,
                             .None() then current_ref.checked_body,
                         };
                         updated[index] = self.copied_extension_method_template(
                             current_ref.type_params,
+                            current_ref.owner_args,
                             current_ref.method,
                             current_ref.conformance_trait_name,
                             current_ref.conformance_trait_def_id,
@@ -839,6 +916,22 @@ given TypeChecker {
             // surface: two modules' `Plain` landed in one slot.
             self.context().register_method_param_specs(type_key, member.name, param_specs);
             if instance_scoped then {
+                // A method carrying its OWN type parameters is instantiated per
+                // call and lives in the template registry (instance-scoped
+                // through `owner_args`); a concrete slot would type a call that
+                // no body ever answers for.
+                let mutable member_is_generic = false;
+                for param in member.params then {
+                    if self.contains_generic_parameter(param.param_type) then {
+                        member_is_generic = true;
+                    };
+                };
+                if self.contains_generic_parameter(member.return_type) then {
+                    member_is_generic = true;
+                };
+                if member_is_generic then {
+                    continue;
+                };
                 let made_ambiguous = self.storage.method_table.register_instance(
                     type_key,
                     member.name,
@@ -1022,7 +1115,7 @@ given TypeChecker {
                 owner_key,
                 method_name,
                 Option[Int].None(),
-                Option[Int].Some(1),
+                self.single_type_arg_list(inner_type),
             ) in {
                 .Some(template) then {
                     let mutable bindings = Dict[String, Type].new();
@@ -1108,7 +1201,7 @@ given TypeChecker {
                 owner_key,
                 method_name,
                 Option[Int].None(),
-                Option[Int].Some(1),
+                self.single_type_arg_list(inner_type),
             ) in {
                 .Some(template) then {
                     let mutable bindings = Dict[String, Type].new();
@@ -1249,9 +1342,11 @@ given TypeChecker {
                 method_name,
                 Option[Int].Some(method_type_args_ref.count()),
                 Option[Int].Some(extension_type_args.count()),
+                Option[List[Type]].Some(extension_type_args),
             ) is .Some(template) then {
                 let request_template = self.copied_extension_method_template(
                     template.type_params,
+                    template.owner_args,
                     template.method,
                     template.conformance_trait_name,
                     template.conformance_trait_def_id,
@@ -1309,6 +1404,7 @@ given TypeChecker {
                         method_name,
                         Option[Int].Some(method_type_args_ref.count()),
                         Option[Int].Some(conformance.trait_arg_types.count()),
+                        Option[List[Type]].None(),
                     ) or else {
                         continue;
                     };
@@ -1320,6 +1416,7 @@ given TypeChecker {
                     };
                     let request_template = self.copied_extension_method_template(
                         matched_template.type_params,
+                        matched_template.owner_args,
                         matched_template.method,
                         matched_template.conformance_trait_name,
                         matched_template.conformance_trait_def_id,

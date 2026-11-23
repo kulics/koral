@@ -310,7 +310,8 @@ public class Monomorphizer {
         _ extensions: [GenericExtensionMethodTemplate],
         name: String,
         methodTypeArgCount: Int? = nil,
-        extensionTypeArgCount: Int? = nil
+        extensionTypeArgCount: Int? = nil,
+        expectedSelfArgs: [Type]? = nil
     ) -> GenericExtensionMethodTemplate? {
         let candidates = extensions.filter { ext in
             guard ext.method.name == name else {
@@ -319,7 +320,15 @@ public class Monomorphizer {
             if let methodTypeArgCount, ext.method.typeParameters.count != methodTypeArgCount {
                 return false
             }
-            if let extensionTypeArgCount, ext.typeParams.count != extensionTypeArgCount {
+            // An instance-scoped template (a `given List[Int]` method) answers
+            // only for its declared arguments; without an argument expectation
+            // it is never the match. A universal template keeps the
+            // shape-count rule.
+            if !ext.selfTypeArgs.isEmpty {
+                guard let expectedSelfArgs, ext.selfTypeArgs == expectedSelfArgs else {
+                    return false
+                }
+            } else if let extensionTypeArgCount, ext.typeParams.count != extensionTypeArgCount {
                 return false
             }
             return true

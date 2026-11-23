@@ -49,6 +49,11 @@ public struct TraitDeclInfo {
 /// This is used by the Monomorphizer to look up templates when processing instantiation requests.
 public struct GenericExtensionMethodTemplate {
     public let typeParams: [TypeParameterDecl]
+    /// The target's INSTANTIATION arguments when the `given` names one
+    /// (`given List[Int] { ... }` -> [Int]); empty for a universal target.
+    /// An instance-scoped template answers for exactly these arguments and no
+    /// other instantiation -- rustc's `impl` on a concrete instantiation.
+    public let selfTypeArgs: [Type]
     public let method: MethodDeclaration
     public let conformanceTraitName: String?
     public let conformanceTraitDefId: DefId?
@@ -63,6 +68,7 @@ public struct GenericExtensionMethodTemplate {
 
     public init(
         typeParams: [TypeParameterDecl],
+        selfTypeArgs: [Type] = [],
         method: MethodDeclaration,
         conformanceTraitName: String? = nil,
         conformanceTraitDefId: DefId? = nil,
@@ -74,6 +80,7 @@ public struct GenericExtensionMethodTemplate {
         checkedReturnType: Type? = nil
     ) {
         self.typeParams = typeParams
+        self.selfTypeArgs = selfTypeArgs
         self.method = method
         self.conformanceTraitName = conformanceTraitName
         self.conformanceTraitDefId = conformanceTraitDefId
@@ -83,6 +90,13 @@ public struct GenericExtensionMethodTemplate {
         self.checkedBody = checkedBody
         self.checkedParameters = checkedParameters
         self.checkedReturnType = checkedReturnType
+    }
+
+    /// Does this template answer for `typeArgs`? An instance-scoped template
+    /// (a `given List[Int]` method) answers for exactly its declared
+    /// arguments; a universal template applies as before.
+    public func applies(toTypeArgs typeArgs: [Type]) -> Bool {
+        return selfTypeArgs.isEmpty || selfTypeArgs == typeArgs
     }
 }
 

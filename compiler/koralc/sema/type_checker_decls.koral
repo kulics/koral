@@ -2090,6 +2090,32 @@ given TypeChecker {
                     let resolved_target = if type_params.is_empty() then self.resolve_type(
                         target_type,
                     ) else self.resolve_type_with_bindings(target_type, bindings);
+                    // Same shape rule as the seed's intrinsic pass: a struct,
+                    // an enum, or a primitive -- never a generic instantiation
+                    // or a modifier.
+                    let intrinsic_target_supported = when resolved_target in {
+                        .StructureType(_) or .EnumType(_) or .IntType() or .Int8Type()
+                        or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType()
+                        or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type()
+                        or .WrappingIntType() or .WrappingInt8Type() or .WrappingInt16Type()
+                        or .WrappingInt32Type() or .WrappingInt64Type() or .WrappingUIntType()
+                        or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type()
+                        or .WrappingUInt64Type() or .Float32Type() or .Float64Type()
+                        or .BoolType() then true,
+                        _ then false,
+                    };
+                    if not intrinsic_target_supported then {
+                        self.push_diagnostic(
+                            "Invalid operation intrinsic given target not supported between types \(self.context().type_display_name(resolved_target)) and ",
+                            span,
+                        );
+                        self.restore_generic_constraints(generic_constraint_snapshot);
+                        return TypedDecl.IntrinsicGivenDecl(
+                            Type.Unknown(),
+                            List[TypedGivenMember].new(),
+                            span,
+                        );
+                    };
                     let mutable typed_members = self.check_given_members_for_type(
                         members,
                         resolved_target,

@@ -4371,7 +4371,7 @@ extension TypeChecker {
       
     case .genericStruct(let tplDefId, let typeArgs):
       guard let extensions = genericExtensionMethods[context.methodOwner(of: expectedType)],
-            let ext = extensions.first(where: { $0.method.name == memberName }) else {
+            let ext = extensions.first(where: { $0.method.name == memberName  && $0.applies(toTypeArgs: typeArgs) }) else {
         return nil
       }
       
@@ -4430,7 +4430,7 @@ extension TypeChecker {
       
     case .genericEnum(let tplDefId, let typeArgs):
       guard let extensions = genericExtensionMethods[context.methodOwner(of: expectedType)],
-            let ext = extensions.first(where: { $0.method.name == memberName }) else {
+            let ext = extensions.first(where: { $0.method.name == memberName  && $0.applies(toTypeArgs: typeArgs) }) else {
         return nil
       }
       
@@ -5129,7 +5129,7 @@ extension TypeChecker {
         
         // Look up static method on generic struct
         if let extensions = genericExtensionMethods[context.methodOwner(of: baseType)] {
-          if let ext = extensions.first(where: { $0.method.name == memberName }) {
+          if let ext = extensions.first(where: { $0.method.name == memberName  && $0.applies(toTypeArgs: resolvedArgs) }) {
             let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
             if isStatic {
               let methodSym = try resolveGenericExtensionMethod(
@@ -5256,7 +5256,7 @@ extension TypeChecker {
         
         // Look up static method on generic enum
         if let extensions = genericExtensionMethods[context.methodOwner(of: baseType)] {
-          if let ext = extensions.first(where: { $0.method.name == memberName }) {
+          if let ext = extensions.first(where: { $0.method.name == memberName  && $0.applies(toTypeArgs: resolvedArgs) }) {
             let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
             if isStatic {
               let methodSym = try resolveGenericExtensionMethod(
@@ -7591,7 +7591,7 @@ extension TypeChecker {
       if path.count == 1 {
         let memberName = path[0]
         if let extensions = genericExtensionMethods[context.methodOwner(of: type)] {
-          if let ext = extensions.first(where: { $0.method.name == memberName }) {
+          if let ext = extensions.first(where: { $0.method.name == memberName  && $0.applies(toTypeArgs: resolvedArgs) }) {
             let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
             if isStatic {
               let methodSym = try resolveGenericExtensionMethod(
@@ -7762,7 +7762,7 @@ extension TypeChecker {
         for ext in extensions {
           // METHOD FACE (§3.4): a template with a conformance trait is that
           // trait's method -- invisible unless the trait is in scope here.
-          if ext.method.name == memberName && extensionTemplateFaceAllows(ext) {
+          if ext.method.name == memberName && extensionTemplateFaceAllows(ext) && ext.applies(toTypeArgs: typeArgs) {
             guard ext.method.parameters.first?.name == "self" else {
               continue
             }
@@ -7782,7 +7782,7 @@ extension TypeChecker {
     if case .genericEnum(let tplDefId, let typeArgs) = typeToLookup {
       if let extensions = genericExtensionMethods[context.methodOwner(of: typeToLookup)] {
         for ext in extensions {
-          if ext.method.name == memberName && extensionTemplateFaceAllows(ext) {
+          if ext.method.name == memberName && extensionTemplateFaceAllows(ext) && ext.applies(toTypeArgs: typeArgs) {
             guard ext.method.parameters.first?.name == "self" else {
               continue
             }
@@ -8132,7 +8132,8 @@ extension TypeChecker {
         templateName: typeName,
         typeParameters: template.typeParameters,
         methodName: methodName,
-        arguments: callArgs.compactMap { $0.expression }
+        arguments: callArgs.compactMap { $0.expression },
+        ownerTypeArgs: resolvedTypeArgs
        ) {
       effectiveTypeArgs = inferred
     }
@@ -8150,7 +8151,7 @@ extension TypeChecker {
     let baseType = genericStructType(template: typeName, args: effectiveTypeArgs)
 
     if let extensions = genericExtensionMethods[context.methodOwner(of: baseType)] {
-      if let ext = extensions.first(where: { $0.method.name == methodName }) {
+      if let ext = extensions.first(where: { $0.method.name == methodName  && $0.applies(toTypeArgs: effectiveTypeArgs) }) {
         let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
         if isStatic {
           let methodSym = try resolveGenericExtensionMethod(
@@ -8222,7 +8223,8 @@ extension TypeChecker {
         templateName: typeName,
         typeParameters: template.typeParameters,
         methodName: methodName,
-        arguments: callArgs.compactMap { $0.expression }
+        arguments: callArgs.compactMap { $0.expression },
+        ownerTypeArgs: resolvedTypeArgs
        ) {
       effectiveTypeArgs = inferred
     }
@@ -8247,7 +8249,7 @@ extension TypeChecker {
     let baseType = genericEnumType(template: typeName, args: effectiveTypeArgs)
     
     if let extensions = genericExtensionMethods[context.methodOwner(of: baseType)] {
-      if let ext = extensions.first(where: { $0.method.name == methodName }) {
+      if let ext = extensions.first(where: { $0.method.name == methodName  && $0.applies(toTypeArgs: effectiveTypeArgs) }) {
         let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
         if isStatic {
           let methodSym = try resolveGenericExtensionMethod(
@@ -8310,12 +8312,13 @@ extension TypeChecker {
     templateName: String,
     typeParameters: [TypeParameterDecl],
     methodName: String,
-    arguments: [ExpressionNode]
+    arguments: [ExpressionNode],
+    ownerTypeArgs: [Type] = []
   ) throws -> [Type]? {
     // Only the template's SPELLING is in scope here; resolve it once.
     let templateOwner = methodOwnerForName(templateName) ?? .builtin(templateName)
     guard let extensions = genericExtensionMethods[templateOwner],
-          let ext = extensions.first(where: { $0.method.name == methodName }) else {
+          let ext = extensions.first(where: { $0.method.name == methodName && (ownerTypeArgs.isEmpty || $0.applies(toTypeArgs: ownerTypeArgs)) }) else {
       return nil
     }
 
@@ -8779,7 +8782,7 @@ extension TypeChecker {
     let unresolvedFunctionType: Type
 
     if let extensions = genericExtensionMethods[context.methodOwner(of: baseType)],
-       let methodInfo = extensions.first(where: { $0.method.name == methodName }) {
+       let methodInfo = extensions.first(where: { $0.method.name == methodName && $0.applies(toTypeArgs: context.methodOwnerAndArgs(of: baseType).args) }) {
       let methodTypeParams = methodInfo.method.typeParameters
       if methodTypeParams.isEmpty {
         return []

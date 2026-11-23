@@ -1946,10 +1946,12 @@ given TypeChecker {
         actual_type_args: List[Type],
         span: SourceSpan,
     ): Option[Symbol] = {
-        // A template declares the target's type parameters; the receiver must
-        // carry exactly that many arguments. Swift checks this the same way in
-        // `selectExtensionTemplate` (`ext.typeParams.count != extensionTypeArgCount`).
-        if template.type_params.count() != actual_type_args.count() then {
+        // A universal template declares the target's type parameters; the
+        // receiver must carry exactly that many arguments (Swift
+        // `selectExtensionTemplate`'s `ext.typeParams.count !=
+        // extensionTypeArgCount`). An instance-scoped template carries its
+        // declared arguments instead and already matched them at lookup.
+        if template.owner_args.is_empty() and template.type_params.count() != actual_type_args.count() then {
             self.push_diagnostic(
                 "Type mismatch: expected \(template.type_params.count()) type arguments, got \(actual_type_args.count())",
                 span,
@@ -2141,7 +2143,7 @@ given TypeChecker {
                 key,
                 method_name,
                 Option[Int].None(),
-                Option[Int].Some(self.receiver_type_args(inner_type).count()),
+                self.receiver_type_args(inner_type),
             ) in {
                 .Some(template) then {
                     // METHOD FACE (§3.4): a template with a conformance trait
@@ -2883,7 +2885,7 @@ given TypeChecker {
                 MethodOwner.Decl(conformance.trait_def_id),
                 method_name,
                 Option[Int].None(),
-                Option[Int].Some(conformance.trait_arg_types.count()),
+                conformance.trait_arg_types,
             );
             let template = template_opt or else {
                 continue;
@@ -3716,7 +3718,7 @@ given TypeChecker {
                     key,
                     method_name,
                     Option[Int].None(),
-                    Option[Int].Some(actual_type_args.count()),
+                    actual_type_args,
                 ) in {
                     .Some(template) then {
                         if self.extension_template_is_receiver_style(template) then Option[Symbol].None(

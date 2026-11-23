@@ -2196,6 +2196,7 @@ extension TypeChecker {
 
             genericExtensionMethods[methodOwnerKey]!.append(GenericExtensionMethodTemplate(
               typeParams: [],
+              selfTypeArgs: instanceScoped ? selfArgs : [],
               method: registeredMethod,
               conformanceTraitName: providingTrait.flatMap { context.getName($0) },
               conformanceTraitDefId: providingTrait,
@@ -2621,6 +2622,7 @@ extension TypeChecker {
             )
             genericExtensionMethods[methodOwnerKey]!.append(GenericExtensionMethodTemplate(
               typeParams: [],
+              selfTypeArgs: [],
               method: tmplMethod,
               conformanceTraitName: nil,
               sourceFile: currentSourceFile,
@@ -3902,6 +3904,7 @@ extension TypeChecker {
           }
           genericExtensionMethods[toolOwnerKey]![templateIndex] = GenericExtensionMethodTemplate(
             typeParams: template.typeParams,
+            selfTypeArgs: template.selfTypeArgs,
             method: template.method,
             conformanceTraitName: template.conformanceTraitName,
             conformanceTraitDefId: template.conformanceTraitDefId,
@@ -3998,6 +4001,7 @@ extension TypeChecker {
           // Update the template with the checked body
           genericExtensionMethods[genericOwnerKey]![templateIndex] = GenericExtensionMethodTemplate(
             typeParams: template.typeParams,
+            selfTypeArgs: template.selfTypeArgs,
             method: template.method,
             conformanceTraitName: template.conformanceTraitName,
             conformanceTraitDefId: template.conformanceTraitDefId,
@@ -4123,10 +4127,16 @@ extension TypeChecker {
         )
 
         if instanceScoped {
-          registerInstanceMethod(
-            owner: methodOwnerKey, name: method.name, selfArgs: selfArgs,
-            symbol: methodSymbol, sourceDefId: methodSymbol.defId,
-            inherent: true, providingTrait: nil)
+          // A method carrying its OWN type parameters is instantiated per call
+          // and lives in the template registry (instance-scoped through
+          // `selfTypeArgs`); a concrete slot would type a call that no body
+          // ever answers for.
+          if !context.containsGenericParameter(methodSymbol.type) {
+            registerInstanceMethod(
+              owner: methodOwnerKey, name: method.name, selfArgs: selfArgs,
+              symbol: methodSymbol, sourceDefId: methodSymbol.defId,
+              inherent: true, providingTrait: nil)
+          }
         } else {
           extensionMethods[methodOwnerKey]![method.name] = methodSymbol
         }
@@ -4179,10 +4189,11 @@ extension TypeChecker {
             defId: info.symbol.defId
           )
           if let existingIndex = genericExtensionMethods[methodOwnerKey]!.firstIndex(where: {
-            $0.method.defId == info.symbol.defId || ($0.method.name == info.method.name && $0.typeParams.isEmpty)
+            $0.method.defId == info.symbol.defId || ($0.method.name == info.method.name && $0.typeParams.isEmpty && $0.selfTypeArgs == (instanceScoped ? selfArgs : []))
           }) {
             genericExtensionMethods[methodOwnerKey]![existingIndex] = GenericExtensionMethodTemplate(
               typeParams: [],
+              selfTypeArgs: instanceScoped ? selfArgs : [],
               method: tmplMethod,
               conformanceTraitName: nil,
               sourceFile: currentSourceFile,
@@ -4195,6 +4206,7 @@ extension TypeChecker {
           } else {
             genericExtensionMethods[methodOwnerKey]!.append(GenericExtensionMethodTemplate(
               typeParams: [],
+              selfTypeArgs: instanceScoped ? selfArgs : [],
               method: tmplMethod,
               conformanceTraitName: nil,
               sourceFile: currentSourceFile,
@@ -4972,6 +4984,7 @@ extension TypeChecker {
             }) {
               genericExtensionMethods[genericOwnerKey]![existingIndex] = GenericExtensionMethodTemplate(
                 typeParams: stampedTypeParameters(typeParams),
+                selfTypeArgs: [],
                 method: info.method,
                 conformanceTraitName: traitName,
                 conformanceTraitDefId: traitDefId,
@@ -4986,6 +4999,7 @@ extension TypeChecker {
               genericExtensionMethods[genericOwnerKey]!.append(
                 GenericExtensionMethodTemplate(
                   typeParams: stampedTypeParameters(typeParams),
+                  selfTypeArgs: [],
                   method: info.method,
                   conformanceTraitName: traitName,
                   conformanceTraitDefId: traitDefId,
@@ -5047,9 +5061,11 @@ extension TypeChecker {
 
           if let existingIndex = genericExtensionMethods[methodOwnerKey]!.firstIndex(where: {
             $0.method.name == info.method.name && $0.typeParams.isEmpty
+              && $0.selfTypeArgs == (instanceScoped ? selfArgs : [])
           }) {
             genericExtensionMethods[methodOwnerKey]![existingIndex] = GenericExtensionMethodTemplate(
               typeParams: [],
+              selfTypeArgs: instanceScoped ? selfArgs : [],
               method: info.method,
               conformanceTraitName: traitName,
               conformanceTraitDefId: traitDefId,
@@ -5064,6 +5080,7 @@ extension TypeChecker {
             genericExtensionMethods[methodOwnerKey]!.append(
               GenericExtensionMethodTemplate(
                 typeParams: [],
+                selfTypeArgs: instanceScoped ? selfArgs : [],
                 method: info.method,
                 conformanceTraitName: traitName,
                 conformanceTraitDefId: traitDefId,
