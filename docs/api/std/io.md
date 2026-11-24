@@ -198,6 +198,19 @@ given ByteBuffer {
     /// regardless of the cursor; afterwards the buffer is empty with its
     /// cursor reset and its capacity kept, like `clear`.
     public into_string(self): String;
+    /// Hand the accumulated bytes to a `List[UInt8]`, then empty the buffer.
+    /// One copy into fresh `List` storage (same reason as `into_string`);
+    /// the whole buffer is handed over regardless of the cursor, and the
+    /// buffer ends empty with its cursor reset and its capacity kept.
+    public into_bytes(self): List[UInt8];
+    /// Return the accumulated bytes as a `String` snapshot; the buffer is
+    /// untouched. Copies once, like `into_string`, and takes the whole
+    /// content regardless of the cursor.
+    public to_string(self): String;
+    /// Return the accumulated bytes as a `List[UInt8]` snapshot; the buffer
+    /// is untouched. Unlike the `Reader` extension `read_all`, this copies
+    /// the whole content regardless of the cursor and does not advance it.
+    public to_bytes(self): List[UInt8];
 };
 
 /// Implements `Reader`, reading from the buffer's cursor.

@@ -26,5 +26,29 @@ let main(): Void = {
     assert(c.into_string() == "abcd", "whole buffer handover");
     assert(c.into_string() == "", "drained after cursor use");
 
+    // Snapshot extractions (`to_*`) leave the buffer untouched.
+    let mutable t = ByteBuffer.from_string("snap");
+    assert(t.to_string() == "snap", "to_string snapshot");
+    let snap_bytes = t.to_bytes();
+    assert(snap_bytes.count() == 4, "to_bytes snapshot count");
+    assert(snap_bytes[0] == 's' and snap_bytes[3] == 'p', "to_bytes snapshot content");
+    assert(t.into_string() == "snap", "buffer untouched by snapshots");
+
+    // `into_bytes` hands the whole content over and drains the buffer.
+    let mutable d = ByteBuffer.from_string("abcd");
+    let got = d.into_bytes();
+    assert(got.count() == 4, "into_bytes count");
+    assert(got[0] == 'a' and got[3] == 'd', "into_bytes content");
+    assert(d.into_bytes().count() == 0, "into_bytes drained");
+    assert(d.into_string() == "", "drained after into_bytes");
+
+    // `to_bytes` ignores the cursor, unlike the Reader `read_all`.
+    let mutable e = ByteBuffer.from_string("wxyz");
+    let n2 = e.read(into = sink, span = 0..<2) or else 0;
+    assert(n2 == 2, "read two again");
+    let full = e.to_bytes();
+    assert(full.count() == 4, "to_bytes whole content");
+    assert(full[2] == 'y', "to_bytes beyond cursor");
+
     println("into_string_ok");
 };
