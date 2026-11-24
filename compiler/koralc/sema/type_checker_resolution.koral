@@ -44,6 +44,52 @@ given TypeChecker {
         };
     };
 
+    /// 泛型模板的形参个数（注册表未命中时返回 -1，表示「尚不可知」——
+    /// pass-2 的模板注册按声明推进，跨模块签名解析可能先于注册）。
+    generic_template_param_count(self, def_id: DefId): Int = {
+        if self.storage.generic_templates.struct_by_def_id(def_id) is .Some(tmpl) then {
+            return tmpl.type_parameters.count();
+        };
+        if self.storage.generic_templates.enum_by_def_id(def_id) is .Some(tmpl) then {
+            return tmpl.type_parameters.count();
+        };
+        return 0 - 1;
+    };
+
+    /// 顺序无关的「泛型模板」判定：DefKind 在 name collection 期就分配
+    /// （`GenericTemplate` vs `TypeDef`），不依赖 pass-2 模板注册的时序。
+    is_generic_template_def(self, def_id: DefId): Bool = {
+        return when self.context().get_kind(def_id) in {
+            .Some(kind) then kind is .GenericTemplate(_),
+            .None() then false,
+        };
+    };
+
+    /// 实参数目对形参数目（种子在类型解析位 throw）：不等时报
+    /// `Type mismatch: expected N generic arguments, got M`。诊断锚在
+    /// currentSpan——种子的无 span typeMismatch 捕获点，与语句 / 声明级
+    /// 的 blame 一致。
+    validate_generic_template_arity(
+        self,
+        def_id: DefId,
+        resolved_args: List[Type],
+    ): Bool = {
+        let count = self.generic_template_param_count(def_id);
+        // 注册表尚未命中（pass-2 按声明推进，跨模块签名可能先于注册）：
+        // 不可知即不判——实参与形参的真检查等注册后由单态化把关。
+        if count < 0 then {
+            return true;
+        };
+        if count != resolved_args.count() then {
+            self.push_diagnostic(
+                "Type mismatch: expected \(count) generic arguments, got \(resolved_args.count())",
+                unknown_span(),
+            );
+            return false;
+        };
+        return true;
+    };
+
     resolve_visible_generic_template_type(
         self,
         base: String,
@@ -67,7 +113,16 @@ given TypeChecker {
                         false,
                     );
                 };
+                // `Duo[Int]` 之于非泛型 `Duo`：这个名字不是泛型模板，种子
+                // 说 `Undefined type`（锚在 currentSpan）。
+                if not self.is_generic_template_def(def_id) then {
+                    self.push_diagnostic("Undefined type: \(base)", unknown_span());
+                    return Type.Unknown();
+                };
                 if not self.ensure_generic_template_visible(base, def_id, span) then {
+                    return Type.Unknown();
+                };
+                if not self.validate_generic_template_arity(def_id, resolved_args) then {
                     return Type.Unknown();
                 };
                 self.validate_template_bounds(def_id, resolved_args, span, false);
@@ -77,7 +132,14 @@ given TypeChecker {
                 )
             },
             .EnumType(def_id) then {
+                if not self.is_generic_template_def(def_id) then {
+                    self.push_diagnostic("Undefined type: \(base)", unknown_span());
+                    return Type.Unknown();
+                };
                 if not self.ensure_generic_template_visible(base, def_id, span) then {
+                    return Type.Unknown();
+                };
+                if not self.validate_generic_template_arity(def_id, resolved_args) then {
                     return Type.Unknown();
                 };
                 self.validate_template_bounds(def_id, resolved_args, span, false);
@@ -87,7 +149,7 @@ given TypeChecker {
                 )
             },
             _ then {
-                self.push_diagnostic("Undefined type: \(base)", span);
+                self.push_diagnostic("Undefined type: \(base)", unknown_span());
                 Type.Unknown()
             },
         };
@@ -602,6 +664,10 @@ given TypeChecker {
                     // can still name another module's type, so it needs the
                     // visibility check too -- not just the last-resort path.
                     let canonical = self.canonicalize_alias_type(t);
+                    if self.bare_generic_template_type(canonical) then {
+                        self.push_diagnostic("Undefined type: \(name)", span);
+                        return Type.Unknown();
+                    };
                     self.check_type_visibility(
                         canonical,
                         name,
@@ -839,6 +905,22 @@ given TypeChecker {
         return self.try_resolve_named_type_without_diag(name);
     };
 
+    /// `t` 是「省略了全部实参的泛型模板」形态吗？（`Box` 之于 `type Box[T]`。）
+    /// 带着实参的 GenericStruct/GenericEnum 不是。
+    bare_generic_template_type(self, t: Type): Bool = {
+        return when t in {
+            .StructureType(def_id) then self.is_generic_template_def(def_id),
+            .EnumType(def_id) then self.is_generic_template_def(def_id),
+            .GenericStruct(def_id, args) then {
+                args.count() == 0 and self.is_generic_template_def(def_id)
+            },
+            .GenericEnum(def_id, args) then {
+                args.count() == 0 and self.is_generic_template_def(def_id)
+            },
+            _ then false,
+        };
+    };
+
     /// `span` is the spelling being resolved: a diagnostic about the name
     /// belongs at the name.
     resolve_named_type_in_scope(
@@ -855,6 +937,13 @@ given TypeChecker {
         };
         if self.try_resolve_named_type_in_scope_without_diag(name, scope) is .Some(t) then {
             let canonical = self.canonicalize_alias_type(t);
+            // 裸泛型名（`Box` 之于 `type Box[T]`）在类型节点位不命名任何
+            // 类型——模板要实参。表达式位的构造调用（`Box(1)`）不走这条
+            // 解析路径，不受影响。
+            if self.bare_generic_template_type(canonical) then {
+                self.push_diagnostic("Undefined type: \(name)", span);
+                return Type.Unknown();
+            };
             self.check_type_visibility(canonical, name, scope, span);
             return canonical;
         };
@@ -1456,11 +1545,21 @@ given TypeChecker {
             self.storage.module_path,
         ) is .Some(t) then {
             let canonical = self.canonicalize_alias_type(t);
+            // 裸泛型名（`Box` 之于 `type Box[T]`）在类型节点位不命名任何
+            // 类型——模板要实参。
+            if self.bare_generic_template_type(canonical) then {
+                self.push_diagnostic("Undefined type: \(name)", span);
+                return Type.Unknown();
+            };
             self.check_type_visibility(canonical, name, self.storage.current_scope, span);
             return canonical;
         };
         if self.try_resolve_named_type_without_diag(name) is .Some(t) then {
             let canonical = self.canonicalize_alias_type(t);
+            if self.bare_generic_template_type(canonical) then {
+                self.push_diagnostic("Undefined type: \(name)", span);
+                return Type.Unknown();
+            };
             self.check_type_visibility(canonical, name, self.storage.current_scope, span);
             return canonical;
         };

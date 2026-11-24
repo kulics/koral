@@ -863,6 +863,143 @@ given TypeChecker {
         return TypedStatement.WhileStmt(loop_condition, when_expr, unknown_span());
     };
 
+    /// 种子 `expressionFromTypeOnlyLiteral` 的等价物：某类型的「同族类型
+    /// 字面量」，供反向 join 试型用（int 族试整数目标、float 族试浮点目标）。
+    type_only_literal_for(self, kind: Type): Option[TypedExpr] = {
+        if self.is_integer_type(kind) then {
+            return Option[TypedExpr].Some(
+                make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.IntType()),
+            );
+        };
+        if self.is_float_type(kind) then {
+            return Option[TypedExpr].Some(
+                make_typed_expr(TypedExprKind.FloatLiteral("0.0"), Type.Float64Type()),
+            );
+        };
+        return Option[TypedExpr].None();
+    };
+
+    /// 元素能否落进目标类型（种子 `coerceLiteral` 的判定面，不报错只试型）：
+    /// 字面 join（int 字面量只进整数、float 字面量只进浮点，无 int↔float
+    /// 提升）或全等，其余交给 `adapt_expr_to_expected_type_at` 的引用/
+    /// trait object 适配。
+    collection_element_joins(self, typed: TypedExpr, target: Type): Bool = {
+        let adapted = self.adapt_expr_to_expected_type_at(
+            typed,
+            Option[Type].Some(target),
+            Option[SourceSpan].None(),
+        );
+        return self.same_expr_type(adapted.expr_type, target);
+    };
+
+    /// 元素落地：join 或全等即改写成目标类型，否则 fatal（种子在
+    /// push/insert 实参位 throw）。返回 None 表示错误已报、调用方立即
+    /// 放弃这一支。字面 join 试型的 blame 锚在字面量上——种子的
+    /// `coerceLiteral` 在 lowering 上下文里 blame = currentSpan = 字面量。
+    enforce_collection_element(
+        self,
+        typed: TypedExpr,
+        target: Type,
+        span: SourceSpan,
+    ): Option[TypedExpr] = {
+        let concretized = self.concretize_default_literal_type(typed.expr_type);
+        let normalized = if self.same_expr_type(concretized, typed.expr_type) then typed
+        else make_typed_expr_ref(typed.expr_kind, concretized);
+        // 毒型 / Never 放行（种子的实参位守卫）：毒型自己的抱怨已在册，
+        // Never 的返回值在写出处已按目标类型落地过。
+        if self.is_unresolved_expr_type(concretized)
+            or concretized is .NeverType()
+            or self.is_unresolved_expr_type(target)
+            or target is .NeverType()
+            or self.contains_generic_parameter(target) then {
+            return Option[TypedExpr].Some(normalized);
+        };
+        let adapted = self.adapt_expr_to_expected_type_at(
+            normalized,
+            Option[Type].Some(target),
+            Option[SourceSpan].Some(span),
+        );
+        if self.same_expr_type(adapted.expr_type, target) then {
+            return Option[TypedExpr].Some(adapted);
+        };
+        self.push_fatal_diagnostic(
+            "Type mismatch: expected \(self.display_type_name(target)), got \(self.display_type_name(concretized))",
+            span,
+        );
+        return Option[TypedExpr].None();
+    };
+
+    /// 无目标类型（或默认 List）时的元素对账（种子 `inferCommonElementType`）：
+    /// 首元素定型；后续元素先前向 join，失败再反向 join（反向成立则**元素
+    /// 类型胜出**）；双向皆败 → fatal。落定后按最终元素类型统一物化——
+    /// 种子在 push 实参位按最终类型重推一遍，反向翻转留下的旧元素（如
+    /// `[v, x]`，v: Int、x: UInt8）就在这一步报错。
+    reconcile_collection_elements(
+        self,
+        elements: List[Expr],
+        scope: Scope,
+        span: SourceSpan,
+    ): Option[Pair[Type, List[TypedExpr]]] = {
+        let mutable raw = List[TypedExpr].new();
+        let mutable elem_type = Type.Unknown();
+        let mutable poisoned = false;
+        for e in elements then {
+            let hint = if poisoned or self.is_unresolved_expr_type(elem_type) then {
+                Option[Type].None()
+            } else {
+                Option[Type].Some(elem_type)
+            };
+            let typed = self.check_expr_scoped_ref(e, hint, scope);
+            let concretized = self.concretize_default_literal_type(typed.expr_type);
+            let normalized = if self.same_expr_type(concretized, typed.expr_type) then typed
+            else make_typed_expr_ref(typed.expr_kind, concretized);
+            raw.push(normalized);
+            if poisoned then {
+                continue;
+            };
+            if self.is_unresolved_expr_type(concretized) then {
+                poisoned = true;
+                continue;
+            };
+            if self.is_unresolved_expr_type(elem_type) then {
+                elem_type = concretized;
+                continue;
+            };
+            if self.same_expr_type(concretized, elem_type) then {
+                continue;
+            };
+            if self.collection_element_joins(normalized, elem_type) then {
+                continue;
+            };
+            let reverse_joins = when self.type_only_literal_for(elem_type) in {
+                .Some(synth) then self.collection_element_joins(synth, concretized),
+                .None() then false,
+            };
+            if reverse_joins then {
+                elem_type = concretized;
+                continue;
+            };
+            self.push_fatal_diagnostic(
+                "Type mismatch: expected \(self.display_type_name(elem_type)), got \(self.display_type_name(concretized))",
+                span,
+            );
+            return Option[Pair[Type, List[TypedExpr]]].None();
+        };
+        if poisoned or self.is_unresolved_expr_type(elem_type) then {
+            return Option[Pair[Type, List[TypedExpr]]].None();
+        };
+        let mutable typed_elems = List[TypedExpr].new();
+        for n in raw then {
+            when self.enforce_collection_element(n, elem_type, span) in {
+                .Some(adapted) then typed_elems.push(adapted),
+                .None() then return Option[Pair[Type, List[TypedExpr]]].None(),
+            };
+        };
+        return Option[Pair[Type, List[TypedExpr]]].Some(
+            Pair[Type, List[TypedExpr]](elem_type, typed_elems),
+        );
+    };
+
     infer_collection_literal_result_type(
         self,
         typed_elems: List[TypedExpr],
@@ -1272,6 +1409,7 @@ given TypeChecker {
         elements: List[Expr],
         expected: Option[Type],
         scope: Scope,
+        span: SourceSpan,
     ): TypedExpr = {
         // A fixed array takes its own literal shape: exactly N elements for
         // `[N]T` (`[]` is the zeroed buffer, handled by lower_empty_literal).
@@ -1284,6 +1422,7 @@ given TypeChecker {
                         element,
                         expected_type,
                         scope,
+                        span,
                     );
                 },
                 _ then {},
@@ -1325,15 +1464,49 @@ given TypeChecker {
             defaulted = true;
         };
 
-        let mutable typed_elems = List[TypedExpr].new();
-        for e in elements then {
-            typed_elems.push(self.check_expr_scoped_ref(e, elem_expected, scope));
+        // 有目标元素类型：逐元素落地（种子经 push/insert 的实参 coercion
+        // 强制元素类型）。元素位还是泛型参数时（echo guard）没有元素信息
+        // 可强制，保持按提示检查、交给结果类型推导。
+        if not defaulted and elem_expected is .Some(elem_t) then {
+            if not self.contains_generic_parameter(elem_t) then {
+                let mutable checked = List[TypedExpr].new();
+                for e in elements then {
+                    let typed = self.check_expr_scoped_ref(e, elem_expected, scope);
+                    let enforced = self.enforce_collection_element(typed, elem_t, span);
+                    if enforced is .Some(adapted) then {
+                        checked.push(adapted);
+                    } else {
+                        return self.empty_typed_block(Type.Unknown());
+                    };
+                };
+                let checked_type = self.infer_collection_literal_result_type(
+                    checked,
+                    expected,
+                );
+                return self.lower_collection_literal_from_typed(checked, checked_type);
+            };
+            let mutable hinted = List[TypedExpr].new();
+            for e in elements then {
+                hinted.push(self.check_expr_scoped_ref(e, elem_expected, scope));
+            };
+            let hinted_type = self.infer_collection_literal_result_type(hinted, expected);
+            return self.lower_collection_literal_from_typed(hinted, hinted_type);
         };
-        let result_type = self.infer_collection_literal_result_type(
-            typed_elems,
-            if defaulted then Option[Type].None() else expected,
-        );
-        return self.lower_collection_literal_from_typed(typed_elems, result_type);
+
+        // 无目标 / 默认 List：两向对账定元素类型，再按最终类型统一物化。
+        let reconciled = self.reconcile_collection_elements(elements, scope, span);
+        if reconciled is .Some(pair) then {
+            let mutable args = List[Type].new();
+            args.push(pair.first);
+            // Std's `List` is a LANG ITEM, reached by declaration the way rustc
+            // reaches `str` -- not by a spelling lookup that a user type could win.
+            let result_type = Type.GenericStruct(
+                self.context().std_type_def_id("List") or else def_id_invalid(),
+                args,
+            );
+            return self.lower_collection_literal_from_typed(pair.second, result_type);
+        };
+        return self.empty_typed_block(Type.Unknown());
     };
 
     /// 定长数组字面量：恰好 N 个元素（`[]` 走 lower_empty_literal，是全零缓冲）。
@@ -1344,17 +1517,24 @@ given TypeChecker {
         element: Type,
         result_type: Type,
         scope: Scope,
+        span: SourceSpan,
     ): TypedExpr = {
         if elements.count() != len then {
             self.push_diagnostic(
                 "Fixed array literal expects exactly \(len) elements, got \(elements.count())",
-                unknown_span(),
+                span,
             );
             return self.empty_typed_block(Type.Unknown());
         };
         let mutable typed_elems = List[TypedExpr].new();
         for e in elements then {
-            typed_elems.push(self.check_expr_scoped_ref(e, Option[Type].Some(element), scope));
+            let typed = self.check_expr_scoped_ref(e, Option[Type].Some(element), scope);
+            let enforced = self.enforce_collection_element(typed, element, span);
+            if enforced is .Some(adapted) then {
+                typed_elems.push(adapted);
+            } else {
+                return self.empty_typed_block(Type.Unknown());
+            };
         };
         return make_typed_expr(
             TypedExprKind.IntrinsicCall(TypedIntrinsic.FixedArrayLiteral(result_type, typed_elems)),
@@ -1367,6 +1547,7 @@ given TypeChecker {
         entries: List[ExprPair],
         expected: Option[Type],
         scope: Scope,
+        span: SourceSpan,
     ): TypedExpr = {
         let kv_types = when expected in {
             .Some(et) then self.extract_dict_kv_types(et),
@@ -1393,17 +1574,74 @@ given TypeChecker {
             defaulted = true;
         };
 
-        let mutable typed_entries = List[Pair[TypedExpr, TypedExpr]].new();
-        for entry in entries then {
-            let tf = self.check_expr_scoped_ref(entry.first, kv_types.first, scope);
-            let ts = self.check_expr_scoped_ref(entry.second, kv_types.second, scope);
-            typed_entries.push(Pair[TypedExpr, TypedExpr](tf, ts));
+        // 有目标 K/V 类型：逐条落地（种子经 insert 的实参 coercion 强制）。
+        // 目标位是泛型参数时 enforce 自行放行（echo guard），行为不变。
+        if not defaulted
+            and kv_types.first is .Some(k_t)
+            and kv_types.second is .Some(v_t) then {
+            let mutable checked_entries = List[Pair[TypedExpr, TypedExpr]].new();
+            for entry in entries then {
+                let typed_key = self.check_expr_scoped_ref(entry.first, kv_types.first, scope);
+                let enforced_key = self.enforce_collection_element(typed_key, k_t, span);
+                if enforced_key is .Some(key_expr) then {
+                    let typed_value = self.check_expr_scoped_ref(
+                        entry.second,
+                        kv_types.second,
+                        scope,
+                    );
+                    let enforced_value = self.enforce_collection_element(
+                        typed_value,
+                        v_t,
+                        span,
+                    );
+                    if enforced_value is .Some(value_expr) then {
+                        checked_entries.push(
+                            Pair[TypedExpr, TypedExpr](key_expr, value_expr),
+                        );
+                    } else {
+                        return self.empty_typed_block(Type.Unknown());
+                    };
+                } else {
+                    return self.empty_typed_block(Type.Unknown());
+                };
+            };
+            let checked_type = self.infer_dict_literal_result_type(checked_entries, expected);
+            return self.lower_dict_literal_from_typed(checked_entries, checked_type);
         };
-        let mutable result_type = self.infer_dict_literal_result_type(
-            typed_entries,
-            if defaulted then Option[Type].None() else expected,
-        );
-        return self.lower_dict_literal_from_typed(typed_entries, result_type);
+
+        // 无目标 / 默认 Dict：键集与值集各自两向对账（种子对两者分别跑
+        // inferCommonElementType），再按最终类型统一物化。
+        let key_exprs = List[Expr].new();
+        let value_exprs = List[Expr].new();
+        for entry in entries then {
+            key_exprs.push(entry.first);
+            value_exprs.push(entry.second);
+        };
+        let keys = self.reconcile_collection_elements(key_exprs, scope, span);
+        if keys is .Some(key_pair) then {
+            let values = self.reconcile_collection_elements(value_exprs, scope, span);
+            if values is .Some(value_pair) then {
+                let mutable reconciled_entries = List[Pair[TypedExpr, TypedExpr]].new();
+                for i in 0..<entries.count() then {
+                    reconciled_entries.push(
+                        Pair[TypedExpr, TypedExpr](
+                            key_pair.second[i],
+                            value_pair.second[i],
+                        ),
+                    );
+                };
+                let mutable args = List[Type].new();
+                args.push(key_pair.first);
+                args.push(value_pair.first);
+                // Std's `Dict` is a LANG ITEM, reached by declaration.
+                let result_type = Type.GenericStruct(
+                    self.context().std_type_def_id("Dict") or else def_id_invalid(),
+                    args,
+                );
+                return self.lower_dict_literal_from_typed(reconciled_entries, result_type);
+            };
+        };
+        return self.empty_typed_block(Type.Unknown());
     };
 
     extract_range_element_type(self, t: Type): Option[Type] = {
