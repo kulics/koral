@@ -112,22 +112,18 @@ let join_args(head: List[String], tail: List[String]): List[String] = {
 };
 
 /// Check that a `-j N` run is byte-identical to the same run under `-j 1`.
+/// The baseline is always explicit: the tool's DEFAULT job count is the
+/// machine's available parallelism, not 1.
 let check_same_as_serial(
     args: List[String],
     stdin_file: Option[String],
     jobs: String,
     msg: String,
 ): TestResult = {
-    let serial = run_grep_j(args, stdin_file) or else {
+    let serial = run_grep_j(join_args(["-j", "1"], args), stdin_file) or else {
         return fail(msg + " serial run failed");
     };
-    let mut_args = List[String].new();
-    mut_args.push("-j");
-    mut_args.push(jobs);
-    for a in args then {
-        mut_args.push(a);
-    };
-    let par = run_grep_j(mut_args, stdin_file) or else {
+    let par = run_grep_j(join_args(["-j", jobs], args), stdin_file) or else {
         return fail(msg + " parallel run failed");
     };
     let r1 = assert_eq(
@@ -758,6 +754,53 @@ let test_jobs_one_file(): TestResult = {
     return check_same_as_serial(["hit", in_path], Option[String].None(), "8", "jobs_one_file");
 };
 
+/// The default job count is `available_parallelism()` (at least 1): a plain
+/// run must be byte-identical to an explicit `-j 1`.
+let test_default_matches_serial(): TestResult = {
+    let mutable paths = List[String].new();
+    for k in 0..<4 then {
+        let p = create_temp_text_file("tmp_grepj_def_\(k).txt", "hit \(k)\nmiss\n") or else {
+            return fail("default_matches_serial setup failed");
+        };
+        paths.push(p);
+    };
+    defer {
+        for p in paths then {
+            cleanup_temp_file(p);
+        };
+    };
+    let args = join_args(["hit"], paths);
+    let def = run_grep_j(args, Option[String].None()) or else {
+        return fail("default_matches_serial default run failed");
+    };
+    let one = run_grep_j(join_args(["-j", "1"], args), Option[String].None()) or else {
+        return fail("default_matches_serial serial run failed");
+    };
+    let r1 = assert_eq(
+        normalize_newlines(def.stdout),
+        normalize_newlines(one.stdout),
+        "default_matches_serial stdout",
+    );
+    if r1 is .Fail(_) then {
+        return r1;
+    };
+    return assert_int(def.exit_code, one.exit_code, "default_matches_serial exit");
+};
+
+/// The `-w` neighbor check reads raw bytes: a multi-byte neighbor must not
+/// trip the substring rune-boundary panic (and reads as non-word, the
+/// documented ASCII-only word constituent set).
+let test_w_multibyte(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grepj_wmb.txt", "中a\na中\nab\n") or else {
+        return fail("w_multibyte setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep_j(["-w", "a"], Option[String].Some(in_path)) or else {
+        return fail("w_multibyte run failed");
+    };
+    return check(out, "中a\na中\n", 0, "w_multibyte");
+};
+
 let test_stdin_with_jobs(): TestResult = {
     let in_path = create_temp_text_file("tmp_grepj_jstdin.txt", "apple\nbanana\n") or else {
         return fail("stdin_with_jobs setup failed");
@@ -949,6 +992,8 @@ let main(): Void = {
     cases.push(run_case("jobs_bad", test_jobs_bad()));
     cases.push(run_case("jobs_missing_arg", test_jobs_missing_arg()));
     cases.push(run_case("jobs_one_file", test_jobs_one_file()));
+    cases.push(run_case("default_matches_serial", test_default_matches_serial()));
+    cases.push(run_case("w_multibyte", test_w_multibyte()));
     cases.push(run_case("stdin_with_jobs", test_stdin_with_jobs()));
     cases.push(run_case("parallel_modes_match_serial", test_parallel_modes_match_serial()));
     cases.push(run_case("parallel_order_stress", test_parallel_order_stress()));

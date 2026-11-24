@@ -191,6 +191,13 @@ given ByteBuffer {
     public from_string(s: String): ByteBuffer;
     /// Create a byte buffer holding a copy of `bytes`.
     public from_bytes(bytes: List[UInt8]): ByteBuffer;
+    /// Hand the accumulated bytes to a `String`, then empty the buffer.
+    /// Copies once: the buffer's storage is a plain `alloc_memory` block, not
+    /// a single-block `Bytes`, so it cannot be adopted without a copy (unlike
+    /// `StringBuilder.into_string`). The whole buffer is handed over
+    /// regardless of the cursor; afterwards the buffer is empty with its
+    /// cursor reset and its capacity kept, like `clear`.
+    public into_string(self): String;
 };
 
 /// Implements `Reader`, reading from the buffer's cursor.

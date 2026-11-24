@@ -552,14 +552,14 @@ given String {
     };
 
     /// Return the byte index of the first occurrence of `pat`, or `None` when
-    /// absent; an empty pattern never matches.
+    /// absent; an empty pattern matches at 0.
     public find(self, pat: String): Option[Int] = self.find_from(0, pat);
 
     /// Return the byte index of the last occurrence of `pat`, or `None` when
-    /// absent; an empty pattern never matches.
+    /// absent; an empty pattern matches at the end (the byte length).
     public find_last(self, pat: String): Option[Int] = {
         if pat.len == 0 then {
-            return Option[Int].None();
+            return Option[Int].Some(self.len);
         };
         let mutable result = Option[Int].None();
         let mutable start = 0;
@@ -705,15 +705,16 @@ given String {
     };
 
     /// Search from byte index `start` for the first occurrence of `pat`, returning
-    /// its index or `None`; panics when `start` is past the end.
+    /// its index or `None`. An empty pattern matches at `start` itself (so
+    /// `find("")` is `Some(0)`), following Rust/Python/JS/Go/Java and staying
+    /// consistent with `starts_with`/`ends_with`; a negative or past-the-end
+    /// `start` is an out-of-domain position and yields `None`, never a panic.
     public find_from(self, start: Int, pat: String): Option[Int] = unsafe {
-        if pat.len == 0 then {
-            return Option[Int].None();
-        };
-        // An Option-returning search is total: a negative or past-the-end
-        // start is an out-of-domain position and yields `None`, never a panic.
         if start < 0 or start > self.len or pat.len > self.len then {
             return Option[Int].None();
+        };
+        if pat.len == 0 then {
+            return Option[Int].Some(start);
         };
         let mutable i = start;
         let max = self.len - pat.len;
@@ -735,7 +736,8 @@ given String {
         return Option[Int].None();
     };
 
-    /// Whether `pat` occurs anywhere in the string.
+    /// Whether `pat` occurs anywhere in the string (the empty pattern occurs
+    /// in every string).
     public contains(self, pat: String): Bool = self.find_from(0, pat).is_some();
 
     /// Return the string repeated `times` times, or the empty string when `times` is 0.
@@ -796,8 +798,11 @@ given String {
     };
 
     /// Split on the first occurrence of `sep`, returning (before, after).
-    /// Return `None` when `sep` is not found.
+    /// Return `None` when `sep` is not found; an empty `sep` is not a separator.
     public split_once(self, sep: String): Option[Pair[String, String]] = {
+        if sep.len == 0 then {
+            return Option[Pair[String, String]].None();
+        };
         when self.find(sep) in {
             .Some(idx) then {
                 let before = self.make_substring(0, idx);
@@ -812,8 +817,11 @@ given String {
     };
 
     /// Split on the last occurrence of `sep`, returning (before, after).
-    /// Return `None` when `sep` is not found.
+    /// Return `None` when `sep` is not found; an empty `sep` is not a separator.
     public split_last_once(self, sep: String): Option[Pair[String, String]] = {
+        if sep.len == 0 then {
+            return Option[Pair[String, String]].None();
+        };
         when self.find_last(sep) in {
             .Some(idx) then {
                 let before = self.make_substring(0, idx);

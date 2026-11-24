@@ -1,0 +1,57 @@
+// EXPECT: PASS
+// Empty-pattern semantics across the String API. The find family treats the
+// empty pattern as matching at every position (find -> 0, find_last -> len,
+// find_from(start) -> start), following Rust/Python/JS/Go/Java and staying
+// consistent with starts_with/ends_with. The split family treats it as "not
+// a separator" (split_once/split_last_once -> None, split yields the whole
+// string once), and the replace family keeps panicking on it.
+
+let expect_some_int(opt: Option[Int], expected: Int, msg: String): Void = {
+    when opt in {
+        .Some(v) then assert(v == expected, msg),
+        .None() then panic(msg + ": expected Some"),
+    };
+};
+
+let main(): Int = {
+    let s = "hello";
+
+    // find family: the empty pattern matches at every position.
+    expect_some_int(s.find(""), 0, "find empty");
+    expect_some_int(s.find_from(2, ""), 2, "find_from empty mid");
+    expect_some_int(s.find_from(5, ""), 5, "find_from empty at length");
+    expect_some_int(s.find_last(""), 5, "find_last empty");
+    assert(s.contains(""), "contains empty");
+
+    // Out-of-domain starts stay out of domain, empty pattern or not.
+    if s.find_from(-1, "") is .Some(_) then {
+        panic("find_from(-1, empty) should be None");
+    };
+    if s.find_from(9, "") is .Some(_) then {
+        panic("find_from(9, empty) should be None");
+    };
+
+    // The family is now self-consistent: the empty string is a prefix, a
+    // suffix, and an occurrence.
+    assert(s.starts_with(""), "starts_with empty");
+    assert(s.ends_with(""), "ends_with empty");
+
+    // split family: an empty sep is not a separator.
+    if s.split_once("") is .Some(_) then {
+        panic("split_once empty should be None");
+    };
+    if s.split_last_once("") is .Some(_) then {
+        panic("split_last_once empty should be None");
+    };
+    let mutable parts = 0;
+    for p in s.split("") then {
+        parts += 1;
+        assert(p == "hello", "empty sep yields the whole string");
+    };
+    assert(parts == 1, "empty sep yields it once");
+
+    // replace family: still an explicit panic (pinned elsewhere by shape,
+    // guarded before any search).
+    println("PASS");
+    return 0;
+};

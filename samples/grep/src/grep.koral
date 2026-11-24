@@ -230,20 +230,24 @@ let line_subject(line: String): String = {
     return line;
 };
 
-let word_chars: String = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
-
-let is_word_char(ch: String): Bool = {
-    return ch.count() > 0 and word_chars.contains(ch);
+/// ASCII word constituent (`-w`): letter, digit, or underscore. Multi-byte
+/// neighbors read as non-word bytes -- the ASCII-only word set.
+let is_word_byte(b: UInt8): Bool = {
+    return b == '_' or (b >= '0' and b <= '9') or (b >= 'A' and b <= 'Z') or (
+        b >= 'a' and b <= 'z'
+    );
 };
 
 /// GNU `-w`: the match must touch a non-word constituent or the line edge.
+/// The neighbor check reads raw bytes so a multi-byte neighbor cannot trip
+/// the substring rune check.
 let word_bounded(subject: String, m: Match): Bool = {
     let s = m.start();
     let e = m.end();
-    if s > 0 and is_word_char(subject.substring((s - 1)..<s)) then {
+    if s > 0 and is_word_byte(subject.get(s - 1).unwrap()) then {
         return false;
     };
-    if e < subject.count() and is_word_char(subject.substring(e..<(e + 1))) then {
+    if e < subject.count() and is_word_byte(subject.get(e).unwrap()) then {
         return false;
     };
     return true;

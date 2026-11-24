@@ -3861,10 +3861,10 @@ given String {
     /// Whether the string ends with `suffix`.
     public ends_with(self, suffix: String): Bool;
     /// Return the byte index of the first occurrence of `pat`, or `None` when
-    /// absent; an empty pattern never matches.
+    /// absent; an empty pattern matches at 0.
     public find(self, pat: String): Option[Int];
     /// Return the byte index of the last occurrence of `pat`, or `None` when
-    /// absent; an empty pattern never matches.
+    /// absent; an empty pattern matches at the end (the byte length).
     public find_last(self, pat: String): Option[Int];
     /// Whether `byte_index` falls on a rune boundary: 0, the byte length, or the
     /// start of a UTF-8 sequence; `false` when the index is past the end.
@@ -3890,9 +3890,13 @@ given String {
     /// the rest lower.
     public to_ascii_titlecase(self): String;
     /// Search from byte index `start` for the first occurrence of `pat`, returning
-    /// its index or `None`; panics when `start` is past the end.
+    /// its index or `None`. An empty pattern matches at `start` itself (so
+    /// `find("")` is `Some(0)`), following Rust/Python/JS/Go/Java and staying
+    /// consistent with `starts_with`/`ends_with`; a negative or past-the-end
+    /// `start` is an out-of-domain position and yields `None`, never a panic.
     public find_from(self, start: Int, pat: String): Option[Int];
-    /// Whether `pat` occurs anywhere in the string.
+    /// Whether `pat` occurs anywhere in the string (the empty pattern occurs
+    /// in every string).
     public contains(self, pat: String): Bool;
     /// Return the string repeated `times` times, or the empty string when `times` is 0.
     public repeat(self, times: Int): String;
@@ -3900,10 +3904,10 @@ given String {
     /// If `n` is 0, return a copy of the string unchanged; panic on an empty `pat`.
     public replace_n(self, pat: String, n: Int, with: String =): String;
     /// Split on the first occurrence of `sep`, returning (before, after).
-    /// Return `None` when `sep` is not found.
+    /// Return `None` when `sep` is not found; an empty `sep` is not a separator.
     public split_once(self, sep: String): Option[Pair[String, String]];
     /// Split on the last occurrence of `sep`, returning (before, after).
-    /// Return `None` when `sep` is not found.
+    /// Return `None` when `sep` is not found; an empty `sep` is not a separator.
     public split_last_once(self, sep: String): Option[Pair[String, String]];
     /// Replace every occurrence of `pat` with `with`, left to right without overlap.
     /// Panic on an empty `pat`; with no match, return the string unchanged.

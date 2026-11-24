@@ -1,0 +1,30 @@
+// EXPECT: into_string_ok
+// `into_string` hands the accumulated bytes to a `String` and empties the
+// buffer. The buffer's storage is a plain `alloc_memory` block (not a
+// single-block `Bytes`), so this is a one-copy handover rather than
+// StringBuilder's adoption; capacity stays, like `clear`.
+
+using "std/io" { ... };
+
+let main(): Void = {
+    let mutable b = ByteBuffer.from_string("hello world");
+    let s = b.into_string();
+    assert(s == "hello world", "from_string roundtrip");
+    assert(b.into_string() == "", "drained");
+
+    // The buffer stays usable after the handover.
+    let _ = b.write_all(from = "again".to_bytes());
+    assert(b.into_string() == "again", "reuse after handover");
+
+    // The whole buffer is handed over regardless of the cursor.
+    let mutable c = ByteBuffer.from_string("abcd");
+    let mutable sink = List[UInt8].new();
+    sink.push(0);
+    sink.push(0);
+    let n = c.read(into = sink, span = 0..<2) or else 0;
+    assert(n == 2, "read two");
+    assert(c.into_string() == "abcd", "whole buffer handover");
+    assert(c.into_string() == "", "drained after cursor use");
+
+    println("into_string_ok");
+};

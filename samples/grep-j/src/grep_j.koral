@@ -5,14 +5,17 @@
 // Patterns are fixed strings (the `grep -F` dialect): every character matches
 // itself, nothing is special. Reads standard input when no FILE is given
 // (always serial). A missing trailing newline is preserved on output.
-// `-j NUM` searches the FILE operands on NUM worker threads; the output is
-// byte-identical to `-j 1` because the coordinator replays per-file blocks in
-// operand order no matter what order the workers finish in.
+// `-j NUM` searches the FILE operands on NUM worker threads (default: the
+// machine's available parallelism, at least 1); the output is byte-identical
+// to `-j 1` because the coordinator replays per-file blocks in operand order
+// no matter what order the workers finish in.
 // Deliberate divergences from GNU grep: `-o` with `-v` is a usage error;
 // `-o` prints each pattern's matches in order without cross-pattern
 // deduplication (GNU picks the leftmost-longest match across the pattern
 // set); `-m` prints the trailing context of the final match; `-i` folds
-// ASCII letters only (no locale case folding); `-j` is an extension.
+// ASCII letters only (no locale case folding); `-w` counts only ASCII word
+// constituents (a multi-byte neighbor reads as non-word); `-j` is an
+// extension.
 // Exit codes: 0 = selected (found for -l/-L), 1 = not found, 2 = error.
 
 using "std" { ... };
@@ -84,24 +87,27 @@ type sendable FileOutcome(
 /// One buffered line for `-B` context output.
 type LineEntry(no: Int, text: String);
 
-let new_flags(): Flags = Flags(
-    false,
-    false,
-    false,
-    false,
-    false,
-    false,
-    false,
-    false,
-    false,
-    false,
-    false,
-    false,
-    0,
-    0,
-    0,
-    1,
-);
+let new_flags(): Flags = {
+    let cores = available_parallelism();
+    return Flags(
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        false,
+        0,
+        0,
+        0,
+        if cores < 1 then 1 else cores,
+    );
+};
 
 let to_run_flags(flags: Flags): RunFlags = RunFlags(
     flags.line_numbers,
@@ -308,19 +314,22 @@ let line_subject(line: String): String = {
     return line;
 };
 
-let word_chars: String = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
-
-let is_word_char(ch: String): Bool = {
-    return ch.count() > 0 and word_chars.contains(ch);
+/// ASCII word constituent (`-w`): letter, digit, or underscore. Multi-byte
+/// neighbors read as non-word bytes -- the documented ASCII-only word set.
+let is_word_byte(b: UInt8): Bool = {
+    return b == '_' or (b >= '0' and b <= '9') or (b >= 'A' and b <= 'Z') or (
+        b >= 'a' and b <= 'z'
+    );
 };
 
 /// GNU `-w`: the occurrence must touch a non-word constituent or the line
-/// edge. Positions are byte offsets into `subject`.
+/// edge. Positions are byte offsets into `subject`; the neighbor check reads
+/// raw bytes so a multi-byte neighbor cannot trip the substring rune check.
 let word_bounded(subject: String, s: Int, e: Int): Bool = {
-    if s > 0 and is_word_char(subject.substring((s - 1)..<s)) then {
+    if s > 0 and is_word_byte(subject.get(s - 1).unwrap()) then {
         return false;
     };
-    if e < subject.count() and is_word_char(subject.substring(e..<(e + 1))) then {
+    if e < subject.count() and is_word_byte(subject.get(e).unwrap()) then {
         return false;
     };
     return true;
@@ -330,23 +339,13 @@ let word_bounded(subject: String, s: Int, e: Int): Bool = {
 /// walk positions left to right; a position that matches advances past the
 /// match end, any other position advances by one. That is why `-w` can still
 /// see an occurrence hidden behind an unbounded overlap (`a-a` in `a-a-a`
-/// matches at offset 2). Zero-width occurrences (the empty pattern) count for
-/// selection but are never printed by `-o`.
+/// matches at offset 2). The empty pattern matches at every position as a
+/// zero-width occurrence (`find_from(start, "")` is `Some(start)`), so the
+/// same walk yields the whole 0..=n set -- those count for selection but are
+/// never printed by `-o`.
 let scan_occurrences(search: String, pat: String, word_filter: Bool): List[Pair[Int, Int]] = {
     let mutable out = List[Pair[Int, Int]].new();
     let n = search.count();
-    if pat.count() == 0 then {
-        // `find_from` never matches the empty pattern; the zero-width
-        // positions 0..=n are the occurrence set instead.
-        let mutable pos = 0;
-        while pos <= n then {
-            if not word_filter or word_bounded(search, pos, pos) then {
-                out.push(Pair[Int, Int](pos, pos));
-            };
-            pos += 1;
-        };
-        return out;
-    };
     let mutable pos = 0;
     while pos <= n then {
         when search.find_from(pos, pat) in {

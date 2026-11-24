@@ -3,7 +3,7 @@
 > **状态**：`cat`、`sha256sum`、`expr-eval`、`grep`、`grep-j` 已落地；`http` 未开工。
 > `cat`、`sha256sum`、`grep`、`grep-j` 有黄金参照；`expr-eval` 是登记在案的例外（见「验证」）。
 > 未决：缺口表两项（`grep` 轮关闭了 stdin/stdout 流句柄、`grep-j` 轮关闭了 `Send`/`Sync`
-> 一项，`grep-j` 轮新记一项）；`grep-j` 的拆法已裁定（见「各样本要点与坑」）。
+> 一项）；`grep-j` 的拆法已裁定（见「各样本要点与坑」）。
 > 本文记**当前**的判据与裁定。
 
 ## 为什么用样本
@@ -57,7 +57,6 @@
 |---|---|
 | **常量表没有不可变集合类型** | 模块级 `let` 能放数据常量（2026-10-14 起），但 `List` 是 `type mutable` 共享对象，`let` 保护绑定不保护内容——常量表只能靠 `private` + 不改动的纪律（`sha256sum` 的 K 表即此） |
 | **无非阻塞 / poll** | `std/net` 是纯阻塞面；线程每连接的网络样本今天能写，事件驱动 / 大规模并发表达不了 |
-| **无 CPU 核数 / 硬件并发度查询**（`grep-j` 轮新记） | runtime 里有处理器数查询（`koral_runtime.c` 的 `dwNumberOfProcessors` / `_SC_NPROCESSORS_ONLN`）但 std 未暴露——`grep-j -j` 的默认值只能定 1（compiler-runner 同此），并行工具拿不到「默认 = 核数」 |
 
 ## 各样本要点与坑
 
@@ -101,7 +100,7 @@ ERE 匹配 + stdin / 文件行流 + 多文件前缀。黄金参照是 **`grep -E
 - **拆法（裁定）**：两层——串行 `-F` 核心（`grep_stream`，每文件产出一个输出块 +
   matched）与并行外壳（`run_parallel`）分离。核心不碰线程，外壳不碰匹配语义；
   `-j 1` 与 `-j N` 走同一个核心，黄金用例双路同钉。
-- **`-j NUM`**：worker 线程数，默认 1（无核数 API，见缺口表）；`-j 0` 报
+- **`-j NUM`**：worker 线程数，默认 `available_parallelism()`（下限 1）；`-j 0` 报
   `invalid count argument`。stdin 永远串行（单流无从并行）。
 - **外壳形状**：`AtomicInt.fetch_add` 认领文件序号 + `FrozenList` 共享
   patterns/files/flags（`type sendable RunFlags` 快照）+ 每文件**恰一条**
