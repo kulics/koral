@@ -57,8 +57,9 @@ public type sendable Match;
 /// beyond, the mainstream per-match shape (Go hands back a `[]int`). Either
 /// way a pattern may declare up to 65535 groups.
 ///
-/// `sendable`: every field is sendable value data (inline `Int32` slots and
-/// `String` spans), so a `Captures` crosses threads by copy.
+/// `sendable`: every field is sendable value data (inline `Int32` slots,
+/// `String` spans and a frozen name table), so a `Captures` crosses
+/// threads by copy.
 public type sendable Captures;
 
 /// Iterator over the successive non-overlapping matches of a regex.
@@ -326,6 +327,8 @@ given Regex {
     /// Return the first match in `text`, recording only the whole match's span.
     /// Returns `None` when the pattern does not match.
     public find(self, text: String): Option[Match];
+    /// Return the first match in `text` starting at byte `offset`.
+    public find_at(self, text: String, offset: Int): Option[Match];
 };
 
 /// Capture-group search plus match and capture iterators.
@@ -338,6 +341,9 @@ given Regex {
     /// Return the first match in `text` with all of its capture groups.
     /// Returns `None` when the pattern does not match.
     public captures(self, text: String): Option[Captures];
+    /// Return the first match in `text` starting at byte `offset`, with
+    /// all of its capture groups.
+    public captures_at(self, text: String, offset: Int): Option[Captures];
     /// Return a view over every non-overlapping match in `text`, each with its
     /// capture groups. The view is `Iterable` (`for`, and `lazy()` for
     /// pipelines); it hands out a fresh cursor per `iterator()` and is never
@@ -352,6 +358,15 @@ given Regex {
     public replace(self, text: String, with: String =): String;
     /// Replace every match in `text` with `with`, expanding `$0`..`$9` and `$$` as in `replace`.
     public replace_all(self, text: String, with: String =): String;
+    /// Replace the first match in `text` with the string `f` builds from it
+    /// (the closure sees every capture group). Returns `text` unchanged when
+    /// there is no match.
+    public replace_with(self, text: String, f: (Captures) -> String): String;
+    /// Replace every match in `text` with the string `f` builds from it.
+    /// Zero-width matches step one rune at a time.
+    public replace_all_with(self, text: String, f: (Captures) -> String): String;
+    /// Escape every regex metacharacter in `text`, so it matches literally.
+    public escape(text: String): String;
 };
 
 /// Splitting text around matches.
@@ -381,8 +396,15 @@ given RegexFlag {
 given Regex {
     /// Return the original pattern string.
     public pattern(self): String;
-    /// Return the number of capturing groups in the pattern.
+    /// Return the number of capturing groups in the pattern (the whole
+    /// match is not a group).
     public group_count(self): Int;
+    /// Return the name of capture group `index` (`""` for an unnamed group),
+    /// or `None` when the index is out of range.
+    public group_name(self, index: Int): Option[String];
+    /// Return the index of the capture group named `name`, or `None` when
+    /// the pattern declares no such group.
+    public named_group_index(self, name: String): Option[Int];
 };
 
 /// Accessors for the matched text and its byte offsets.
@@ -403,15 +425,16 @@ given Captures {
     public start(self): Int;
     /// Return the byte offset just past the overall match's end.
     public end(self): Int;
-    /// Return the number of capture slots, counting the whole match as group 0.
+    /// Return the number of capturing groups (the whole match is not a
+    /// group -- same convention as `Regex.group_count`).
     public group_count(self): Int;
-    /// Return group `index`'s text, where group 0 is the whole match.
-    /// `None` when the index is out of range or the group did not take part in the match.
-    public group(self, index: Int): Option[String];
-    /// Return the byte offset where group `index` starts, or `None` if unavailable.
-    public group_start(self, index: Int): Option[Int];
-    /// Return the byte offset just past group `index`'s end, or `None` if unavailable.
-    public group_end(self, index: Int): Option[Int];
+    /// Return capture group `index` as a `Match` (text + byte span), where
+    /// group 0 is the whole match. `None` when the index is out of range or
+    /// the group did not take part in the match.
+    public group(self, index: Int): Option[Match];
+    /// Return the capture group named `name` as a `Match`, or `None` when
+    /// the pattern declares no such group or it did not take part.
+    public group_by_name(self, name: String): Option[Match];
 };
 
 /// `Iterable` for `MatchView`: a fresh matches cursor per call.

@@ -1,0 +1,40 @@
+// EXPECT: regex_runes_ok
+// 正则按码点（UTF-8 rune）匹配：`.` 是一个符、类划符、字面量多字节整符
+// 匹配；偏移仍是字节。旧的字节语义会把「中」拆成 3 步、`..` 只吃两个字节
+// 并在取文本时踩 substring 的符界 panic。
+
+using "std/text" { Regex };
+
+let main(): Int = {
+    // `.` 一个符，不是一字节。
+    let dots = Regex.compile("..").unwrap();
+    let m = dots.find("中a").unwrap();
+    assert(m.text() == "中a", "dots eat runes");
+    assert(m.start() == 0 and m.end() == 4, "byte offsets");
+    assert(dots.find("中").is_none(), "dot needs a whole rune");
+
+    // 否定类划符。
+    let neg = Regex.compile("[^a]+").unwrap();
+    assert(neg.find("中ab").unwrap().text() == "中", "negated class is runes");
+
+    // 字面量多字节整符匹配。
+    let lit = Regex.compile("中+").unwrap();
+    assert(lit.find("x中中y").unwrap().text() == "中中", "literal runes");
+
+    // 空匹配步进按码点：`x*` 在「中中」上零宽恢复不错切多字节。
+    let re = Regex.compile("x*").unwrap();
+    let pieces = List[String].new();
+    for p in re.split("中中") then {
+        pieces.push(p);
+    };
+    assert(pieces.count() == 3, "empty-match split steps by rune");
+    assert(pieces[0] == "中" and pieces[1] == "中", "no torn bytes");
+    assert(pieces[2] == "", "trailing piece");
+
+    // 类区间按码点。
+    let range = Regex.compile("[一-鿿]+").unwrap();
+    assert(range.find("ab中文cd").unwrap().text() == "中文", "rune ranges");
+
+    println("regex_runes_ok");
+    return 0;
+};

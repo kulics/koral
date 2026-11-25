@@ -14,9 +14,9 @@ using "std" { ... };
 // the one the backtracking search would have returned.
 //
 // Semantics (the single definition for every platform):
-//   * byte-oriented matching and byte offsets, UTF-8 opaque;
+//   * rune-based matching (one UTF-8 code point per step), byte offsets;
 //   * alternation, concatenation, groups `( )`, classes `[...]` with
-//     ranges and negation, `.` (any byte but `\n`), anchors `^` / `$`,
+//     ranges and negation, `.` (any rune but `\n`), anchors `^` / `$`,
 //     quantifiers `*` `+` `?` `{n}` `{n,}` `{n,m}` -- all greedy;
 //   * escapes `\d \D \w \W \s \S` plus literal escapes;
 //   * `^`/`$` anchor to text ends unless the multiline flag is set.
@@ -27,14 +27,18 @@ using "std" { ... };
 // Bytecode
 // ----------------------------------------------------------------------------
 
-/// One matcher instruction. `Class` holds a 256-bit set as 32 bytes; the
-/// fixed array is a value, so reading an instruction copies plain bytes --
-/// no reference counting in the step loop.
+/// One inclusive rune range.
+type ReRange(lo: UInt32, hi: UInt32);
+
+/// One matcher instruction. Matching is rune-based (one UTF-8 code point
+/// per step); `Class` holds sorted disjoint rune ranges (negation folded at
+/// compile). Instructions are compile-time only -- the step loop reads the
+/// flattened `ReCode` -- so handles here cost nothing at match time.
 type ReInst {
-    /// Match one byte. `ci` folds ASCII case; `ch` is stored lowercase.
-    Byte(ch: UInt8, ci: Bool),
-    /// Match one byte against a 256-bit class (negation folded at compile).
-    Class(bits: [32]UInt8),
+    /// Match one rune (code point). `ci` folds ASCII case; `cp` is stored lowercase.
+    Rune(cp: UInt32, ci: Bool),
+    /// Match one rune against a sorted disjoint range list (negation folded at compile).
+    Class(ranges: List[ReRange]),
     /// Try `x` first (higher priority), then `y`.
     Split(x: Int, y: Int),
     /// Jump to `x`.
@@ -50,43 +54,81 @@ type ReInst {
 };
 
 // ----------------------------------------------------------------------------
-// Byte class construction
+// Rune class construction
 // ----------------------------------------------------------------------------
 
-type mutable ClassBuilder(mutable bits: [32]UInt8);
+type mutable ClassBuilder(mutable ranges: List[ReRange]);
 
 given ClassBuilder {
 
-    new(): ClassBuilder = {
-        let mutable bits: [32]UInt8 = [];
-        return ClassBuilder(bits);
+    new(): ClassBuilder = ClassBuilder(List[ReRange].new());
+
+    set_rune(self, cp: UInt32): Void = {
+        self.ranges.push(ReRange(cp, cp));
     };
 
-    set_byte(self, ch: UInt8): Void = {
-        let i = Int(ch);
-        self.bits[i >> 3] = self.bits[i >> 3] | (UInt8(1) << UInt8(i & 7));
-    };
-
-    set_range(self, lo: UInt, hi: UInt): Void = {
-        let mutable b = lo;
-        while b <= hi then {
-            self.set_byte(UInt8(b));
-            b += 1;
+    set_range(self, lo: UInt32, hi: UInt32): Void = {
+        if lo <= hi then {
+            self.ranges.push(ReRange(lo, hi));
         };
     };
 
-    set_ascii_letters_ci(self): Void = {
-        self.set_range(65, 90);
-        self.set_range(97, 122);
+    /// Sort the range list and merge overlapping / adjacent runs.
+    private normalize(self): Void = {
+        let rs = self.ranges;
+        let n = rs.count();
+        let mutable i = 1;
+        while i < n then {
+            let key = rs[i];
+            let mutable j = i - 1;
+            while j >= 0 and rs[j].lo > key.lo then {
+                rs[j + 1] = rs[j];
+                j = j - 1;
+            };
+            rs[j + 1] = key;
+            i += 1;
+        };
+        let mutable w = 0;
+        let mutable k = 0;
+        while k < n then {
+            if w > 0 and rs[k].lo <= rs[w - 1].hi + UInt32(1) then {
+                if rs[k].hi > rs[w - 1].hi then {
+                    rs[w - 1] = ReRange(rs[w - 1].lo, rs[k].hi);
+                };
+            } else {
+                rs[w] = rs[k];
+                w += 1;
+            };
+            k += 1;
+        };
+        while rs.count() > w then {
+            let _ = rs.pop();
+        };
     };
 
+    /// Complement over the whole code-point space (negated classes).
     invert(self): Void = {
-        for i in 0..<32 then {
-            self.bits[i] = ~self.bits[i];
+        self.normalize();
+        let out = List[ReRange].new();
+        let mutable next = UInt32(0);
+        for r in self.ranges then {
+            if r.lo > next then {
+                out.push(ReRange(next, r.lo - UInt32(1)));
+            };
+            if r.hi >= next then {
+                next = r.hi + UInt32(1);
+            };
         };
+        if next <= UInt32(1114111) then {
+            out.push(ReRange(next, UInt32(1114111)));
+        };
+        self.ranges = out;
     };
 
-    build(self): ReInst = ReInst.Class(self.bits);
+    build(self): ReInst = {
+        self.normalize();
+        return ReInst.Class(self.ranges);
+    };
 };
 
 /// `[0-9]`
@@ -101,7 +143,7 @@ let re_class_word(): ReInst = {
     let b = ClassBuilder.new();
     b.set_range(48, 57);
     b.set_range(65, 90);
-    b.set_byte(95);
+    b.set_rune(95);
     b.set_range(97, 122);
     return b.build();
 };
@@ -110,22 +152,21 @@ let re_class_word(): ReInst = {
 let re_class_space(): ReInst = {
     let b = ClassBuilder.new();
     b.set_range(9, 13);
-    b.set_byte(32);
+    b.set_rune(32);
     return b.build();
 };
 
-/// Any byte except `\n`.
+/// Any rune except `\n`.
 let re_class_dot(): ReInst = {
     let b = ClassBuilder.new();
-    b.set_range(0, 255);
-    b.invert();
-    b.set_byte(10);
-    b.invert();
+    b.set_range(0, 9);
+    b.set_range(11, 1114111);
     return b.build();
 };
 
-let re_lower_byte(b: UInt8): UInt8 = {
-    return if b >= 'A' and b <= 'Z' then b + 32 else b;
+/// ASCII-only case fold for code points (non-ASCII passes through).
+let re_fold_cp(cp: UInt32): UInt32 = {
+    return if cp >= 65 and cp <= 90 then cp + 32 else cp;
 };
 
 // ----------------------------------------------------------------------------
@@ -185,7 +226,39 @@ type mutable ReParser(
     mutable pos: Int,
     mutable ngroups: Int,
     mutable error: String,
+    names: List[String],
 );
+
+/// UTF-8 sequence width from a lead byte (valid UTF-8 assumed: `String`
+/// carries the invariant).
+let re_rune_width(b0: UInt8): Int = {
+    return if b0 < 128 then 1 else if b0 < 224 then 2 else if b0 < 240 then 3 else 4;
+};
+
+/// Decode the rune at byte offset `i` of a raw buffer of `len` bytes.
+let re_rune_at(bp: *UInt8, i: Int, len: Int): UInt32 = unsafe {
+    let b0 = bp[i];
+    if b0 < 128 then {
+        return UInt32(b0);
+    };
+    if b0 < 224 then {
+        return ((UInt32(b0) & 31) << 6) | (UInt32(bp[i + 1]) & 63);
+    };
+    if b0 < 240 then {
+        return ((UInt32(b0) & 15) << 12) | ((UInt32(bp[i + 1]) & 63) << 6) | (UInt32(bp[i + 2]) & 63);
+    };
+    return ((UInt32(b0) & 7) << 18) | ((UInt32(bp[i + 1]) & 63) << 12) | ((UInt32(bp[i + 2]) & 63) << 6) | (UInt32(bp[i + 3]) & 63);
+};
+
+/// The width in bytes of the rune ENDING at byte offset `i` (walks back over
+/// continuation bytes). Used for backward steps over the subject.
+let re_prev_rune_width(bp: *UInt8, i: Int): Int = unsafe {
+    let mutable w = 1;
+    while w < 4 and i - w > 0 and (bp[i - w] & 192) == 128 then {
+        w += 1;
+    };
+    return w;
+};
 
 given ReParser {
 
@@ -198,7 +271,31 @@ given ReParser {
 
     at_end(self): Bool = self.pos >= self.pat.count();
 
-    peek(self): UInt8 = self.pat[self.pos];
+    /// The rune at the cursor.
+    peek(self): Rune = unsafe {
+        return Rune.from_uint32_unchecked(
+            re_rune_at(self.pat.borrow_ptr(), self.pos, self.pat.count()),
+        );
+    };
+
+    /// The byte width of the rune at the cursor.
+    peek_width(self): Int = re_rune_width(self.pat[self.pos]);
+
+    /// Advance past one rune.
+    step(self): Void = {
+        self.pos += self.peek_width();
+    };
+
+    /// The rune after the cursor's rune (lookahead for `]` / `-` decisions).
+    peek_next(self): Rune = unsafe {
+        let after = self.pos + self.peek_width();
+        if after >= self.pat.count() then {
+            return Rune.replacement_char();
+        };
+        return Rune.from_uint32_unchecked(
+            re_rune_at(self.pat.borrow_ptr(), after, self.pat.count()),
+        );
+    };
 
     /// One alternation level: `concat ( '|' concat )*`.
     parse_alt(self, out: List[ReInst]): Bool = {
@@ -263,17 +360,17 @@ given ReParser {
         };
         let c = self.peek();
         if c == '*' then {
-            self.pos += 1;
+            self.step();
             re_append(out, re_wrap_star(atom));
             return true;
         };
         if c == '+' then {
-            self.pos += 1;
+            self.step();
             re_append(out, re_wrap_plus(atom));
             return true;
         };
         if c == '?' then {
-            self.pos += 1;
+            self.step();
             re_append(out, re_wrap_question(atom));
             return true;
         };
@@ -286,23 +383,23 @@ given ReParser {
 
     /// `{n}`, `{n,}`, `{n,m}` over `atom`, greedy.
     parse_bounded(self, out: List[ReInst], atom: List[ReInst]): Bool = {
-        self.pos += 1;
+        self.step();
         let mutable n = 0;
         let mutable n_digits = false;
         while not self.at_end() and self.peek() >= '0' and self.peek() <= '9' then {
-            n = n * 10 + Int(self.peek() - '0');
+            n = n * 10 + Int(self.peek().to_uint32() - 48);
             n_digits = true;
-            self.pos += 1;
+            self.step();
         };
         let mutable m = n;
         let mutable unbounded = false;
         if not self.at_end() and self.peek() == ',' then {
-            self.pos += 1;
+            self.step();
             if not self.at_end() and self.peek() != '}' then {
                 m = 0;
                 while not self.at_end() and self.peek() >= '0' and self.peek() <= '9' then {
-                    m = m * 10 + Int(self.peek() - '0');
-                    self.pos += 1;
+                    m = m * 10 + Int(self.peek().to_uint32() - 48);
+                    self.step();
                 };
             } else {
                 unbounded = true;
@@ -311,7 +408,7 @@ given ReParser {
         if self.at_end() or self.peek() != '}' then {
             return self.fail("Invalid {n,m} quantifier");
         };
-        self.pos += 1;
+        self.step();
         if not n_digits then {
             return self.fail("Invalid {n,m} quantifier");
         };
@@ -337,18 +434,30 @@ given ReParser {
         return true;
     };
 
-    /// One atom: group, class, dot, anchor, escape or literal byte.
+    /// One atom: group, class, dot, anchor, escape or literal rune.
     parse_atom(self, out: List[ReInst]): Bool = {
         if self.at_end() then {
             return self.fail("Unexpected end of pattern");
         };
         let c = self.peek();
         if c == '(' then {
-            self.pos += 1;
+            self.step();
+            // `(?P<name>...)` / `(?<name>...)` 是命名捕获组；其余 `(?`
+            // 前缀不支持（ERE 无非捕获组）。
+            let mutable name = "";
+            if not self.at_end() and self.peek() == '?' then {
+                self.step();
+                let mut_name = self.parse_group_name();
+                if mut_name is .None() then {
+                    return false;
+                };
+                name = mut_name or else "";
+            };
             if self.ngroups >= 65535 then {
                 return self.fail("Too many capture groups (at most 65535)");
             };
             self.ngroups += 1;
+            self.names.push(name);
             let g = self.ngroups;
             out.push(ReInst.Save(g * 2));
             if not self.parse_alt(out) then {
@@ -357,7 +466,7 @@ given ReParser {
             if self.at_end() or self.peek() != ')' then {
                 return self.fail("Unmatched (");
             };
-            self.pos += 1;
+            self.step();
             out.push(ReInst.Save(g * 2 + 1));
             return true;
         };
@@ -365,17 +474,17 @@ given ReParser {
             return self.parse_class(out);
         };
         if c == '.' then {
-            self.pos += 1;
+            self.step();
             out.push(re_class_dot());
             return true;
         };
         if c == '^' then {
-            self.pos += 1;
+            self.step();
             out.push(ReInst.Bol(self.multiline));
             return true;
         };
         if c == '$' then {
-            self.pos += 1;
+            self.step();
             out.push(ReInst.Eol(self.multiline));
             return true;
         };
@@ -385,19 +494,61 @@ given ReParser {
         if c == '*' or c == '+' or c == '?' or c == '{' then {
             return self.fail("Invalid preceding regular expression");
         };
-        self.pos += 1;
-        out.push(ReInst.Byte(re_lower_byte(c), self.ignore_case));
+        self.step();
+        out.push(ReInst.Rune(re_fold_cp(c.to_uint32()), self.ignore_case));
         return true;
+    };
+
+    /// The `P<name>` / `<name>` tail of a named group introducer, already
+    /// past the `?`. Returns `None` (with `error` set) on a bad introducer.
+    parse_group_name(self): Option[String] = {
+        let mutable kind_ok = false;
+        if not self.at_end() and self.peek() == 'P' then {
+            self.step();
+            kind_ok = true;
+        };
+        if not self.at_end() and self.peek() == '<' then {
+            self.step();
+            kind_ok = true;
+        };
+        if not kind_ok then {
+            self.fail("Invalid group modifier");
+            return Option[String].None();
+        };
+        let mutable name = StringBuilder.new();
+        let mutable closed = false;
+        while not self.at_end() then {
+            let ch = self.peek();
+            if ch == '>' then {
+                self.step();
+                closed = true;
+                break;
+            };
+            let cp = ch.to_uint32();
+            let is_name_char = (cp >= 65 and cp <= 90) or (cp >= 97 and cp <= 122)
+                or (cp >= 48 and cp <= 57) or cp == 95;
+            if not is_name_char then {
+                self.fail("Invalid group name");
+                return Option[String].None();
+            };
+            name.push_rune(ch);
+            self.step();
+        };
+        if not closed or name.is_empty() then {
+            self.fail("Unterminated group name");
+            return Option[String].None();
+        };
+        return Option[String].Some(name.to_string());
     };
 
     /// `\d \D \w \W \s \S` and literal escapes.
     parse_escape(self, out: List[ReInst]): Bool = {
-        self.pos += 1;
+        self.step();
         if self.at_end() then {
             return self.fail("Trailing backslash");
         };
         let c = self.peek();
-        self.pos += 1;
+        self.step();
         if c == 'd' then {
             out.push(re_class_digit());
             return true;
@@ -417,7 +568,7 @@ given ReParser {
             let b = ClassBuilder.new();
             b.set_range(48, 57);
             b.set_range(65, 90);
-            b.set_byte(95);
+            b.set_rune(95);
             b.set_range(97, 122);
             b.invert();
             out.push(b.build());
@@ -430,54 +581,54 @@ given ReParser {
         if c == 'S' then {
             let b = ClassBuilder.new();
             b.set_range(9, 13);
-            b.set_byte(32);
+            b.set_rune(32);
             b.invert();
             out.push(b.build());
             return true;
         };
         if c == 'n' then {
-            out.push(ReInst.Byte(10, false));
+            out.push(ReInst.Rune(10, false));
             return true;
         };
         if c == 't' then {
-            out.push(ReInst.Byte(9, false));
+            out.push(ReInst.Rune(9, false));
             return true;
         };
         if c == 'r' then {
-            out.push(ReInst.Byte(13, false));
+            out.push(ReInst.Rune(13, false));
             return true;
         };
-        out.push(ReInst.Byte(re_lower_byte(c), self.ignore_case));
+        out.push(ReInst.Rune(re_fold_cp(c.to_uint32()), self.ignore_case));
         return true;
     };
 
-    /// `[...]` with ranges, negation, and literal `]` / `-` in the first slot.
+    /// `[...]` with rune ranges, negation, and literal `]` / `-` in the first slot.
     parse_class(self, out: List[ReInst]): Bool = {
-        self.pos += 1;
+        self.step();
         let b = ClassBuilder.new();
         let mutable negated = false;
         if not self.at_end() and self.peek() == '^' then {
             negated = true;
-            self.pos += 1;
+            self.step();
         };
         let mutable first = true;
         let mutable closed = false;
         while not self.at_end() then {
             let c = self.peek();
             if c == ']' and not first then {
-                self.pos += 1;
+                self.step();
                 closed = true;
                 break;
             };
             first = false;
-            self.pos += 1;
-            let mutable lo = c;
+            self.step();
+            let mutable lo = c.to_uint32();
             if c == '\\' then {
                 if self.at_end() then {
                     return self.fail("Trailing backslash");
                 };
                 let e = self.peek();
-                self.pos += 1;
+                self.step();
                 if e == 'd' then {
                     b.set_range(48, 57);
                     continue;
@@ -485,13 +636,13 @@ given ReParser {
                 if e == 'w' then {
                     b.set_range(48, 57);
                     b.set_range(65, 90);
-                    b.set_byte(95);
+                    b.set_rune(95);
                     b.set_range(97, 122);
                     continue;
                 };
                 if e == 's' then {
                     b.set_range(9, 13);
-                    b.set_byte(32);
+                    b.set_rune(32);
                     continue;
                 };
                 if e == 'n' then {
@@ -501,40 +652,41 @@ given ReParser {
                 } else if e == 'r' then {
                     lo = 13;
                 } else {
-                    lo = e;
+                    lo = e.to_uint32();
                 };
             };
-            // Range: `lo-hi` when a `-` and a follower come next.
-            if not self.at_end() and self.peek() == '-' and self.pos + 1 < self.pat.count(
-            ) and self.pat[self.pos + 1] != ']' then {
-                self.pos += 1;
-                let mut_hi = self.peek();
-                self.pos += 1;
-                let mutable hi = mut_hi;
-                if hi == '\\' then {
+            // Range: `lo-hi` when a `-` and a non-`]` follower come next.
+            if not self.at_end() and self.peek() == '-'
+                and self.pos + self.peek_width() < self.pat.count()
+                and not (self.peek_next() == ']') then {
+                self.step();
+                let hi_r = self.peek();
+                self.step();
+                let mutable hi = hi_r.to_uint32();
+                if hi_r == '\\' then {
                     if self.at_end() then {
                         return self.fail("Trailing backslash");
                     };
                     let e = self.peek();
-                    self.pos += 1;
+                    self.step();
                     hi = if e == 'n' then 10
-                    else if e == 't' then 9 else if e == 'r' then 13 else e;
+                    else if e == 't' then 9 else if e == 'r' then 13 else e.to_uint32();
                 };
-                if self.ignore_case and lo >= 'A' and lo <= 'Z' and hi >= 'A' and hi <= 'Z' then {
-                    b.set_range(UInt(lo) + 32, UInt(hi) + 32);
+                if self.ignore_case and lo >= 65 and lo <= 90 and hi >= 65 and hi <= 90 then {
+                    b.set_range(lo + 32, hi + 32);
                 };
-                if UInt(lo) > UInt(hi) then {
+                if lo > hi then {
                     return self.fail("Invalid character range");
                 };
-                b.set_range(UInt(lo), UInt(hi));
+                b.set_range(lo, hi);
             } else {
-                if self.ignore_case and lo >= 'A' and lo <= 'Z' then {
-                    b.set_byte(lo + 32);
+                if self.ignore_case and lo >= 65 and lo <= 90 then {
+                    b.set_rune(lo + 32);
                 };
-                if self.ignore_case and lo >= 'a' and lo <= 'z' then {
-                    b.set_byte(lo - 32);
+                if self.ignore_case and lo >= 97 and lo <= 122 then {
+                    b.set_rune(lo - 32);
                 };
-                b.set_byte(lo);
+                b.set_rune(lo);
             };
         };
         if not closed then {
@@ -804,7 +956,7 @@ let re_new_scratch(inst_count: Int, width: Int): ReScratch = unsafe {
 /// only as its LAST byte), so a leftmost search can stop at the first viable
 /// candidate. Patterns without such a byte keep the plain unanchored scan.
 type mutable ReReq(
-    byte: UInt8,
+    cp: UInt32,
     ci: Bool,
     pc: Int,
     eps_from: *mutable Int,
@@ -830,6 +982,9 @@ type mutable ReCode(
     aux1: *mutable UInt32,
     aux2: *mutable UInt32,
     match_bits: *mutable UInt8,
+    hi_off: *mutable Int,
+    hi_cnt: *mutable Int,
+    hi_pairs: *mutable UInt32,
     count: Int,
 );
 
@@ -840,41 +995,90 @@ given ReCode: Drop {
         dealloc_memory(self.aux1);
         dealloc_memory(self.aux2);
         dealloc_memory(self.match_bits);
+        dealloc_memory(self.hi_off);
+        dealloc_memory(self.hi_cnt);
+        dealloc_memory(self.hi_pairs);
     };
 };
 
+/// Does instruction `u`'s matcher cover code point `cp`? ASCII takes the
+/// precomputed 256-bit row; everything else the per-pc sorted hi ranges.
+let re_cp_match(code: ReCode, u: Int, cp: UInt32): Bool = unsafe {
+    if cp < 128 then {
+        return re_bits_match(code.match_bits, u, UInt8(Int(cp)));
+    };
+    let off = Int(code.hi_off[u]);
+    let cnt = Int(code.hi_cnt[u]);
+    let mutable k = 0;
+    while k < cnt then {
+        let lo = code.hi_pairs[(off + k) * 2];
+        let hi = code.hi_pairs[(off + k) * 2 + 1];
+        if cp >= lo and cp <= hi then {
+            return true;
+        };
+        if cp < lo then {
+            return false;
+        };
+        k += 1;
+    };
+    return false;
+};
+
 /// Mirror the instruction list into flat arrays. Parsing and analysis keep
-/// the variant form; the step loop never touches it again.
+/// the variant form; the step loop never touches it again. A consumer's
+/// matcher is its ASCII 256-bit row plus its sorted non-ASCII rune ranges.
 let re_build_code(insts: List[ReInst]): ReCode = unsafe {
     let n = insts.count();
     let op = alloc_memory[UInt8](UInt(n));
     let aux1 = alloc_memory[UInt32](UInt(n));
     let aux2 = alloc_memory[UInt32](UInt(n));
     let match_bits = alloc_memory[UInt8](UInt(n * 32));
+    let hi_off = alloc_memory[Int](UInt(n));
+    let hi_cnt = alloc_memory[Int](UInt(n));
     let mutable zi = 0;
     while zi < n * 32 then {
         match_bits[zi] = UInt8(0);
         zi += 1;
     };
+    // Pass 1: rows and per-pc hi-range counts.
     for pc in 0..<n then {
         let base = pc * 32;
         aux1[pc] = UInt32(0);
         aux2[pc] = UInt32(0);
+        hi_off[pc] = 0;
+        hi_cnt[pc] = 0;
         when insts[pc] in {
-            .Byte(ch, ci) then {
+            .Rune(cp, ci) then {
                 op[pc] = UInt8(0);
-                let i = Int(ch);
-                match_bits[base + (i >> 3)] = match_bits[base + (i >> 3)] | (UInt8(1) << UInt8(i & 7));
-                if ci and ch >= 'a' and ch <= 'z' then {
-                    let up = Int(ch - 32);
-                    match_bits[base + (up >> 3)] = match_bits[base + (up >> 3)] | (UInt8(1) << UInt8(up & 7));
+                if cp < 128 then {
+                    let i = Int(cp);
+                    match_bits[base + (i >> 3)] = match_bits[base + (i >> 3)] | (UInt8(1) << UInt8(i & 7));
+                    if ci and cp >= 97 and cp <= 122 then {
+                        let up = Int(cp - 32);
+                        match_bits[base + (up >> 3)] = match_bits[base + (up >> 3)] | (UInt8(1) << UInt8(up & 7));
+                    };
+                } else {
+                    hi_cnt[pc] = 1;
                 };
             },
-            .Class(bits) then {
+            .Class(ranges) then {
                 op[pc] = UInt8(0);
-                for k in 0..<32 then {
-                    match_bits[base + k] = bits[k];
+                let mutable hc = 0;
+                for r in ranges then {
+                    if r.lo < 128 then {
+                        let ascii_hi = if r.hi < 128 then r.hi else UInt32(127);
+                        let mutable b = r.lo;
+                        while b <= ascii_hi then {
+                            let i = Int(b);
+                            match_bits[base + (i >> 3)] = match_bits[base + (i >> 3)] | (UInt8(1) << UInt8(i & 7));
+                            b += UInt32(1);
+                        };
+                    };
+                    if r.hi >= 128 then {
+                        hc += 1;
+                    };
                 };
+                hi_cnt[pc] = hc;
             },
             .Split(x, y) then {
                 op[pc] = UInt8(1);
@@ -902,15 +1106,50 @@ let re_build_code(insts: List[ReInst]): ReCode = unsafe {
             },
         };
     };
+    // Prefix-sum the hi counts into offsets; one flat pair table.
+    let mutable total = 0;
+    for pc in 0..<n then {
+        hi_off[pc] = total;
+        total += hi_cnt[pc];
+    };
+    let hi_pairs = alloc_memory[UInt32](UInt(total * 2 + 2));
+    let mutable fillc = alloc_memory[Int](UInt(n));
+    for pc in 0..<n then {
+        fillc[pc] = 0;
+    };
+    for pc in 0..<n then {
+        when insts[pc] in {
+            .Rune(cp, _) then {
+                if cp >= 128 then {
+                    hi_pairs[(hi_off[pc] + fillc[pc]) * 2] = cp;
+                    hi_pairs[(hi_off[pc] + fillc[pc]) * 2 + 1] = cp;
+                    fillc[pc] += 1;
+                };
+            },
+            .Class(ranges) then {
+                for r in ranges then {
+                    if r.hi >= 128 then {
+                        let lo = if r.lo < 128 then UInt32(128) else r.lo;
+                        let idx = hi_off[pc] + fillc[pc];
+                        hi_pairs[idx * 2] = lo;
+                        hi_pairs[idx * 2 + 1] = r.hi;
+                        fillc[pc] += 1;
+                    };
+                };
+            },
+            _ then {},
+        };
+    };
+    dealloc_memory(fillc);
     // Quantifier fusion: the `atom*` and `atom+` wrappers expand to a
-    // Split/Consume/Jump loop -- two steps and a thread fork per byte at
-    // match time. Where the loop's consumer is a single byte or class
+    // Split/Consume/Jump loop -- two steps and a thread fork per rune at
+    // match time. Where the loop's consumer is a single rune or class
     // instruction, one Run instruction takes over the Split's slot (star
     // semantics -- the plus shape keeps its mandatory first atom): the
-    // greedy scan is one compare per byte, and the boundary alternatives
+    // greedy scan is one compare per rune, and the boundary alternatives
     // are the run's exit at every shorter end. The expanded instructions
-    // stay in place and keep their bytes: the analysis and the backward
-    // prefilter walk the expanded graph, where a loop step is one byte --
+    // stay in place and keep their matchers: the analysis and the backward
+    // prefilter walk the expanded graph, where a loop step is one rune --
     // exactly what their model assumes.
     let mutable pc2 = 0;
     while pc2 < n then {
@@ -926,7 +1165,7 @@ let re_build_code(insts: List[ReInst]): ReCode = unsafe {
                         .Jump(t) then {
                             if t == pc2 then {
                                 when insts[pc2 + 1] in {
-                                    .Byte(_, _) or .Class(_) then {
+                                    .Rune(_, _) or .Class(_) then {
                                         run_pc = pc2;
                                         loop_consumer = pc2 + 1;
                                         exit_pc = y;
@@ -940,7 +1179,7 @@ let re_build_code(insts: List[ReInst]): ReCode = unsafe {
                     };
                 };
             },
-            .Byte(_, _) or .Class(_) then {
+            .Rune(_, _) or .Class(_) then {
                 // plus: consume at s, split(s, s+2) at s+1. The mandatory
                 // first consume stays; the Split becomes the run.
                 if pc2 + 2 <= n then {
@@ -960,18 +1199,18 @@ let re_build_code(insts: List[ReInst]): ReCode = unsafe {
             _ then {},
         };
         if star then {
-            // The run reads its byte set through `aux2` -- the loop
-            // consumer's pc. It must NOT copy the bytes onto its own pc:
+            // The run reads its matcher through `aux2` -- the loop
+            // consumer's pc. It must NOT copy the matcher onto its own pc:
             // the backward prefilter models every instruction as a
-            // one-byte consumer and would read a fused run as a spurious
-            // one-byte step at the Split's slot.
+            // one-rune consumer and would read a fused run as a spurious
+            // one-rune step at the Split's slot.
             op[run_pc] = UInt8(7);
             aux1[run_pc] = UInt32(exit_pc);
             aux2[run_pc] = UInt32(loop_consumer);
         };
         pc2 += 1;
     };
-    return ReCode(op, aux1, aux2, match_bits, n);
+    return ReCode(op, aux1, aux2, match_bits, hi_off, hi_cnt, hi_pairs, n);
 };
 
 /// Does instruction `u`'s byte set (the precomputed bitmap) cover `b`?
@@ -982,25 +1221,45 @@ let re_bits_match(match_bits: *mutable UInt8, u: Int, b: UInt8): Bool = unsafe {
 };
 
 /// A compiled program: instructions plus the number of capture groups, the
-/// start-byte analysis used to skip hopeless search positions, the required
-/// literal byte (when there is one) and the match scratch shared by every
-/// run of this regex.
+/// start-rune analysis used to skip hopeless search positions (an ASCII
+/// bitmap plus sorted non-ASCII ranges), the required literal rune (when
+/// there is one) and the match scratch shared by every run of this regex.
 type ReProgram(
     insts: List[ReInst],
     ngroups: Int,
     start_any: Bool,
     start_bits: [32]UInt8,
+    start_hi: List[ReRange],
+    names: FrozenList[String],
     code: ReCode,
     req: Option[ReReq],
     scratch: ReScratch,
 );
 
+/// Sorted-disjoint range containment (the lists here stay tiny).
+let re_ranges_cover(rs: List[ReRange], cp: UInt32): Bool = {
+    for r in rs then {
+        if cp >= r.lo and cp <= r.hi then {
+            return true;
+        };
+        if cp < r.lo then {
+            return false;
+        };
+    };
+    return false;
+};
+
 /// The bytes a match can start with, or the fact that any position can
 /// (empty-matching patterns like `a*`). Computed from the program's
 /// epsilon closure at pc 0; assertions are treated as pass-through, so the
 /// set may over-approximate -- safe for a skip test.
-let re_analyze_start(insts: List[ReInst], ngroups: Int): ReProgram = {
+let re_analyze_start(
+    insts: List[ReInst],
+    ngroups: Int,
+    names: FrozenList[String],
+): ReProgram = {
     let mutable start_any = false;
+    let mutable start_hi = ClassBuilder.new();
     let mutable bits: [32]UInt8 = [];
     let mutable marks = List[Int32].new();
     for _ in 0..<insts.count() then marks.push(0);
@@ -1024,29 +1283,47 @@ let re_analyze_start(insts: List[ReInst], ngroups: Int): ReProgram = {
             .Match() then {
                 start_any = true;
             },
-            .Byte(ch, ci) then {
-                let i = Int(ch);
-                bits[i >> 3] = bits[i >> 3] | (UInt8(1) << UInt8(i & 7));
-                if ci and ch >= 'a' and ch <= 'z' then {
-                    let u = Int(ch - 32);
-                    bits[u >> 3] = bits[u >> 3] | (UInt8(1) << UInt8(u & 7));
+            .Rune(cp, ci) then {
+                if cp < 128 then {
+                    let i = Int(cp);
+                    bits[i >> 3] = bits[i >> 3] | (UInt8(1) << UInt8(i & 7));
+                    if ci and cp >= 97 and cp <= 122 then {
+                        let u = Int(cp - 32);
+                        bits[u >> 3] = bits[u >> 3] | (UInt8(1) << UInt8(u & 7));
+                    };
+                } else {
+                    start_hi.set_rune(cp);
                 };
             },
-            .Class(bs) then {
-                for k in 0..<32 then {
-                    bits[k] = bits[k] | bs[k];
+            .Class(ranges) then {
+                for r in ranges then {
+                    if r.lo < 128 then {
+                        let ascii_hi = if r.hi < 128 then r.hi else UInt32(127);
+                        let mutable b = r.lo;
+                        while b <= ascii_hi then {
+                            let i = Int(b);
+                            bits[i >> 3] = bits[i >> 3] | (UInt8(1) << UInt8(i & 7));
+                            b += UInt32(1);
+                        };
+                    };
+                    if r.hi >= 128 then {
+                        start_hi.set_range(if r.lo < 128 then UInt32(128) else r.lo, r.hi);
+                    };
                 };
             },
         };
     };
+    start_hi.normalize();
     let code = re_build_code(insts);
     return ReProgram(
         insts,
         ngroups,
         start_any,
         bits,
+        start_hi.ranges,
+        names,
         code,
-        re_analyze_required(insts, code.match_bits),
+        re_analyze_required(insts, code),
         re_new_scratch(insts.count(), ngroups * 2 + 2),
     );
 };
@@ -1055,19 +1332,19 @@ let re_analyze_start(insts: List[ReInst], ngroups: Int): ReProgram = {
 // Required-literal analysis
 // ----------------------------------------------------------------------------
 
-/// Pick a literal byte that dominates Match -- deleting its instruction
-/// disconnects Match from pc 0, so every match contains the byte -- and for
+/// Pick a literal rune that dominates Match -- deleting its instruction
+/// disconnects Match from pc 0, so every match contains the rune -- and for
 /// which the property of `ReReq` holds. Punctuation beats alnum (the rarest
 /// in ordinary text); among equals the earliest instruction wins.
 let re_analyze_required(
     insts: List[ReInst],
-    match_bits: *mutable UInt8,
+    code: ReCode,
 ): Option[ReReq] = {
     let n = insts.count();
     let mutable candidates = List[Int].new();
     for pc in 0..<n then {
         when insts[pc] in {
-            .Byte(_, _) then {
+            .Rune(_, _) then {
                 let mutable marks = List[Bool].new();
                 for _ in 0..<n then marks.push(false);
                 let mutable work = List[Int].new();
@@ -1101,10 +1378,10 @@ let re_analyze_required(
     for pass in 0..<2 then {
         for pc in candidates then {
             when insts[pc] in {
-                .Byte(ch, _) then {
-                    let alnum = (ch >= 'a' and ch <= 'z')
-                        or (ch >= 'A' and ch <= 'Z')
-                        or (ch >= '0' and ch <= '9');
+                .Rune(cp, _) then {
+                    let alnum = (cp >= 97 and cp <= 122)
+                        or (cp >= 65 and cp <= 90)
+                        or (cp >= 48 and cp <= 57);
                     if (pass == 0 and not alnum)
                         or (pass == 1 and alnum) then {
                         ordered.push(pc);
@@ -1115,7 +1392,7 @@ let re_analyze_required(
         };
     };
     for pc in ordered then {
-        when re_build_required(insts, pc, match_bits) in {
+        when re_build_required(insts, pc, code) in {
             .Some(req) then {
                 return Option[ReReq].Some(req);
             },
@@ -1133,14 +1410,14 @@ let re_analyze_required(
 let re_build_required(
     insts: List[ReInst],
     req_pc: Int,
-    match_bits: *mutable UInt8,
+    code: ReCode,
 ): Option[ReReq] = unsafe {
     let n = insts.count();
-    let mutable req_byte = UInt8(0);
+    let mutable req_cp = UInt32(0);
     let mutable req_ci = false;
     when insts[req_pc] in {
-        .Byte(ch, ci) then {
-            req_byte = ch;
+        .Rune(cp, ci) then {
+            req_cp = cp;
             req_ci = ci;
         },
         _ then {
@@ -1230,7 +1507,7 @@ let re_build_required(
         if cur > 0 then {
             let u = cur - 1;
             when insts[u] in {
-                .Byte(_, _) or .Class(_) then {
+                .Rune(_, _) or .Class(_) then {
                     if not reach[u] then {
                         reach[u] = true;
                         work.push(u);
@@ -1251,19 +1528,19 @@ let re_build_required(
             };
         };
     };
-    // The property: no reachable consumer of any byte the required
+    // The property: no reachable consumer of any rune the required
     // instruction matches, other than the instruction itself. A
     // case-insensitive instruction matches the upper-case twin too, and a
-    // prefix that could consume EITHER byte could hide one mid-match --
+    // prefix that could consume EITHER rune could hide one mid-match --
     // which would let feasible starts interleave across occurrences and
     // break the leftmost early stop.
     for u in 0..<n then {
         if u != req_pc and reach[u] then {
-            if re_bits_match(match_bits, u, req_byte) then {
+            if re_cp_match(code, u, req_cp) then {
                 return Option[ReReq].None();
             };
-            if req_ci and req_byte >= 'a' and req_byte <= 'z' then {
-                if re_bits_match(match_bits, u, req_byte - UInt8(32)) then {
+            if req_ci and req_cp >= 97 and req_cp <= 122 then {
+                if re_cp_match(code, u, req_cp - UInt32(32)) then {
                     return Option[ReReq].None();
                 };
             };
@@ -1282,12 +1559,12 @@ let re_build_required(
             };
         };
     };
-    return Option[ReReq].Some(ReReq(req_byte, req_ci, req_pc, eps_from, eps_off));
+    return Option[ReReq].Some(ReReq(req_cp, req_ci, req_pc, eps_from, eps_off));
 };
 
 /// Compile `pattern` to a program: `save 0; body; save 1; match`.
 let re_compile(pattern: String, ignore_case: Bool, multiline: Bool): Result[ReProgram] = {
-    let parser = ReParser(pattern, ignore_case, multiline, 0, 0, "");
+    let parser = ReParser(pattern, ignore_case, multiline, 0, 0, "", List[String].new());
     let body = List[ReInst].new();
     if not parser.parse_alt(body) then {
         return Result[ReProgram].Error(parser.error);
@@ -1303,7 +1580,9 @@ let re_compile(pattern: String, ignore_case: Bool, multiline: Bool): Result[RePr
     re_append(insts, body);
     insts.push(ReInst.Save(1));
     insts.push(ReInst.Match());
-    return Result[ReProgram].Ok(re_analyze_start(insts, parser.ngroups));
+    return Result[ReProgram].Ok(
+        re_analyze_start(insts, parser.ngroups, parser.names.into_frozen_list()),
+    );
 };
 
 // ----------------------------------------------------------------------------
@@ -1457,8 +1736,13 @@ let re_run_scan(
                     if prog.start_any then {
                         inject = true;
                     } else if pos < text_len then {
-                        let i = Int(bp[pos]);
-                        inject = ((prog.start_bits[i >> 3] >> UInt8(i & 7)) & 1) == 1;
+                        let cp = re_rune_at(bp, pos, text_len);
+                        if cp < 128 then {
+                            let i = Int(cp);
+                            inject = ((prog.start_bits[i >> 3] >> UInt8(i & 7)) & 1) == 1;
+                        } else {
+                            inject = re_ranges_cover(prog.start_hi, cp);
+                        };
                     };
                 },
             };
@@ -1500,14 +1784,14 @@ let re_run_scan(
                     matched = true;
                     cut = true;
                 } else if opc == UInt8(0) and pos < text_len then {
-                    if re_bits_match(code.match_bits, t.pc, bp[pos]) then {
+                    if re_cp_match(code, t.pc, re_rune_at(bp, pos, text_len)) then {
                         re_add(
                             code,
                             nmp,
                             ng,
                             bp,
                             text_len,
-                            pos + 1,
+                            pos + re_rune_width(bp[pos]),
                             nlist,
                             t.pc + 1,
                             t.row,
@@ -1517,16 +1801,16 @@ let re_run_scan(
                         );
                     };
                 } else if opc == UInt8(7) and pos < text_len then {
-                    // The run consumes one byte and stays; its closure
+                    // The run consumes one rune and stays; its closure
                     // re-forks the exit at the next boundary.
-                    if re_bits_match(code.match_bits, Int(code.aux2[t.pc]), bp[pos]) then {
+                    if re_cp_match(code, Int(code.aux2[t.pc]), re_rune_at(bp, pos, text_len)) then {
                         re_add(
                             code,
                             nmp,
                             ng,
                             bp,
                             text_len,
-                            pos + 1,
+                            pos + re_rune_width(bp[pos]),
                             nlist,
                             t.pc,
                             t.row,
@@ -1553,7 +1837,7 @@ let re_run_scan(
         cg = ng;
         ng = tmpg;
 
-        pos += 1;
+        pos += if pos < text_len then re_rune_width(bp[pos]) else 1;
         let drained = when anchors in {
             .Some(list) then matched or anchor_i >= list.count(),
             .None() then matched,
@@ -1636,8 +1920,8 @@ let re_backtrack(
         let mutable failed = false;
         let opc = code.op[pc];
         if opc == UInt8(0) then {
-            if pos < text_len and re_bits_match(code.match_bits, pc, bp[pos]) then {
-                pos = pos + 1;
+            if pos < text_len and re_cp_match(code, pc, re_rune_at(bp, pos, text_len)) then {
+                pos = pos + re_rune_width(bp[pos]);
                 pc = pc + 1;
             } else {
                 failed = true;
@@ -1671,8 +1955,8 @@ let re_backtrack(
             let exit_pc = Int(code.aux1[pc]);
             let bits_pc = Int(code.aux2[pc]);
             let start = pos;
-            while pos < text_len and re_bits_match(code.match_bits, bits_pc, bp[pos]) then {
-                pos = pos + 1;
+            while pos < text_len and re_cp_match(code, bits_pc, re_rune_at(bp, pos, text_len)) then {
+                pos = pos + re_rune_width(bp[pos]);
             };
             let limit = start;
             if alt_len + (pos - limit) > re_bt_budget() then {
@@ -1686,7 +1970,7 @@ let re_backtrack(
                 alt[f + 1] = UInt32(k);
                 alt[f + 2] = UInt32(undo_len);
                 alt_len = alt_len + 1;
-                k = k + 1;
+                k = k + re_rune_width(bp[k]);
             };
             pc = exit_pc;
         } else if opc == UInt8(4) then {
@@ -1788,7 +2072,7 @@ let re_backward_starts(
                 ci += 1;
                 if pc > 0 then {
                     let u = pc - 1;
-                    if re_bits_match(prog.code.match_bits, u, bp[i]) then {
+                    if re_cp_match(prog.code, u, re_rune_at(bp, i, text_len)) then {
                         let t = scratch.bstack_len;
                         bstack[t] = u;
                         scratch.bstack_len = t + 1;
@@ -1838,7 +2122,7 @@ let re_backward_starts(
         let tmp_len = scratch.bcur_len;
         scratch.bcur_len = scratch.bnext_len;
         scratch.bnext_len = tmp_len;
-        i -= 1;
+        i -= re_prev_rune_width(bp, i);
         bgen += Int32(1);
         if bgen > Int32(1000000000) then {
             let mutable zi = 0;
@@ -1859,11 +2143,11 @@ let re_backward_starts(
 let re_find_occurrence(req: ReReq, bp: *UInt8, text_len: Int, from: Int): Int = unsafe {
     let mutable q = from;
     while q < text_len then {
-        let b = bp[q];
-        if b == req.byte or (req.ci and re_lower_byte(b) == req.byte) then {
+        let cp = re_rune_at(bp, q, text_len);
+        if cp == req.cp or (req.ci and re_fold_cp(cp) == req.cp) then {
             return q;
         };
-        q += 1;
+        q += re_rune_width(bp[q]);
     };
     return text_len;
 };

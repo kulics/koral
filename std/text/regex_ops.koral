@@ -45,8 +45,8 @@ given Regex {
     /// Returns `None` when the pattern does not match.
     public find(self, text: String): Option[Match] = Regex.find_at(self, text, 0);
 
-    // 从指定偏移开始查找（内部方法，仅 $0）
-    find_at(self, text: String, offset: Int): Option[Match] = {
+    /// Return the first match in `text` starting at byte `offset`.
+    public find_at(self, text: String, offset: Int): Option[Match] = {
         return when re_run(self.prog, text, offset, false) in {
             .Some(m) then {
                 Option[Match].Some(Match(text, Int(m.slot(0)), Int(m.slot(1))))
@@ -74,11 +74,14 @@ given Regex {
     public captures(self, text: String): Option[Captures] =
         Regex.captures_at(self, text, 0);
 
-    // 从指定偏移开始查找并捕获所有 group（内部方法）
-    captures_at(self, text: String, offset: Int): Option[Captures] = {
+    /// Return the first match in `text` starting at byte `offset`, with
+    /// all of its capture groups.
+    public captures_at(self, text: String, offset: Int): Option[Captures] = {
         return when re_run(self.prog, text, offset, true) in {
             .Some(m) then {
-                Option[Captures].Some(Captures(text, m.slots, m.spill, self.groups))
+                Option[Captures].Some(
+                    Captures(text, m.slots, m.spill, self.groups, self.prog.names),
+                )
             },
             .None() then Option[Captures].None(),
         };
@@ -136,9 +139,13 @@ given Regex {
                     result.push_string(Regex.expand_replacement(with, c));
                     if c.end() == offset then {
                         if offset < text_len then {
-                            result.push_byte(text[offset]);
+                            // 零宽匹配的步进按码点走（整符并入，不错切多字节）。
+                            let next = regex_next_offset(text, offset);
+                            result.push_string(text.substring(offset..<next));
+                            offset = next;
+                        } else {
+                            offset += 1;
                         };
-                        offset += 1;
                     } else {
                         offset = c.end();
                     };
@@ -168,7 +175,7 @@ given Regex {
                 if next >= '0' and next <= '9' then {
                     let group_idx = Int((next - '0'));
                     when c.group(group_idx) in {
-                        .Some(g) then result.push_string(g),
+                        .Some(g) then result.push_string(g.text()),
                         .None() then {}, // 未匹配的组替换为空
                     };
                     i += 2;
@@ -184,6 +191,88 @@ given Regex {
             i += 1;
         };
 
+        return result.to_string();
+    };
+
+    /// Replace the first match in `text` with the string `f` builds from it
+    /// (the closure sees every capture group). Returns `text` unchanged when
+    /// there is no match.
+    public replace_with(self, text: String, f: (Captures) -> String): String = {
+        when self.captures(text) in {
+            .None() then {
+                return text;
+            },
+            .Some(c) then {
+                let mutable result = StringBuilder.new();
+                if c.start() > 0 then {
+                    result.push_string(text.substring(0..<c.start()));
+                };
+                result.push_string(f(c));
+                if c.end() < text.count() then {
+                    result.push_string(text.substring(c.end()...));
+                };
+                return result.to_string();
+            },
+        };
+    };
+
+    /// Replace every match in `text` with the string `f` builds from it.
+    /// Zero-width matches step one rune at a time.
+    public replace_all_with(self, text: String, f: (Captures) -> String): String = {
+        let mutable result = StringBuilder.new();
+        let mutable offset = 0;
+        let text_len = text.count();
+        let mutable had_match = false;
+
+        while offset <= text_len then {
+            when Regex.captures_at(self, text, offset) in {
+                .Some(c) then {
+                    had_match = true;
+                    if c.start() > offset then {
+                        result.push_string(text.substring(offset..<c.start()));
+                    };
+                    result.push_string(f(c));
+                    if c.end() == offset then {
+                        if offset < text_len then {
+                            let next = regex_next_offset(text, offset);
+                            result.push_string(text.substring(offset..<next));
+                            offset = next;
+                        } else {
+                            offset += 1;
+                        };
+                    } else {
+                        offset = c.end();
+                    };
+                },
+                .None() then {
+                    if offset < text_len then {
+                        result.push_string(text.substring(offset...));
+                    };
+                    break;
+                },
+            };
+        };
+
+        return if not had_match then text else result.to_string();
+    };
+
+    /// Escape every regex metacharacter in `text`, so it matches literally.
+    public escape(text: String): String = {
+        let mutable result = StringBuilder.new();
+        let len = text.count();
+        let mutable i = 0;
+        while i < len then {
+            let b = text[i];
+            let is_meta = b == '\\' or b == '.' or b == '^' or b == '$'
+                or b == '|' or b == '(' or b == ')' or b == '[' or b == ']'
+                or b == '{' or b == '}' or b == '*' or b == '+' or b == '?'
+                or b == '-';
+            if is_meta then {
+                result.push_byte('\\');
+            };
+            result.push_byte(b);
+            i += 1;
+        };
         return result.to_string();
     };
 };

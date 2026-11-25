@@ -1,0 +1,51 @@
+// EXPECT: regex_api_ok
+// Regex API 面：group 塌缩成 `group(index): Option[Match]`（旧的
+// group/group_start/group_end 三件套删除），命名组 `(?P<name>)` 与
+// group_by_name、公开 find_at/captures_at、闭包替换、escape。
+
+using "std/text" { Regex };
+
+let main(): Int = {
+    // group 塌缩：Match 带文本与字节跨距。
+    let re = Regex.compile("(\\w+)@(\\w+)").unwrap();
+    let caps = re.captures("user@host").unwrap();
+    assert(caps.group(0).unwrap().text() == "user@host", "group 0");
+    assert(caps.group(1).unwrap().text() == "user", "group 1");
+    assert(caps.group(1).unwrap().start() == 0, "group 1 start");
+    assert(caps.group(1).unwrap().end() == 4, "group 1 end");
+    assert(caps.group(2).unwrap().start() == 5, "group 2 start");
+    assert(caps.group(3).is_none(), "out of range");
+
+    // group_count 口径统一：都不含整匹配。
+    assert(re.group_count() == 2, "regex group count");
+    assert(caps.group_count() == 2, "captures group count");
+
+    // 命名组。
+    let named = Regex.compile("(?P<word>\\w+)!(?<num>\\d+)").unwrap();
+    let caps2 = named.captures("hi!42").unwrap();
+    assert(caps2.group_by_name("word").unwrap().text() == "hi", "named group word");
+    assert(caps2.group_by_name("num").unwrap().text() == "42", "named group num");
+    assert(caps2.group_by_name("missing").is_none(), "missing name");
+    assert(named.group_name(1) == Option[String].Some("word"), "group name lookup");
+    assert(named.named_group_index("num") == Option[Int].Some(2), "name index lookup");
+
+    // 公开 find_at / captures_at。
+    assert(re.find_at("a user@host", 2).unwrap().text() == "user@host", "find_at");
+    assert(re.find_at("a user@host", 0).unwrap().start() == 2, "find_at offset");
+    assert(re.captures_at("x user@host", 2).unwrap().group(1).unwrap().text() == "user", "captures_at");
+
+    // 闭包替换。
+    let re3 = Regex.compile("\\d+").unwrap();
+    let out = re3.replace_with("a12b345", (c: Captures) => c.text() + "!");
+    assert(out == "a12b345!", "replace_with first");
+    let out2 = re3.replace_all_with("a12b345", (c: Captures) => "<" + c.text() + ">");
+    assert(out2 == "a<12>b<345>", "replace_all_with");
+
+    // escape：字面匹配。
+    let lit = Regex.compile(Regex.escape("a.b*c")).unwrap();
+    assert(lit.matches("a.b*c"), "escape literal");
+    assert(not lit.matches("aXbYc"), "escape strict");
+
+    println("regex_api_ok");
+    return 0;
+};
