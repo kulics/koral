@@ -271,20 +271,20 @@ given Process {
             return Result[CommandOutput].Error(last_error_message());
         };
 
-        // `from_utf8_ptr_unchecked` COPIES out of the pipe buffers, so the
-        // strings own their own blocks and the `defer` above frees the
-        // originals. Do not null these pointers to fake a hand-over: that
-        // leaked both read buffers on every successful call.
-        let stdout_content = if out_stdout_len > 0 then {
-            unsafe { String.from_utf8_ptr_unchecked(out_stdout, out_stdout_len) }
-        } else {
-            String.new()
+        // 拷贝出管道缓冲区，列表自己持有存储，`defer` 释放原件。子进程
+        // 输出是任意字节（不保证 UTF-8），所以是原始字节而非 String；
+        // 冻结接管（into_frozen_list 零拷贝）保住 sendable。
+        // 不要把指针置空伪造交接——那会泄漏两块读缓冲。
+        let stdout_list = List[UInt8].new();
+        if out_stdout_len > 0 then {
+            unsafe { push_byte_slice(stdout_list, out_stdout, out_stdout_len) };
         };
-        let stderr_content = if out_stderr_len > 0 then {
-            unsafe { String.from_utf8_ptr_unchecked(out_stderr, out_stderr_len) }
-        } else {
-            String.new()
+        let stdout_content = stdout_list.into_frozen_list();
+        let stderr_list = List[UInt8].new();
+        if out_stderr_len > 0 then {
+            unsafe { push_byte_slice(stderr_list, out_stderr, out_stderr_len) };
         };
+        let stderr_content = stderr_list.into_frozen_list();
 
         return when self.wait() in {
             .Ok(status) then Result[CommandOutput].Ok(

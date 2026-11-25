@@ -19,6 +19,12 @@ type TestCase(name: String, result: TestResult);
 
 type ProcessOutput(stdout: String, stderr: String, exit_code: Int);
 
+// 视图方法与 CommandOutput 同名：断言侧统一用 stdout_text()/stderr_text()。
+given ProcessOutput {
+    stdout_text(self): String = self.stdout;
+    stderr_text(self): String = self.stderr;
+};
+
 let pass(): TestResult = TestResult.Pass();
 let fail(msg: String): TestResult = TestResult.Fail(msg);
 
@@ -44,7 +50,7 @@ let run_sha(args: List[String]): Result[ProcessOutput] = {
     let cmd = Command.new(sha_bin).args(args).set_stdin(IoRedirect.Null());
     let out = cmd.run_output() or return;
     let exit_code = out.status.code() or else 0;
-    return Result[ProcessOutput].Ok(ProcessOutput(out.stdout, out.stderr, exit_code));
+    return Result[ProcessOutput].Ok(ProcessOutput(out.stdout_text(), out.stderr_text(), exit_code));
 };
 
 let assert_eq(actual: String, expected: String, msg: String): TestResult = {
@@ -95,7 +101,7 @@ let hash_of_file(path: String): TestResult = {
         return fail("failed to run sha256sum: \(e.message())");
     };
     if out.exit_code != 0 then {
-        return fail("exit \(out.exit_code) for \(path): \(out.stderr)");
+        return fail("exit \(out.exit_code) for \(path): \(out.stderr_text())");
     };
     return pass();
 };
@@ -114,7 +120,7 @@ let test_nist_empty(): TestResult = {
         return fail("run: \(e.message())");
     };
     cleanup_temp_file(name);
-    let r = assert_eq(digest_of(out.stdout), nist_empty(), "NIST empty string");
+    let r = assert_eq(digest_of(out.stdout_text()), nist_empty(), "NIST empty string");
     return r;
 };
 
@@ -128,7 +134,7 @@ let test_nist_abc(): TestResult = {
         return fail("run: \(e.message())");
     };
     cleanup_temp_file(name);
-    return assert_eq(digest_of(out.stdout), nist_abc(), "NIST 'abc'");
+    return assert_eq(digest_of(out.stdout_text()), nist_abc(), "NIST 'abc'");
 };
 
 let test_nist_two_block(): TestResult = {
@@ -144,7 +150,7 @@ let test_nist_two_block(): TestResult = {
         return fail("run: \(e.message())");
     };
     cleanup_temp_file(name);
-    return assert_eq(digest_of(out.stdout), nist_two_block(), "NIST two-block message");
+    return assert_eq(digest_of(out.stdout_text()), nist_two_block(), "NIST two-block message");
 };
 
 let test_nist_million_a(): TestResult = {
@@ -161,7 +167,7 @@ let test_nist_million_a(): TestResult = {
         return fail("run: \(e.message())");
     };
     cleanup_temp_file(name);
-    return assert_eq(digest_of(out.stdout), nist_million_a(), "NIST one million 'a'");
+    return assert_eq(digest_of(out.stdout_text()), nist_million_a(), "NIST one million 'a'");
 };
 
 // ---------------------------------------------------------------------------
@@ -181,7 +187,7 @@ let test_output_format(): TestResult = {
     cleanup_temp_file(name);
 
     let expected = nist_abc() + "  " + name + "\n";
-    return assert_eq(normalize_newlines(out.stdout), expected, "output format");
+    return assert_eq(normalize_newlines(out.stdout_text()), expected, "output format");
 };
 
 let test_multiple_files(): TestResult = {
@@ -202,7 +208,7 @@ let test_multiple_files(): TestResult = {
     cleanup_temp_files([a, b]);
 
     let expected = nist_abc() + "  " + a + "\n" + nist_empty() + "  " + b + "\n";
-    return assert_eq(normalize_newlines(out.stdout), expected, "multiple files");
+    return assert_eq(normalize_newlines(out.stdout_text()), expected, "multiple files");
 };
 
 let test_missing_file(): TestResult = {
@@ -213,7 +219,7 @@ let test_missing_file(): TestResult = {
         return fail("expected non-zero exit for a missing file, got 0");
     };
     return assert_true(
-        out.stderr.contains("sha256sum:"),
+        out.stderr_text().contains("sha256sum:"),
         "error goes to stderr with a prefix",
     );
 };
@@ -239,7 +245,7 @@ let test_help_and_version(): TestResult = {
     if help.exit_code != 0 then {
         return fail("--help must exit 0");
     };
-    if not help.stdout.contains("Usage:") then {
+    if not help.stdout_text().contains("Usage:") then {
         return fail("--help must print usage");
     };
 
@@ -250,7 +256,7 @@ let test_help_and_version(): TestResult = {
         return fail("--version must exit 0");
     };
     return assert_true(
-        version.stdout.contains("sha256sum"),
+        version.stdout_text().contains("sha256sum"),
         "--version must name the tool",
     );
 };
@@ -283,8 +289,8 @@ let property_name_independent(): TestResult = {
     cleanup_temp_files([a, b]);
 
     return assert_eq(
-        digest_of(out_a.stdout),
-        digest_of(out_b.stdout),
+        digest_of(out_a.stdout_text()),
+        digest_of(out_b.stdout_text()),
         "digest ignores the file name",
     );
 };
@@ -313,7 +319,7 @@ let property_avalanche(): TestResult = {
     cleanup_temp_files([a, b]);
 
     return assert_true(
-        digest_of(out_a.stdout) != digest_of(out_b.stdout),
+        digest_of(out_a.stdout_text()) != digest_of(out_b.stdout_text()),
         "a one-byte change must change the digest",
     );
 };
@@ -330,7 +336,7 @@ let property_digest_shape(): TestResult = {
     };
     cleanup_temp_file(name);
 
-    let d = digest_of(out.stdout);
+    let d = digest_of(out.stdout_text());
     if d.count() != 64 then {
         return fail("digest must be 64 hex chars, got \(d.count())");
     };

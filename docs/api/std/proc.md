@@ -57,8 +57,12 @@ public let run_command_output(program: String, args: List[String]): Result[Comma
 /// working directory, and I/O redirection before spawning.
 public type mutable Command;
 
-/// Synchronous command execution result containing exit status and captured output.
-public type sendable CommandOutput(public status: ExitStatus, public stdout: String, public stderr: String);
+/// Synchronous command execution result containing exit status and captured
+/// output. 子进程输出是任意字节（不保证 UTF-8）：`stdout` / `stderr` 是
+/// 原始字节（`FrozenList[UInt8]`——不可变快照，保住 `CommandOutput` 的
+/// sendable），文本语义由调用方决定——受检走 `String.from_bytes`，不失败
+/// 走 `String.from_bytes_lossy` 或 `stdout_text` / `stderr_text` 视图。
+public type sendable CommandOutput(public status: ExitStatus, public stdout: FrozenList[UInt8], public stderr: FrozenList[UInt8]);
 
 /// Child process exit status.
 /// raw_status encoding: normal exit = exit code (0-255), signal termination = -(signal_number)
@@ -157,6 +161,10 @@ given CommandOutput {
     public is_success(self): Bool;
     /// Get exit code (convenience method delegating to status).
     public code(self): Option[Int];
+    /// stdout 的 lossy 文本视图（每个最大非法子序列替换为 U+FFFD）。
+    public stdout_text(self): String;
+    /// stderr 的 lossy 文本视图（每个最大非法子序列替换为 U+FFFD）。
+    public stderr_text(self): String;
 };
 
 /// String conformance: renders the exit status together with the captured stdout and stderr.

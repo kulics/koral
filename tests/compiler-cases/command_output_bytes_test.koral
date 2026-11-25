@@ -1,0 +1,24 @@
+// EXPECT: command_output_bytes_ok
+// CommandOutput 的 stdout/stderr 是原始字节（FrozenList[UInt8]），文本
+// 语义由调用方决定：视图走 lossy，受检走 String.from_bytes。
+
+using "std/proc" { ... };
+
+let main(): Int = {
+    let mutableView = List[String].new();
+    mutableView.push("hello_bytes");
+    when run_command_output("echo", mutableView) in {
+        .Ok(o) then {
+            assert(o.stdout.count() > 0, "stdout is bytes");
+            assert(o.stdout_text().contains("hello_bytes"), "lossy view");
+            let checked = String.from_bytes(o.stdout.to_list());
+            assert(checked is .Ok(_), "valid output converts");
+            assert(o.stderr.count() == 0, "stderr empty bytes");
+        },
+        .Error(_) then {
+            assert(false, "run_command_output should succeed");
+        },
+    };
+    println("command_output_bytes_ok");
+    return 0;
+};

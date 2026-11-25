@@ -1,0 +1,38 @@
+// EXPECT: lossy_ok
+// lossy 构造族：合法序列原样拷贝，每个最大非法子序列替换为一个 U+FFFD
+// （Rust `String::from_utf8_lossy` 同规则）。OS 摄入面永不失败。
+
+let fffd(): String = Rune.replacement_char().to_string();
+
+let main(): Int = {
+    let f = fffd();
+    assert(String.from_bytes_lossy("abc".to_bytes()) == "abc", "ascii passthrough");
+    assert(String.from_bytes_lossy("中a".to_bytes()) == "中a", "multibyte passthrough");
+
+    // 单个坏字节 → 一个替换字符。
+    let one: List[UInt8] = [97, 255, 98];
+    assert(String.from_bytes_lossy(one) == "a" + f + "b", "one replacement");
+
+    // 最大非法子序列：E4 B8 后面断掉——两字节子序列只出一个替换字符。
+    let subpart: List[UInt8] = [97, 228, 184, 98];
+    assert(String.from_bytes_lossy(subpart) == "a" + f + "b", "maximal subpart");
+
+    // 引导后第一个字节就坏：单字节子序列；孤立续字节各自成一个。
+    let mixed: List[UInt8] = [97, 228, 40, 184, 98];
+    assert(String.from_bytes_lossy(mixed) == "a" + f + "(" + f + "b", "mixed invalid");
+
+    // 截尾。
+    let trunc: List[UInt8] = [97, 228];
+    assert(String.from_bytes_lossy(trunc) == "a" + f, "truncated tail");
+
+    // 过长编码 C0 80：两个单字节非法子序列。
+    let overlong: List[UInt8] = [192, 128];
+    assert(String.from_bytes_lossy(overlong) == f + f, "overlong");
+
+    // surrogate 编辑区 ED A0 80：一个替换字符（最大子序列）。
+    let surrogate: List[UInt8] = [237, 160, 128];
+    assert(String.from_bytes_lossy(surrogate) == f + f, "surrogate bytes");
+
+    println("lossy_ok");
+    return 0;
+};

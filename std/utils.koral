@@ -144,12 +144,13 @@ protected let stdout_write_lock: StdioWriteLock = StdioWriteLock(unsafe { __kora
 protected let stderr_write_lock: StdioWriteLock = StdioWriteLock(unsafe { __koral_mutex_create() });
 
 /// Return the command-line arguments, starting with the program name.
+/// argv 字节不保证 UTF-8：lossy 转换（U+FFFD），永不失败。
 public let args(): List[String] = {
     let mutable result: List[String] = [];
     let count = Int(__koral_argc());
     for i in 0..<count then {
         let arg_ptr = unsafe { __koral_argv()[i] };
-        result.push(unsafe { String.from_cstring_unchecked(arg_ptr) });
+        result.push(unsafe { String.from_cstring_lossy(arg_ptr) });
     };
     return result;
 };
@@ -234,9 +235,10 @@ public let eprintln[T: ToString](value: T): Void = {
 /// Read one line from standard input without its line ending, returning `None`
 /// at end of input; an empty line yields an empty string. The line ending is
 /// `\n` or `\r\n` (a single trailing `\r` is dropped); any other `\r` is
-/// content and kept.
+/// content and kept. stdin 字节不保证 UTF-8：每个最大非法子序列替换为
+/// U+FFFD（lossy，OS 摄入面不失败）。
 public let scanln(): Option[String] = {
-    let mutable result = StringBuilder.new();
+    let mutable result = List[UInt8].new();
 
     while true then {
         let ch = unsafe { fgetc(__koral_stdin()) };
@@ -255,10 +257,10 @@ public let scanln(): Option[String] = {
             break;
         };
 
-        result.push_byte(UInt8(ch));
+        result.push(UInt8(ch));
     };
 
-    let line = result.to_string();
+    let line = String.from_bytes_lossy(result);
     let len = line.count();
     if len > 0 and line[len - 1] == '\r' then {
         return Option[String].Some(line.substring(0..<(len - 1)));

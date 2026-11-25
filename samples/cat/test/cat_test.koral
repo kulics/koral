@@ -16,6 +16,12 @@ type TestCase(name: String, result: TestResult);
 
 type ProcessOutput(stdout: String, stderr: String, exit_code: Int);
 
+// 视图方法与 CommandOutput 同名：断言侧统一用 stdout_text()/stderr_text()。
+given ProcessOutput {
+    stdout_text(self): String = self.stdout;
+    stderr_text(self): String = self.stderr;
+};
+
 let pass(): TestResult = TestResult.Pass();
 let fail(msg: String): TestResult = TestResult.Fail(msg);
 
@@ -41,7 +47,7 @@ let run_cat(args: List[String]): Result[ProcessOutput] = {
     let cmd = Command.new(cat_bin).args(args).set_stdin(IoRedirect.Null());
     let out = cmd.run_output() or return;
     let exit_code = out.status.code() or else 0;
-    return Result[ProcessOutput].Ok(ProcessOutput(out.stdout, out.stderr, exit_code));
+    return Result[ProcessOutput].Ok(ProcessOutput(out.stdout_text(), out.stderr_text(), exit_code));
 };
 
 let assert_eq(actual: String, expected: String, msg: String): TestResult = {
@@ -80,7 +86,7 @@ let test_single_file(): TestResult = {
 
     if out.exit_code == 0 then {
         return assert_eq(
-            normalize_newlines(out.stdout),
+            normalize_newlines(out.stdout_text()),
             "Hello\nWorld\n",
             "single file output mismatch",
         );
@@ -103,7 +109,7 @@ let test_multiple_files(): TestResult = {
         return fail("multiple file command failed");
     };
     return assert_eq(
-        normalize_newlines(out.stdout),
+        normalize_newlines(out.stdout_text()),
         "A\nB\n",
         "multiple file concat mismatch",
     );
@@ -120,7 +126,7 @@ let test_number_all_lines(): TestResult = {
     };
 
     let expected = "     1\tLine 1\n     2\tLine 2\n     3\t\n     4\tLine 4\n";
-    return assert_eq(normalize_newlines(out.stdout), expected, "-n formatting mismatch");
+    return assert_eq(normalize_newlines(out.stdout_text()), expected, "-n formatting mismatch");
 };
 
 let test_number_nonblank(): TestResult = {
@@ -134,7 +140,7 @@ let test_number_nonblank(): TestResult = {
     };
 
     let expected = "     1\tLine 1\n\n     2\tLine 3\n";
-    return assert_eq(normalize_newlines(out.stdout), expected, "-b formatting mismatch");
+    return assert_eq(normalize_newlines(out.stdout_text()), expected, "-b formatting mismatch");
 };
 
 let test_squeeze_blank(): TestResult = {
@@ -147,7 +153,7 @@ let test_squeeze_blank(): TestResult = {
         return fail("-s command failed");
     };
 
-    return assert_eq(normalize_newlines(out.stdout), "A\n\nB\n", "-s squeeze mismatch");
+    return assert_eq(normalize_newlines(out.stdout_text()), "A\n\nB\n", "-s squeeze mismatch");
 };
 
 let test_show_ends_tabs_all(): TestResult = {
@@ -169,10 +175,10 @@ let test_show_ends_tabs_all(): TestResult = {
         return fail("-vET command failed");
     };
 
-    let e_out = normalize_newlines(e1.stdout);
-    let t_out = normalize_newlines(t1.stdout);
-    let a_out = normalize_newlines(a1.stdout);
-    let vet_out = normalize_newlines(vet1.stdout);
+    let e_out = normalize_newlines(e1.stdout_text());
+    let t_out = normalize_newlines(t1.stdout_text());
+    let a_out = normalize_newlines(a1.stdout_text());
+    let vet_out = normalize_newlines(vet1.stdout_text());
     let ok_e = e_out == "X\tY$\n";
     let ok_t = t_out == "X^IY\n";
     let ok_a = a_out == vet_out and a_out == "X^IY$\n";
@@ -183,7 +189,7 @@ let test_invalid_option(): TestResult = {
     let out = run_cat(["--badopt"]) or else {
         return fail("invalid option command failed");
     };
-    let ok = out.exit_code != 0 and out.stderr.contains("invalid option");
+    let ok = out.exit_code != 0 and out.stderr_text().contains("invalid option");
     return assert_true(ok, "invalid option not reported");
 };
 
@@ -191,7 +197,7 @@ let test_missing_file(): TestResult = {
     let out = run_cat(["no_such_file_12345.txt"]) or else {
         return fail("missing file command failed");
     };
-    let ok = out.exit_code != 0 and out.stderr.contains("no_such_file_12345.txt");
+    let ok = out.exit_code != 0 and out.stderr_text().contains("no_such_file_12345.txt");
     return assert_true(ok, "missing file not reported");
 };
 
@@ -203,7 +209,7 @@ let test_help_and_version(): TestResult = {
         return fail("version command failed");
     };
 
-    let ok = help.exit_code == 0 and help.stdout.contains("Usage:") and ver.exit_code == 0 and ver.stdout.contains(
+    let ok = help.exit_code == 0 and help.stdout_text().contains("Usage:") and ver.exit_code == 0 and ver.stdout_text().contains(
         "koral-cat",
     );
     return assert_true(ok, "help/version output mismatch");
@@ -242,7 +248,7 @@ let property_multifile_roundtrip(): TestResult = {
             return fail("property execution failed");
         };
 
-        if out.exit_code != 0 or normalize_newlines(out.stdout) != normalize_newlines(
+        if out.exit_code != 0 or normalize_newlines(out.stdout_text()) != normalize_newlines(
             expected.to_string(),
         ) then {
             return fail("property multifile roundtrip failed");

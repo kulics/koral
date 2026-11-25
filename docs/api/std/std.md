@@ -17,8 +17,11 @@ public let sleep(d: Duration): Void;
 /// A `count`-byte list of zeros.
 public let make_bytes(count: Int): List[UInt8];
 
-/// A `count`-byte list of uninitialized bytes, meant for buffers that are filled before being read.
-public let make_uninitialized_bytes(count: Int): List[UInt8];
+/// A `count`-byte list of uninitialized bytes, meant for buffers that are
+/// filled before being read.
+/// 调用契约（`let unsafe`）：每个字节在读取前必须先写入——未初始化内存
+/// 读出的值不可观测地任意。
+public let unsafe make_uninitialized_bytes(count: Int): List[UInt8];
 
 /// Allocates uninitialized memory for `capacity` number of elements.
 public let unsafe intrinsic alloc_memory[T: Any](capacity: UInt): *mutable T;
@@ -68,6 +71,7 @@ public let foreign abort(): Never;
 public let last_error_message(): String;
 
 /// Return the command-line arguments, starting with the program name.
+/// argv 字节不保证 UTF-8：lossy 转换（U+FFFD），永不失败。
 public let args(): List[String];
 
 /// Print `Panic: ` and the message to standard error in one locked write,
@@ -98,7 +102,8 @@ public let eprintln[T: ToString](value: T): Void;
 /// Read one line from standard input without its line ending, returning `None`
 /// at end of input; an empty line yields an empty string. The line ending is
 /// `\n` or `\r\n` (a single trailing `\r` is dropped); any other `\r` is
-/// content and kept.
+/// content and kept. stdin 字节不保证 UTF-8：每个最大非法子序列替换为
+/// U+FFFD（lossy，OS 摄入面不失败）。
 public let scanln(): Option[String];
 ```
 
@@ -3858,10 +3863,21 @@ given StringBuilder {
     /// Empty the builder, keeping its allocated capacity.
     public clear(self): Void;
     /// Return a stable snapshot that does not alias future builder mutations.
+    /// 校验 UTF-8，非法字节 panic（checked 形态）；免检快照走
+    /// `to_string_unchecked`（`let unsafe` 调用契约，担保累积字节是合法
+    /// UTF-8——`push_byte` 的契约）。
     public to_string(self): String;
-    /// Hand the accumulated bytes to a `String` without copying them.
-    /// Afterwards the builder is empty again, holding a fresh empty buffer.
+    /// Unchecked snapshot: no UTF-8 validation. Behavior is undefined when
+    /// the accumulated bytes are not valid UTF-8.
+    public unsafe to_string_unchecked(self): String;
+    /// Hand the accumulated bytes to a `String` without copying them, then
+    /// empty the builder (it keeps a fresh empty buffer). 校验 UTF-8，非法
+    /// 字节 panic（checked 形态）；免检交接走 `into_string_unchecked`。
     public into_string(self): String;
+    /// Unchecked handover: no UTF-8 validation, zero copy; the builder ends
+    /// empty holding a fresh empty buffer. Behavior is undefined when the
+    /// accumulated bytes are not valid UTF-8.
+    public unsafe into_string_unchecked(self): String;
 };
 
 /// Construction, inspection, searching, and transformation of `String` values.
@@ -3883,7 +3899,8 @@ given String {
     public from_bytes(bytes: List[UInt8]): Result[String];
     /// Copy `bytes` into a string without validating UTF-8.
     /// Behavior is undefined when those bytes are not valid UTF-8.
-    public from_bytes_unchecked(bytes: List[UInt8]): String;
+    /// 调用契约（`let unsafe`）：担保 `bytes` 是合法 UTF-8。
+    public unsafe from_bytes_unchecked(bytes: List[UInt8]): String;
     /// Build a string from a null-terminated C string, returning an error when
     /// it is not valid UTF-8.
     /// The caller guarantees `cstr` points at a readable NUL-terminated string.
@@ -3892,6 +3909,18 @@ given String {
     /// Behavior is undefined when the bytes are not valid UTF-8.
     /// The caller guarantees `cstr` points at a readable NUL-terminated string.
     public unsafe from_cstring_unchecked(cstr: *UInt8): String;
+    /// Copy `len` bytes into a string, replacing each maximal ill-formed UTF-8
+    /// subsequence with U+FFFD -- never fails (Rust `String::from_utf8_lossy`
+    /// 同规则)。OS 摄入面（文件名 / symlink 目标 / argv / stdin 行）用它。
+    /// The caller guarantees `bytes`/`len` point at `len` readable bytes.
+    public unsafe from_utf8_lossy(bytes: *UInt8, len: Int): String;
+    /// Copy `bytes` into a string, replacing each maximal ill-formed UTF-8
+    /// subsequence with U+FFFD -- never fails.
+    public from_bytes_lossy(bytes: List[UInt8]): String;
+    /// Build a string from a null-terminated C string, replacing each maximal
+    /// ill-formed UTF-8 subsequence with U+FFFD -- never fails.
+    /// The caller guarantees `cstr` points at a readable NUL-terminated string.
+    public unsafe from_cstring_lossy(cstr: *UInt8): String;
     /// Create an empty string.
     public new(): String;
     /// The length of the string in UTF-8 bytes, not runes.

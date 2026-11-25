@@ -71,8 +71,23 @@ given ByteBuffer {
     /// a single-block `Bytes`, so it cannot be adopted without a copy (unlike
     /// `StringBuilder.into_string`). The whole buffer is handed over
     /// regardless of the cursor; afterwards the buffer is empty with its
-    /// cursor reset and its capacity kept, like `clear`.
+    /// cursor reset and its capacity kept, like `clear`. 校验 UTF-8，非法
+    /// 字节 panic（checked 形态）；免检交接走 `into_string_unchecked`。
     public into_string(self): String = unsafe {
+        if self.len == 0 then {
+            return "";
+        };
+        let result = String.from_utf8_ptr(self.data, self.len) or else {
+            panic("ByteBuffer.into_string: invalid UTF-8");
+        };
+        self.len = 0;
+        self.cursor = 0;
+        return result;
+    };
+
+    /// Unchecked handover: no UTF-8 validation. Behavior is undefined when
+    /// the accumulated bytes are not valid UTF-8.
+    public unsafe into_string_unchecked(self): String = unsafe {
         if self.len == 0 then {
             return "";
         };
@@ -98,8 +113,20 @@ given ByteBuffer {
 
     /// Return the accumulated bytes as a `String` snapshot; the buffer is
     /// untouched. Copies once, like `into_string`, and takes the whole
-    /// content regardless of the cursor.
+    /// content regardless of the cursor. 校验 UTF-8，非法字节 panic
+    /// （checked 形态）；免检快照走 `to_string_unchecked`。
     public to_string(self): String = unsafe {
+        if self.len == 0 then {
+            return "";
+        };
+        return String.from_utf8_ptr(self.data, self.len) or else {
+            panic("ByteBuffer.to_string: invalid UTF-8");
+        };
+    };
+
+    /// Unchecked snapshot: no UTF-8 validation. Behavior is undefined when
+    /// the accumulated bytes are not valid UTF-8.
+    public unsafe to_string_unchecked(self): String = unsafe {
         if self.len == 0 then {
             return "";
         };

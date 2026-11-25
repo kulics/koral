@@ -1,0 +1,38 @@
+// EXPECT: unchecked_ok
+// unchecked 对（`let unsafe` 调用契约）：不校验、按原字节交接；checked 对
+// 见 *_invalid_utf8_panic 用例。故意构造非法 String，只验证字节保真。
+
+using "std/io" { ByteBuffer, Writer };
+
+let main(): Int = {
+    let raw: List[UInt8] = [97, 255, 98];
+
+    // from_bytes_unchecked / to_bytes 原样往返。
+    let s = unsafe { String.from_bytes_unchecked(raw) };
+    let back = s.to_bytes();
+    assert(back.count() == 3, "unchecked roundtrip count");
+    assert(back[0] == 97 and back[1] == 255 and back[2] == 98, "unchecked roundtrip bytes");
+
+    // ByteBuffer 的免检交接/快照。
+    let mutable b = ByteBuffer.new();
+    let _ = b.write_all(from = raw);
+    let s2 = unsafe { b.into_string_unchecked() };
+    let back2 = s2.to_bytes();
+    assert(back2[1] == 255, "byte buffer unchecked handover");
+    let _ = b.write_all(from = raw);
+    let s3 = unsafe { b.to_string_unchecked() };
+    assert(s3.to_bytes()[1] == 255, "byte buffer unchecked snapshot");
+    assert(unsafe { b.into_string_unchecked() }.to_bytes()[1] == 255, "snapshot leaves buffer");
+
+    // StringBuilder 的免检快照/交接。
+    let mutable sb = StringBuilder.new();
+    sb.push_byte(97);
+    sb.push_byte(255);
+    let s4 = unsafe { sb.to_string_unchecked() };
+    assert(s4.to_bytes()[1] == 255, "builder unchecked snapshot");
+    let s5 = unsafe { sb.into_string_unchecked() };
+    assert(s5.to_bytes()[1] == 255, "builder unchecked handover");
+
+    println("unchecked_ok");
+    return 0;
+};

@@ -197,8 +197,12 @@ given ByteBuffer {
     /// a single-block `Bytes`, so it cannot be adopted without a copy (unlike
     /// `StringBuilder.into_string`). The whole buffer is handed over
     /// regardless of the cursor; afterwards the buffer is empty with its
-    /// cursor reset and its capacity kept, like `clear`.
+    /// cursor reset and its capacity kept, like `clear`. 校验 UTF-8，非法
+    /// 字节 panic（checked 形态）；免检交接走 `into_string_unchecked`。
     public into_string(self): String;
+    /// Unchecked handover: no UTF-8 validation. Behavior is undefined when
+    /// the accumulated bytes are not valid UTF-8.
+    public unsafe into_string_unchecked(self): String;
     /// Hand the accumulated bytes to a `List[UInt8]`, then empty the buffer.
     /// One copy into fresh `List` storage (same reason as `into_string`);
     /// the whole buffer is handed over regardless of the cursor, and the
@@ -206,8 +210,12 @@ given ByteBuffer {
     public into_bytes(self): List[UInt8];
     /// Return the accumulated bytes as a `String` snapshot; the buffer is
     /// untouched. Copies once, like `into_string`, and takes the whole
-    /// content regardless of the cursor.
+    /// content regardless of the cursor. 校验 UTF-8，非法字节 panic
+    /// （checked 形态）；免检快照走 `to_string_unchecked`。
     public to_string(self): String;
+    /// Unchecked snapshot: no UTF-8 validation. Behavior is undefined when
+    /// the accumulated bytes are not valid UTF-8.
+    public unsafe to_string_unchecked(self): String;
     /// Return the accumulated bytes as a `List[UInt8]` snapshot; the buffer
     /// is untouched. Unlike the `Reader` extension `read_all`, this copies
     /// the whole content regardless of the cursor and does not advance it.
