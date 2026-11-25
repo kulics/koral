@@ -3436,6 +3436,15 @@ given UInt8 {
     public is_ascii_uppercase(self): Bool;
     /// Returns whether `self` is an ASCII lowercase letter (`a`-`z`).
     public is_ascii_lowercase(self): Bool;
+    /// Returns whether `self` is an ASCII control character (below 0x20 or 0x7F).
+    public is_ascii_control(self): Bool;
+    /// Returns whether `self` is an ASCII graphic character (0x21-0x7E).
+    public is_ascii_graphic(self): Bool;
+    /// Returns whether `self` is an ASCII punctuation character: graphic and
+    /// neither letter nor digit.
+    public is_ascii_punctuation(self): Bool;
+    /// Returns `self` as a `Rune` (every byte is a valid scalar value).
+    public to_rune(self): Rune;
     /// Returns the ASCII lowercase form of `self`, or `self` unchanged.
     public to_ascii_lowercase(self): UInt8;
     /// Returns the ASCII uppercase form of `self`, or `self` unchanged.
@@ -3599,6 +3608,15 @@ given[T: Any] Result[T] {
     public unwrap_or(self, default: T): T;
     /// Transform the `Ok` value with `f`, leaving an `Error` unchanged.
     public map[U: Any](self, f: (T) -> U): Result[U];
+    /// Transform the `Error` with `f` (e.g. to wrap context), leaving `Ok`
+    /// unchanged.
+    public map_error(self, f: (Error) -> Error): Result[T];
+    /// The `Ok` value as an `Option`, discarding the error.
+    public ok(self): Option[T];
+    /// The error as an `Option`, discarding the `Ok` value.
+    public error(self): Option[Error];
+    /// Return the `Ok` value, or compute a default from the error.
+    public unwrap_or_else(self, f: (Error) -> T): T;
 };
 
 /// `Eq` for `Result[T]`: `Ok` values compare with `==`, and `Ok` never equals
@@ -3613,11 +3631,16 @@ given[T: Eq] Result[T]: Eq {
 given Rune {
     /// Return the Unicode replacement character U+FFFD.
     public replacement_char(): Rune;
+    /// Widen a byte to a rune: every `UInt8` value is a valid scalar value,
+    /// so the conversion is infallible (unlike `from_uint32`).
+    public from_uint8(value: UInt8): Rune;
     /// Create a rune from a code point; `Error` for a surrogate (U+D800..U+DFFF)
     /// or a value above U+10FFFF.
     public from_uint32(value: UInt32): Result[Rune];
     /// Create a rune from a code point with no validity check.
-    public from_uint32_unchecked(value: UInt32): Rune;
+    /// 调用契约（`let unsafe`）：担保值是合法 Unicode 标量值（非代理对、
+    /// 不超过 U+10FFFF）——非法值破坏 Rune 恒有效。
+    public unsafe from_uint32_unchecked(value: UInt32): Rune;
     /// Return the code point as a `UInt32`.
     public to_uint32(self): UInt32;
     /// Return whether the rune is ASCII (U+0000..U+007F).
@@ -3637,6 +3660,13 @@ given Rune {
     public is_ascii_uppercase(self): Bool;
     /// Return whether the rune is an ASCII lowercase letter (a-z).
     public is_ascii_lowercase(self): Bool;
+    /// Return whether the rune is an ASCII control character (below 0x20 or 0x7F).
+    public is_ascii_control(self): Bool;
+    /// Return whether the rune is an ASCII graphic character (0x21-0x7E).
+    public is_ascii_graphic(self): Bool;
+    /// Return whether the rune is an ASCII punctuation character: graphic
+    /// and neither letter nor digit.
+    public is_ascii_punctuation(self): Bool;
     /// Convert an ASCII uppercase letter to lowercase; any other rune is
     /// returned unchanged.
     public to_ascii_lowercase(self): Rune;

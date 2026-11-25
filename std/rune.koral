@@ -18,6 +18,10 @@ given Rune {
     /// Return the Unicode replacement character U+FFFD.
     public replacement_char(): Rune = Rune(65533);
 
+    /// Widen a byte to a rune: every `UInt8` value is a valid scalar value,
+    /// so the conversion is infallible (unlike `from_uint32`).
+    public from_uint8(value: UInt8): Rune = Rune(UInt32(value));
+
     /// Create a rune from a code point; `Error` for a surrogate (U+D800..U+DFFF)
     /// or a value above U+10FFFF.
     public from_uint32(value: UInt32): Result[Rune] = {
@@ -28,7 +32,9 @@ given Rune {
     };
 
     /// Create a rune from a code point with no validity check.
-    public from_uint32_unchecked(value: UInt32): Rune = Rune(value);
+    /// 调用契约（`let unsafe`）：担保值是合法 Unicode 标量值（非代理对、
+    /// 不超过 U+10FFFF）——非法值破坏 Rune 恒有效。
+    public unsafe from_uint32_unchecked(value: UInt32): Rune = Rune(value);
 
     /// Return the code point as a `UInt32`.
     public to_uint32(self): UInt32 = self.value;
@@ -76,6 +82,23 @@ given Rune {
         let cp = self.value;
         return cp >= 97 and cp <= 122;
     };
+
+    /// Return whether the rune is an ASCII control character (below 0x20 or 0x7F).
+    public is_ascii_control(self): Bool = {
+        let cp = self.value;
+        return cp < 32 or cp == 127;
+    };
+
+    /// Return whether the rune is an ASCII graphic character (0x21-0x7E).
+    public is_ascii_graphic(self): Bool = {
+        let cp = self.value;
+        return cp >= 33 and cp <= 126;
+    };
+
+    /// Return whether the rune is an ASCII punctuation character: graphic
+    /// and neither letter nor digit.
+    public is_ascii_punctuation(self): Bool =
+        self.is_ascii_graphic() and not self.is_ascii_alphanumeric();
 
     /// Convert an ASCII uppercase letter to lowercase; any other rune is
     /// returned unchanged.

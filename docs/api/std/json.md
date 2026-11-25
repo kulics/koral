@@ -22,21 +22,30 @@ Import the module with `using "std/json" { ... };`.
 /// matching `IoError.Other(detail: String)`.
 public type sendable JsonError(public detail: String, public position: Int);
 
+/// A JSON number as ONE type over three internal representations. The split
+/// is about exactness, not API: integers that fit `Int`/`UInt` are stored
+/// exactly (JSON carries IDs that must survive a round trip, and a Float64
+/// rounds past 2^53), floats keep shortest-round-trip printing. 构造走
+/// `from_int` / `from_uint` / `from_float`，读取走 `as_int` / `as_uint` /
+/// `as_float`；相等按数值（`1` 与 `1.0` 相等），序列化保构造/解析形式。
+public type sendable JsonNumber {
+    IntRep(value: Int),
+    UIntRep(value: UInt),
+    FloatRep(value: Float64),
+};
+
 /// A JSON value: `Null`, `Bool`, `Number`, `String`, `Array`, or `Object`.
-/// `Number` holds a `Float64`, `Array` a frozen list of values, and `Object` a
-/// frozen string-keyed map. A value is construction-then-read-only data that
-/// sits on the `Frozen` tree, so it is safe `sendable` and may cross threads
-/// directly (e.g. through a `Channel[JsonValue]`); parsing and building stay
-/// on the mutable side (`JsonParser` accumulates, then freezes at construction).
+/// `Number` holds a `JsonNumber`, `Array` a frozen list of values, and
+/// `Object` a frozen string-keyed map. A value is construction-then-read-only
+/// data that sits on the `Frozen` tree, so it is safe `sendable` and may cross
+/// threads directly (e.g. through a `Channel[JsonValue]`); parsing and building
+/// stay on the mutable side (`JsonParser` accumulates, then freezes at
+/// construction).
 public type sendable JsonValue {
     Null(),
     Bool(value: Bool),
-    /// A non-integer number. Integers that fit `Int`/`UInt` are stored
-    /// exactly in those cases instead: a `Float64` rounds everything past
-    /// 2^53, and JSON integers carry IDs that must survive a round trip.
-    Number(value: Float64),
-    Int(value: Int),
-    UInt(value: UInt),
+    /// A JSON number (`JsonNumber` keeps exact integers exact).
+    Number(value: JsonNumber),
     String(value: String),
     Array(elements: FrozenList[JsonValue]),
     Object(entries: FrozenDict[String, JsonValue]),
@@ -59,6 +68,41 @@ given JsonError: ToString {
     public to_string(self): String;
 };
 
+/// Construction from the three numeric forms and extraction back out.
+given JsonNumber {
+    /// Build a number from an exact `Int`.
+    public from_int(value: Int): JsonNumber;
+    /// Build a number from an exact `UInt`.
+    public from_uint(value: UInt): JsonNumber;
+    /// Build a number from a `Float64`.
+    public from_float(value: Float64): JsonNumber;
+    /// The exact `Int` value of an integer form (`UInt` converts when it
+    /// fits). A float form is not an integer -- `None`（Option 访问器全函数）.
+    public as_int(self): Option[Int];
+    /// The exact `UInt` value of an integer form (`Int` converts when it is
+    /// non-negative). A float form is not an integer -- `None`.
+    public as_uint(self): Option[UInt];
+    /// The value as `Float64` (an integer beyond 2^53 rounds -- read the
+    /// integer form with `as_int` / `as_uint` for the exact value).
+    public as_float(self): Float64;
+};
+
+/// `Eq` for `JsonNumber`: numeric equality across forms (`1` equals `1.0`),
+/// matching JSON's number semantics.
+given JsonNumber: Eq {
+    /// Compare numerically: like forms compare directly, across forms the
+    /// float side must be exactly representable（大整数超过 2^53 时跨形式
+    /// 比较按 Float64 精度，与 Rust serde 同口径）。
+    public equals(self, other: JsonNumber): Bool;
+};
+
+/// `ToString` for `JsonNumber`: the construction/parse form is preserved
+/// (integer forms print exact decimals, floats the shortest round-trip).
+given JsonNumber: ToString {
+    /// Print the number in its original form.
+    public to_string(self): String;
+};
+
 /// Provides case tests, payload extraction, and indexed access for `JsonValue`.
 given JsonValue {
     /// Check whether this is `Null`.
@@ -75,13 +119,17 @@ given JsonValue {
     public is_object(self): Bool;
     /// Return the `Bool` payload, or `None` when this is not a `Bool`.
     public as_bool(self): Option[Bool];
+    /// Return the `JsonNumber` payload, or `None` when this is not a number.
+    public as_json_number(self): Option[JsonNumber];
     /// Return the numeric payload as `Float64`, or `None` when this is not
     /// a number. An integer payload converts (and can round past 2^53 --
-    /// read the `Int`/`UInt` cases for the exact value).
+    /// read `as_json_number` and its `as_int` / `as_uint` for the exact value).
     public as_number(self): Option[Float64];
-    /// Return the exact `Int` payload, or `None` when this is not an `Int`.
+    /// Return the exact `Int` value, or `None` when this is not an integer
+    /// number (`JsonNumber.as_int` semantics: a float form is not an integer).
     public as_int(self): Option[Int];
-    /// Return the exact `UInt` payload, or `None` when this is not a `UInt`.
+    /// Return the exact `UInt` value, or `None` when this is not an integer
+    /// number (`JsonNumber.as_uint` semantics).
     public as_uint(self): Option[UInt];
     /// Return the `String` payload, or `None` when this is not a `String`.
     public as_string(self): Option[String];
