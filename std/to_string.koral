@@ -489,11 +489,20 @@ given Duration: ToString {
         if self.secs == 0 and self.nanos == 0 then {
             return "0s";
         };
-        let total_ns = self.as_nanoseconds();
-        let is_neg = total_ns < 0;
-        let abs_ns = if is_neg then 0 - total_ns else total_ns;
-        let mutable secs = abs_ns / 1_000_000_000;
-        let nanos = abs_ns % 1_000_000_000;
+        // 按字段取符号与绝对值：nanos 恒在 [0, 1e9)，负值只由 secs 承担
+        // （-0.5s = (-1, 5e8)），取反时纳秒位要向秒位借位——不走总纳秒
+        // 换算（约 292 年以上的时长会在中间量上溢出）。
+        let is_neg = self.secs < 0;
+        let mutable secs = if is_neg then {
+            if self.nanos == 0 then 0 - self.secs else 0 - self.secs - 1
+        } else {
+            self.secs
+        };
+        let nanos = if is_neg and self.nanos != 0 then {
+            1_000_000_000 - self.nanos
+        } else {
+            self.nanos
+        };
         let mutable result = StringBuilder.new();
 
         if is_neg then {

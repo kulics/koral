@@ -117,6 +117,9 @@ given[T: Ord] PriorityQueue[T] {
     public new(): Self;
     /// Create an empty priority queue with room for `capacity` values before resizing.
     public with_capacity(capacity: Int): Self;
+    /// Grow capacity so the queue can hold `additional` more values without
+    /// reallocating. Panics when `additional` is negative.
+    public reserve(self, additional: Int): Void;
     /// Return the number of values in the queue.
     public count(self): Int;
     /// Return `true` if the queue holds no values.
@@ -149,6 +152,9 @@ given[T: Any] Queue[T] {
     public new(): Self;
     /// Create an empty queue with room for `capacity` values before resizing.
     public with_capacity(capacity: Int): Self;
+    /// Grow capacity so the queue can hold `additional` more values without
+    /// reallocating. Panics when `additional` is negative.
+    public reserve(self, additional: Int): Void;
     /// Return the number of values in the queue.
     public count(self): Int;
     /// Return `true` if the queue holds no values.
@@ -187,6 +193,9 @@ given[T: Any] Stack[T] {
     public new(): Self;
     /// Create an empty stack with room for `capacity` values before resizing.
     public with_capacity(capacity: Int): Self;
+    /// Grow capacity so the stack can hold `additional` more values without
+    /// reallocating. Panics when `additional` is negative.
+    public reserve(self, additional: Int): Void;
     /// Return the number of values on the stack.
     public count(self): Int;
     /// Return `true` if the stack holds no values.

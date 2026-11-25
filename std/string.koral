@@ -154,8 +154,11 @@ given StringRunesView: Iterable[Rune, StringRunesIterator] {
 /// Construction and incremental building of strings.
 given StringBuilder {
 
-    /// Create an empty builder with a small initial capacity.
-    public new(): StringBuilder = StringBuilder.with_capacity(16);
+    /// Create an empty builder with the smallest allocation.（例外登记：构建
+    /// 器的字节从一开始就住在 `Bytes` 单块里——`into_string` 零拷贝的 ABI
+    /// 前提——没有天然的空形态，所以这里保留一次 `alloc_bytes(0)` 级的
+    /// 最小分配，不随 `new()` 不分配的容器规则。）
+    public new(): StringBuilder = StringBuilder.with_capacity(0);
 
     /// Create an empty builder with room for at least `capacity` bytes.
     public with_capacity(capacity: Int): StringBuilder = unsafe {
@@ -168,6 +171,17 @@ given StringBuilder {
         let buf = alloc_bytes(UInt(cap - 1));
         buf.data[0] = 0;
         return StringBuilder(buf, buf.data, 0, cap);
+    };
+
+    /// Grow capacity so the builder can hold `additional` more bytes without
+    /// reallocating. Panics when `additional` is negative（容量族负值 panic）。
+    public reserve(self, additional: Int): Void = {
+        if additional < 0 then {
+            panic("StringBuilder reserve negative additional");
+        };
+        if self.cap < self.len + additional + 1 then {
+            self.grow_to(self.len + additional + 1);
+        };
     };
 
     /// The number of bytes pushed so far.
@@ -876,7 +890,9 @@ given String {
     };
 
     /// Return a view over the lines split at `\n`, without the newline.
-    /// A trailing newline does not produce an extra empty line. The view is
+    /// The line ending is `\n` or `\r\n` (a single trailing `\r` is dropped,
+    /// same rule as `scanln`); any other `\r` is content and kept. A trailing
+    /// newline does not produce an extra empty line. The view is
     /// `Iterable` (`for`, and `lazy()` for pipelines); it hands out a fresh
     /// cursor per `iterator()` and is never spent.
     public lines(self): StringLinesView = StringLinesView(self);
@@ -1087,12 +1103,22 @@ given StringLinesIterator: Iterator[String] {
         };
         when self.source.find_from(self.index, "\n") in {
             .Some(i) then {
-                let part = self.source.make_substring(self.index, i - self.index);
+                // 行尾是 `\n` 或 `\r\n`——剥掉一个行尾 `\r`；其它位置的
+                // `\r` 是内容（与 `scanln` 同一条规则）。
+                let mutable end = i;
+                if end > self.index and self.source[end - 1] == '\r' then {
+                    end = end - 1;
+                };
+                let part = self.source.make_substring(self.index, end - self.index);
                 self.index = i + 1;
                 return Option[String].Some(part);
             },
             .None() then {
-                let part = self.source.make_substring(self.index, len - self.index);
+                let mutable end = len;
+                if end > self.index and self.source[end - 1] == '\r' then {
+                    end = end - 1;
+                };
+                let part = self.source.make_substring(self.index, end - self.index);
                 self.index = len + 1;
                 return Option[String].Some(part);
             },

@@ -78,14 +78,17 @@ given[T: Hash] Set[T] {
     private find_slot(self, value: T): Option[Int] =
         find_hash_slot(self.buckets, self.capacity, value);
 
-    private rehash(self): Void = unsafe {
+    private rehash(self): Void = self.rehash_for(self.size);
+
+    /// 以 `min_entries` 个条目为准重建（`reserve` 预留时传 `size + additional`）。
+    private rehash_for(self, min_entries: Int): Void = unsafe {
         let old_cap = self.capacity;
         let old_buckets = self.buckets;
         // 新容量只由存活条目决定（tombstone 不带进新表）：
         // 负载保持 ≤ 0.5（size * 2 < new_cap），空集合首次分配 16 桶；
         // tombstone 主导触发时借此缩回合适容量（hashbrown 的 rebuild 规则）。
         let mutable new_cap = 16;
-        while self.size * 2 >= new_cap then {
+        while min_entries * 2 >= new_cap then {
             new_cap = new_cap * 2;
         };
         let new_buckets = alloc_memory[HashBucket[T, UInt]](UInt(new_cap));
@@ -109,6 +112,19 @@ given[T: Hash] Set[T] {
             };
         };
         dealloc_memory(old_buckets);
+    };
+
+    /// Grow capacity so the set can hold `additional` more elements without
+    /// rehashing. Panics when `additional` is negative（容量族负值 panic）。
+    public reserve(self, additional: Int): Void = {
+        if additional < 0 then {
+            panic("Set reserve negative additional");
+        };
+        let needed = self.size + additional;
+        if needed * 2 < self.capacity and self.deleted * 2 <= self.capacity then {
+            return;
+        };
+        self.rehash_for(needed);
     };
 
     /// Add `value` to the set if it is not already present.

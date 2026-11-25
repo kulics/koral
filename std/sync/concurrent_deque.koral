@@ -37,11 +37,34 @@ given[T: sendable] ConcurrentDeque[T]: Drop {
 /// The linearizable operations of a `ConcurrentDeque`.
 given[T: sendable] ConcurrentDeque[T] {
 
-    /// Create an empty concurrent deque.
+    /// Create an empty concurrent deque. The ring buffer is allocated on
+    /// first use（`new()` 不分配）。
     public new(): ConcurrentDeque[T] = {
-        let cap = 10;
+        return ConcurrentDeque[T](SharedMutex.new(), null, 0, 0, 0);
+    };
+
+    /// Create an empty concurrent deque with room for at least `capacity`
+    /// elements before the next reallocation. Panics when `capacity` is negative.
+    public with_capacity(capacity: Int): ConcurrentDeque[T] = {
+        if capacity < 0 then {
+            panic("ConcurrentDeque with_capacity negative capacity");
+        };
+        let cap = if capacity < 1 then 1 else capacity;
         let source = unsafe { alloc_memory[T](UInt(cap)) };
         return ConcurrentDeque[T](SharedMutex.new(), source, 0, cap, 0);
+    };
+
+    /// Grow capacity so the deque can hold `additional` more elements without
+    /// reallocating. Panics when `additional` is negative.
+    public reserve(self, additional: Int): Void = {
+        if additional < 0 then {
+            panic("ConcurrentDeque reserve negative additional");
+        };
+        self.rw_lock.lock();
+        if self.cap < self.len + additional then {
+            self.grow_to(self.len + additional);
+        };
+        self.rw_lock.unlock();
     };
 
     // Grow capacity so the ring can hold `min_capacity` elements. The caller

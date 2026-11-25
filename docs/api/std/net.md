@@ -100,6 +100,12 @@ given Ipv4Addr: Eq {
     public equals(self, other: Ipv4Addr): Bool;
 };
 
+/// Hash conformance: combines the four octets.
+given Ipv4Addr: Hash {
+    /// Hash the four octets in order.
+    public hash(self): UInt;
+};
+
 /// String conformance: renders dotted-decimal text such as "127.0.0.1".
 given Ipv4Addr: ToString {
     /// Convert to dotted-decimal string representation.
@@ -137,6 +143,12 @@ given Ipv6Addr: Eq {
     public equals(self, other: Ipv6Addr): Bool;
 };
 
+/// Hash conformance: combines the eight segments.
+given Ipv6Addr: Hash {
+    /// Hash the eight segments in order.
+    public hash(self): UInt;
+};
+
 /// String conformance: renders the RFC 5952 canonical form.
 given Ipv6Addr: ToString {
     /// Convert to standard IPv6 string representation (RFC 5952).
@@ -171,6 +183,12 @@ given IpAddr {
 given IpAddr: Eq {
     /// Return true when both values hold the same variant and the same address.
     public equals(self, other: IpAddr): Bool;
+};
+
+/// Hash conformance: the variant discriminant mixed with the address hash.
+given IpAddr: Hash {
+    /// Hash the discriminant, then the wrapped address.
+    public hash(self): UInt;
 };
 
 /// String conformance: renders via the wrapped IPv4 or IPv6 address.
@@ -255,6 +273,12 @@ given SocketAddr: Parseable {
 given SocketAddr: Eq {
     /// Return true when the IP address and the port are both equal.
     public equals(self, other: SocketAddr): Bool;
+};
+
+/// Hash conformance: the address hash combined with the port.
+given SocketAddr: Hash {
+    /// Hash the address and the port and combine the results.
+    public hash(self): UInt;
 };
 
 /// Drop conformance: closes the listening socket when the listener is dropped.

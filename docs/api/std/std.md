@@ -2576,7 +2576,8 @@ given[T: Any] Deque[T]: Drop {};
 
 /// Construction, mutation, and query operations on `Deque[T]`.
 given[T: Any] Deque[T] {
-    /// Create an empty deque, with a small ring buffer allocated up front.
+    /// Create an empty deque. The ring buffer is allocated on first use
+    /// （`new()` 不分配——空容器在编译器里大量建完就丢）。
     public new(): Self;
     /// Create an empty deque with room for at least `capacity` elements before the next reallocation.
     public with_capacity(capacity: Int): Self;
@@ -2652,8 +2653,13 @@ given[K: Hash, V: Any] Dict[K, V] {
     public with_capacity(capacity: Int): Self;
     /// Return the number of entries in the dict.
     public count(self): Int;
+    /// Grow capacity so the dict can hold `additional` more entries without
+    /// rehashing. Panics when `additional` is negative（容量族负值 panic）。
+    public reserve(self, additional: Int): Void;
     /// Store `value` under `key`, replacing any entry already stored there.
-    public insert(self, key: K, value: V): Void;
+    /// Returns the displaced previous value (`None` when the key was absent)，
+    /// 与 Rust `HashMap::insert` 同形。
+    public insert(self, key: K, value: V): Option[V];
     /// Store `value` under `key` only if the key is absent; return whether it
     /// was inserted.
     public try_insert(self, key: K, value: V): Bool;
@@ -2797,11 +2803,11 @@ given Duration {
     /// 从秒和纳秒构造 Duration。
     /// 要求 nanoseconds >= 0，且会归一化到 [0, 1_000_000_000) 区间。
     public new(seconds: Int64 =, nanoseconds: Int64 =): Result[Duration];
-    /// 转换为纳秒总数
+    /// 转换为纳秒总数（精确；总量超出 Int64 时溢出 panic，约 ±292 年）
     public as_nanoseconds(self): Int64;
-    /// 转换为微秒总数
+    /// 转换为微秒总数（向零截断）
     public as_microseconds(self): Int64;
-    /// 转换为毫秒总数
+    /// 转换为毫秒总数（向零截断）
     public as_milliseconds(self): Int64;
     /// 转换为秒数（向零截断）
     public as_seconds(self): Int64;
@@ -2830,6 +2836,12 @@ given Duration: Ord {
     /// 三路比较
     /// 返回: -1 (self < other), 0 (self == other), 1 (self > other)
     public compare(self, other: Duration): Int;
+};
+
+/// `Hash` for `Duration`: the seconds and nanoseconds fields combined.
+given Duration: Hash {
+    /// Hash both fields and combine the results.
+    public hash(self): UInt;
 };
 
 /// `Iterator` for `FilterIterator[T, R]`: pulls from the wrapped cursor until the predicate matches.
@@ -3061,6 +3073,7 @@ given[T: Any] List[T] {
     /// The number of elements in the list.
     public count(self): Int;
     /// Grow capacity so the list can hold `additional` more elements without reallocating.
+    /// Panics when `additional` is negative（容量族负值 panic）。
     public reserve(self, additional: Int): Void;
     /// Append `value` at the end of the list (amortized O(1)), without consuming the caller's value.
     /// Every hot field is read before the growth call and re-read only in
@@ -3276,6 +3289,19 @@ given[T: Any] Option[T]: Default {
 given[T: Eq] Option[T]: Eq {
     /// Return whether `self` and `other` are both `None` or hold equal values.
     public equals(self, other: Option[T]): Bool;
+};
+
+/// `Ord` for `Option[T]`: `None` sorts before every `Some`, and two `Some`
+/// values compare by payload (Rust 的 `Option` 序同形）。
+given[T: Ord] Option[T]: Ord {
+    /// Compare `None` before `Some`, then the payloads.
+    public compare(self, other: Option[T]): Int;
+};
+
+/// `Hash` for `Option[T]`: the discriminant mixed with the payload hash.
+given[T: Hash] Option[T]: Hash {
+    /// Hash a fixed discriminant with the payload (zero when `None`).
+    public hash(self): UInt;
 };
 
 /// Raw bit conversion for `Float32`.
@@ -3570,6 +3596,14 @@ given[T: Any] Result[T] {
     public map[U: Any](self, f: (T) -> U): Result[U];
 };
 
+/// `Eq` for `Result[T]`: `Ok` values compare with `==`, and `Ok` never equals
+/// `Error`. The error side is an `Error` trait object with no comparability
+/// source of its own, so two errors compare by `message()` text.
+given[T: Eq] Result[T]: Eq {
+    /// Compare payloads on `Ok`, message texts on `Error`.
+    public equals(self, other: Result[T]): Bool;
+};
+
 /// Constructors and character classification for runes.
 given Rune {
     /// Return the Unicode replacement character U+FFFD.
@@ -3635,6 +3669,12 @@ given Rune: Ord {
     public compare(self, other: Rune): Int;
 };
 
+/// `Hash` for `Rune`: the code point widened to `UInt`.
+given Rune: Hash {
+    /// Return the code point widened to a `UInt`.
+    public hash(self): UInt;
+};
+
 /// `ToString` for `Rune`: encodes the code point as UTF-8 text.
 given Rune: ToString {
     /// Encode the rune as a UTF-8 string; an invalid rune encodes as the
@@ -3654,6 +3694,9 @@ given[T: Hash] Set[T] {
     public with_capacity(capacity: Int): Self;
     /// Return the number of elements in the set.
     public count(self): Int;
+    /// Grow capacity so the set can hold `additional` more elements without
+    /// rehashing. Panics when `additional` is negative（容量族负值 panic）。
+    public reserve(self, additional: Int): Void;
     /// Add `value` to the set if it is not already present.
     public insert(self, value: T): Void;
     /// Add `value` only if it is absent; return whether it was added.
@@ -3785,10 +3828,16 @@ given StringRunesView: Iterable[Rune, StringRunesIterator] {
 
 /// Construction and incremental building of strings.
 given StringBuilder {
-    /// Create an empty builder with a small initial capacity.
+    /// Create an empty builder with the smallest allocation.（例外登记：构建
+    /// 器的字节从一开始就住在 `Bytes` 单块里——`into_string` 零拷贝的 ABI
+    /// 前提——没有天然的空形态，所以这里保留一次 `alloc_bytes(0)` 级的
+    /// 最小分配，不随 `new()` 不分配的容器规则。）
     public new(): StringBuilder;
     /// Create an empty builder with room for at least `capacity` bytes.
     public with_capacity(capacity: Int): StringBuilder;
+    /// Grow capacity so the builder can hold `additional` more bytes without
+    /// reallocating. Panics when `additional` is negative（容量族负值 panic）。
+    public reserve(self, additional: Int): Void;
     /// The number of bytes pushed so far.
     public count(self): Int;
     /// Whether nothing has been pushed yet.
@@ -3923,7 +3972,9 @@ given String {
     /// a fresh cursor per `iterator()` and is never spent.
     public split(self, sep: String): StringSplitView;
     /// Return a view over the lines split at `\n`, without the newline.
-    /// A trailing newline does not produce an extra empty line. The view is
+    /// The line ending is `\n` or `\r\n` (a single trailing `\r` is dropped,
+    /// same rule as `scanln`); any other `\r` is content and kept. A trailing
+    /// newline does not produce an extra empty line. The view is
     /// `Iterable` (`for`, and `lazy()` for pipelines); it hands out a fresh
     /// cursor per `iterator()` and is never spent.
     public lines(self): StringLinesView;

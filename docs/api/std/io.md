@@ -180,7 +180,8 @@ given ByteBuffer: Drop {};
 
 /// Creates `ByteBuffer` values that are empty, pre-sized, or copied from a string or byte list.
 given ByteBuffer {
-    /// Create an empty byte buffer.
+    /// Create an empty byte buffer. The backing block is allocated on first
+    /// write（`new()` 不分配，与 `List` 同形）。
     public new(): ByteBuffer;
     /// Create an empty byte buffer with room for at least `cap` bytes.
     /// Panics when `cap` is negative.
@@ -211,6 +212,9 @@ given ByteBuffer {
     /// is untouched. Unlike the `Reader` extension `read_all`, this copies
     /// the whole content regardless of the cursor and does not advance it.
     public to_bytes(self): List[UInt8];
+    /// Grow capacity so the buffer can hold `additional` more bytes without
+    /// reallocating. Panics when `additional` is negative（容量族负值 panic）。
+    public reserve(self, additional: Int): Void;
 };
 
 /// Implements `Reader`, reading from the buffer's cursor.

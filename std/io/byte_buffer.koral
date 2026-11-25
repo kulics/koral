@@ -25,10 +25,10 @@ given ByteBuffer: Drop {
 /// Creates `ByteBuffer` values that are empty, pre-sized, or copied from a string or byte list.
 given ByteBuffer {
 
-    /// Create an empty byte buffer.
+    /// Create an empty byte buffer. The backing block is allocated on first
+    /// write（`new()` 不分配，与 `List` 同形）。
     public new(): ByteBuffer = {
-        let data = unsafe { alloc_memory[UInt8](1) };
-        return ByteBuffer(data, 0, 1, 0);
+        return ByteBuffer(null, 0, 0, 0);
     };
 
     /// Create an empty byte buffer with room for at least `cap` bytes.
@@ -73,6 +73,9 @@ given ByteBuffer {
     /// regardless of the cursor; afterwards the buffer is empty with its
     /// cursor reset and its capacity kept, like `clear`.
     public into_string(self): String = unsafe {
+        if self.len == 0 then {
+            return "";
+        };
         let result = String.from_utf8_ptr_unchecked(self.data, self.len);
         self.len = 0;
         self.cursor = 0;
@@ -97,6 +100,9 @@ given ByteBuffer {
     /// untouched. Copies once, like `into_string`, and takes the whole
     /// content regardless of the cursor.
     public to_string(self): String = unsafe {
+        if self.len == 0 then {
+            return "";
+        };
         return String.from_utf8_ptr_unchecked(self.data, self.len);
     };
 
@@ -109,6 +115,15 @@ given ByteBuffer {
             copy_memory(out.borrow_mut_ptr(), self.data, UInt(self.len));
         };
         return out;
+    };
+
+    /// Grow capacity so the buffer can hold `additional` more bytes without
+    /// reallocating. Panics when `additional` is negative（容量族负值 panic）。
+    public reserve(self, additional: Int): Void = {
+        if additional < 0 then {
+            panic("ByteBuffer reserve negative additional");
+        };
+        self.ensure_capacity(self.len + additional);
     };
 
     private ensure_capacity(self, min_capacity: Int): Void = unsafe {

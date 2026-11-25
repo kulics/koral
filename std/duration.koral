@@ -35,14 +35,28 @@ given Duration {
 
     // ============ 转换方法 ============
 
-    /// 转换为纳秒总数
+    /// 转换为纳秒总数（精确；总量超出 Int64 时溢出 panic，约 ±292 年）
     public as_nanoseconds(self): Int64 = self.secs * 1_000_000_000 + self.nanos;
 
-    /// 转换为微秒总数
-    public as_microseconds(self): Int64 = self.secs * 1_000_000 + self.nanos / 1_000;
+    /// 转换为微秒总数（向零截断）
+    public as_microseconds(self): Int64 = {
+        let base = self.secs * 1_000_000 + self.nanos / 1_000;
+        // 向零截断：secs 非负时逐字段拼接即向零；secs 为负且纳秒位有余数
+        // 时要向 +∞ 收一步——向下取整会多截一个。
+        if self.secs < 0 and self.nanos % 1_000 != 0 then {
+            return base + 1;
+        };
+        return base;
+    };
 
-    /// 转换为毫秒总数
-    public as_milliseconds(self): Int64 = self.secs * 1_000 + self.nanos / 1_000_000;
+    /// 转换为毫秒总数（向零截断）
+    public as_milliseconds(self): Int64 = {
+        let base = self.secs * 1_000 + self.nanos / 1_000_000;
+        if self.secs < 0 and self.nanos % 1_000_000 != 0 then {
+            return base + 1;
+        };
+        return base;
+    };
 
     /// 转换为秒数（向零截断）
     public as_seconds(self): Int64 = if self.secs < 0 and self.nanos > 0 then self.secs + 1
@@ -95,6 +109,13 @@ given Duration: Ord {
             return 0;
         };
     };
+};
+
+/// `Hash` for `Duration`: the seconds and nanoseconds fields combined.
+given Duration: Hash {
+
+    /// Hash both fields and combine the results.
+    public hash(self): UInt = self.secs.hash().combine_hash(self.nanos.hash());
 };
 
 // ============================================================================

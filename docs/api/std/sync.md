@@ -250,8 +250,15 @@ given[T: sendable] ConcurrentDeque[T]: Drop {};
 
 /// The linearizable operations of a `ConcurrentDeque`.
 given[T: sendable] ConcurrentDeque[T] {
-    /// Create an empty concurrent deque.
+    /// Create an empty concurrent deque. The ring buffer is allocated on
+    /// first use（`new()` 不分配）。
     public new(): ConcurrentDeque[T];
+    /// Create an empty concurrent deque with room for at least `capacity`
+    /// elements before the next reallocation. Panics when `capacity` is negative.
+    public with_capacity(capacity: Int): ConcurrentDeque[T];
+    /// Grow capacity so the deque can hold `additional` more elements without
+    /// reallocating. Panics when `additional` is negative.
+    public reserve(self, additional: Int): Void;
     /// The number of elements.
     public count(self): Int;
     /// Whether the deque has no elements.
@@ -287,6 +294,9 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     /// Create an empty concurrent dict sized for about `capacity` entries.
     /// Panics when `capacity` is negative.
     public with_capacity(capacity: Int): ConcurrentDict[K, V];
+    /// Grow capacity so the dict can hold `additional` more entries without
+    /// rehashing. Panics when `additional` is negative.
+    public reserve(self, additional: Int): Void;
     /// The number of entries.
     public count(self): Int;
     /// Whether the dict has no entries.
@@ -357,6 +367,12 @@ given[T: Hash and sendable] ConcurrentSet[T]: Drop {};
 given[T: Hash and sendable] ConcurrentSet[T] {
     /// Create an empty concurrent set.
     public new(): ConcurrentSet[T];
+    /// Create an empty concurrent set sized for about `capacity` elements.
+    /// Panics when `capacity` is negative.
+    public with_capacity(capacity: Int): ConcurrentSet[T];
+    /// Grow capacity so the set can hold `additional` more elements without
+    /// rehashing. Panics when `additional` is negative.
+    public reserve(self, additional: Int): Void;
     /// The number of members.
     public count(self): Int;
     /// Whether the set has no members.

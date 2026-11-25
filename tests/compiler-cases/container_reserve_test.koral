@@ -1,0 +1,89 @@
+// EXPECT: reserve_ok
+// 容器容量面统一：reserve 全家族可得（含子模块容器与 ByteBuffer/
+// StringBuilder）、new() 不分配（StringBuilder 例外：最小分配保住
+// into_string 零拷贝）、Dict.insert 交回被顶掉的旧值。
+
+using "std/container" { Queue, Stack, PriorityQueue };
+using "std/io" { ByteBuffer, Writer };
+using "std/sync" { ConcurrentDict, ConcurrentSet, ConcurrentDeque };
+
+let main(): Int = {
+    // new() 空启动 + reserve 后照常工作。
+    let xs = List[Int].new();
+    assert(xs.is_empty(), "lazy list");
+    xs.reserve(100);
+    xs.push(1);
+    xs.push(2);
+    assert(xs.count() == 2, "list after reserve");
+
+    let ds = Dict[String, Int].new();
+    ds.reserve(64);
+    ds.insert("a", 1);
+    ds.insert("b", 2);
+    assert(ds.count() == 2, "dict after reserve");
+
+    let ss = Set[Int].new();
+    ss.reserve(64);
+    ss.insert(3);
+    assert(ss.count() == 1, "set after reserve");
+
+    let dq = Deque[Int].new();
+    assert(dq.is_empty(), "lazy deque");
+    dq.reserve(32);
+    dq.push_back(4);
+    dq.push_front(5);
+    assert(dq.count() == 2, "deque after reserve");
+
+    let q = Queue[Int].new();
+    q.reserve(16);
+    q.push(6);
+    assert(q.pop() == Option[Int].Some(6), "queue after reserve");
+
+    let st = Stack[Int].new();
+    st.reserve(16);
+    st.push(7);
+    assert(st.pop() == Option[Int].Some(7), "stack after reserve");
+
+    let pq = PriorityQueue[Int].new();
+    pq.reserve(16);
+    pq.push(8);
+    assert(pq.pop() == Option[Int].Some(8), "priority queue after reserve");
+
+    let bb = ByteBuffer.new();
+    assert(bb.into_string() == "", "lazy byte buffer");
+    bb.reserve(64);
+    let _ = bb.write_all(from = "xy".to_bytes());
+    assert(bb.into_string() == "xy", "byte buffer after reserve");
+
+    let sb = StringBuilder.new();
+    assert(sb.is_empty(), "minimal string builder");
+    sb.reserve(64);
+    sb.push_string("hi");
+    assert(sb.into_string() == "hi", "string builder after reserve");
+
+    let cd = ConcurrentDict[String, Int].new();
+    cd.reserve(32);
+    assert(cd.insert("k", 9) == Option[Int].None(), "concurrent dict empty insert");
+    assert(cd.insert("k", 10) == Option[Int].Some(9), "concurrent dict returns old");
+
+    let cs = ConcurrentSet[Int].new();
+    cs.reserve(32);
+    cs.insert(11);
+    assert(cs.count() == 1, "concurrent set after reserve");
+
+    let cdq = ConcurrentDeque[Int].new();
+    assert(cdq.is_empty(), "lazy concurrent deque");
+    cdq.reserve(32);
+    cdq.push_back(12);
+    assert(cdq.pop_front() == Option[Int].Some(12), "concurrent deque after reserve");
+
+    // Dict.insert 交回旧值（Rust HashMap::insert 同形）。
+    let d = Dict[String, Int].new();
+    assert(d.insert("x", 1) == Option[Int].None(), "first insert empty");
+    assert(d.insert("x", 2) == Option[Int].Some(1), "insert returns old");
+    assert(d.insert("x", 3) == Option[Int].Some(2), "insert returns old again");
+    assert(d["x"] == 3, "value replaced");
+
+    println("reserve_ok");
+    return 0;
+};

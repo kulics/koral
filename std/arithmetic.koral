@@ -665,9 +665,15 @@ given Duration: Mul[Int] {
 
     /// Returns `self` scaled by the integer factor `k`.
     public mul(self, k: Int): Duration = {
-        let total_nanos = self.as_nanoseconds() * Int64(k);
-        let mutable secs = total_nanos / 1_000_000_000;
-        let mutable nanos = total_nanos % 1_000_000_000;
+        // 按字段乘：秒位与纳秒位分别缩放、纳秒进位并入秒位——不合并到
+        // 总纳秒换算（超过约 292 年的乘法会在中间量上溢出，而结果本身
+        // 放得下）。`nanos * k` 在 |k| 极大时仍可能溢出，与所有 Int 运算
+        // 一样以 panic 收场。
+        let scaled_secs = self.secs * Int64(k);
+        let scaled_nanos = self.nanos * Int64(k);
+        let extra_secs = scaled_nanos / 1_000_000_000;
+        let mutable nanos = scaled_nanos % 1_000_000_000;
+        let mutable secs = scaled_secs + extra_secs;
         // Truncating division leaves `nanos` negative for a negative total;
         // restore the normalization invariant nanos in [0, 1_000_000_000).
         if nanos < 0 then {
@@ -683,9 +689,19 @@ given Duration: Div[Int] {
 
     /// Returns `self` divided by the integer divisor `k`, truncating toward zero.
     public div(self, k: Int): Duration = {
-        let total_nanos = self.as_nanoseconds() / Int64(k);
-        let mutable secs = total_nanos / 1_000_000_000;
-        let mutable nanos = total_nanos % 1_000_000_000;
+        if k == 0 then {
+            panic("Duration.div by zero");
+        };
+        // 按字段除（任意符号的恒等式）：secs = k*qs + rs（向零），总量/k
+        // = qs*1e9 + (rs*1e9 + nanos)/k。各中间量有界，不碰总纳秒换算
+        // （超过约 292 年会在中间量上溢出）。`rs * 1e9` 在 |k| 极大时仍
+        // 可能溢出，与所有 Int 运算一样以 panic 收场。
+        let qs = self.secs / Int64(k);
+        let rs = self.secs % Int64(k);
+        let tail = (rs * 1_000_000_000 + self.nanos) / Int64(k);
+        let extra_secs = tail / 1_000_000_000;
+        let mutable nanos = tail % 1_000_000_000;
+        let mutable secs = qs + extra_secs;
         // Truncating division leaves `nanos` negative for a negative total;
         // restore the normalization invariant nanos in [0, 1_000_000_000).
         if nanos < 0 then {

@@ -1,0 +1,50 @@
+// EXPECT: duration_math_ok
+// as_* 全族向零截断（-1ns 的秒/毫秒/微秒都是 0，不是 -1）；mul/div/
+// to_string 按分字段计算——总纳秒换算在约 292 年处溢出，而按字段的
+// 结果放得下（~3170 年的乘除与 to_string 都必须成立）。
+
+let d(secs: Int64, nanos: Int64): Duration = {
+    return Duration.new(seconds = secs, nanoseconds = nanos).unwrap();
+};
+
+let main(): Int = {
+    // 向零截断：负的亚秒时长不向 -∞ 多截一个。
+    let one_neg = Duration.zero() - d(0, 1);
+    assert(one_neg.as_seconds() == 0, "neg ns seconds");
+    assert(one_neg.as_milliseconds() == 0, "neg ns milliseconds");
+    assert(one_neg.as_microseconds() == 0, "neg ns microseconds");
+    assert(one_neg.as_nanoseconds() == Int64(-1), "neg ns nanoseconds");
+    assert(one_neg.to_string() == "-1ns", "neg ns to_string");
+
+    let neg_1500ms = Duration.zero() - d(1, 500_000_000);
+    assert(neg_1500ms.as_milliseconds() == Int64(-1500), "neg ms exact");
+    assert(neg_1500ms.as_microseconds() == Int64(-1500000), "neg us exact");
+    assert(neg_1500ms.as_seconds() == Int64(-1), "neg seconds toward zero");
+    assert(neg_1500ms.as_minutes() == 0, "neg minutes toward zero");
+    assert(neg_1500ms.to_string() == "-1.5s", "neg to_string");
+
+    let neg_edge = Duration.zero() - d(1, 1);
+    assert(neg_edge.as_milliseconds() == Int64(-1000), "neg edge ms");
+    assert(neg_edge.to_string() == "-1.000000001s", "neg edge to_string");
+
+    // 按字段乘除：超过总纳秒表示范围（约 292 年）仍然成立。
+    let big = d(100_000_000_000, 500_000_000);
+    let twice = big * 2;
+    assert(twice.as_seconds() == 200_000_000_001, "mul past 292 years");
+    let same = big / 1;
+    assert(same.as_seconds() == 100_000_000_000, "div past 292 years");
+    assert(big.to_string() == "27777777h46m40.5s", "to_string past 292 years");
+
+    // 乘除的基本正确性。
+    let s = d(1, 500_000_000) * 3;
+    assert(s.as_seconds() == 4 and s.as_milliseconds() == 4500, "1.5s * 3");
+    let h = d(3, 0) / 2;
+    assert(h.as_milliseconds() == 1500, "3s / 2");
+    let neg_q = (Duration.zero() - d(3, 0)) / 2;
+    assert(neg_q.as_seconds() == Int64(-1) and neg_q.as_milliseconds() == Int64(-1500), "-3s / 2");
+    let tiny = d(0, 3) / 2;
+    assert(tiny.as_nanoseconds() == 1, "3ns / 2 truncates toward zero");
+
+    println("duration_math_ok");
+    return 0;
+};

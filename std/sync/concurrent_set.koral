@@ -111,16 +111,50 @@ given[T: Hash and sendable] ConcurrentSet[T] {
     public new(): ConcurrentSet[T] =
         ConcurrentSet[T](SharedMutex.new(), null, 0, 0, 0);
 
+    /// Create an empty concurrent set sized for about `capacity` elements.
+    /// Panics when `capacity` is negative.
+    public with_capacity(capacity: Int): ConcurrentSet[T] = {
+        if capacity < 0 then {
+            panic("ConcurrentSet with_capacity negative capacity");
+        };
+        let requested = if capacity < 4 then 4 else capacity * 2;
+        let mutable cap = 4;
+        while cap < requested then {
+            cap = cap * 2;
+        };
+        let slots = unsafe { alloc_memory[ConcurrentSetSlot[T]](UInt(cap)) };
+        for i in 0..<cap then {
+            unsafe { set_set_tag(slots + i, UInt(0)) };
+        };
+        return ConcurrentSet[T](SharedMutex.new(), slots, cap, 0, 0);
+    };
+
+    /// Grow capacity so the set can hold `additional` more elements without
+    /// rehashing. Panics when `additional` is negative.
+    public reserve(self, additional: Int): Void = {
+        if additional < 0 then {
+            panic("ConcurrentSet reserve negative additional");
+        };
+        self.rw_lock.lock();
+        let needed = self.size + additional;
+        if needed * 2 >= self.capacity or self.deleted * 2 > self.capacity then {
+            self.rehash_for(needed);
+        };
+        self.rw_lock.unlock();
+    };
+
     // Grow / rebuild the table. Tombstones carry no member here, so a rebuild
     // frees nothing and no destructor runs (the caller holds the exclusive
     // lock).
-    private rehash(self): Void = {
+    private rehash(self): Void = self.rehash_for(self.size);
+
+    private rehash_for(self, min_entries: Int): Void = {
         let old_capacity = self.capacity;
         let old_slots = self.slots;
-        // 新容量只由存活条目决定：负载保持 ≤ 0.5（size * 2 < new_cap），空表
-        // 首次分配 16 槽；tombstone 主导触发时借此缩回合适容量。
+        // 新容量只由存活条目决定：负载保持 ≤ 0.5（min_entries * 2 < new_cap），
+        // 空表首次分配 16 槽；tombstone 主导触发时借此缩回合适容量。
         let mutable new_cap = 16;
-        while self.size * 2 >= new_cap then {
+        while min_entries * 2 >= new_cap then {
             new_cap = new_cap * 2;
         };
         let new_slots = unsafe { alloc_memory[ConcurrentSetSlot[T]](UInt(new_cap)) };

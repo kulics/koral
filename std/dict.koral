@@ -83,14 +83,17 @@ given[K: Hash, V: Any] Dict[K, V] {
     private find_slot(self, key: K): Option[Int] =
         find_hash_slot(self.buckets, self.capacity, key);
 
-    private rehash(self): Void = unsafe {
+    private rehash(self): Void = self.rehash_for(self.size);
+
+    /// 以 `min_entries` 个条目为准重建（`reserve` 预留时传 `size + additional`）。
+    private rehash_for(self, min_entries: Int): Void = unsafe {
         let old_cap = self.capacity;
         let old_buckets = self.buckets;
         // 新容量只由存活条目决定（tombstone 不带进新表）：
         // 负载保持 ≤ 0.5（size * 2 < new_cap），空表首次分配 16 桶；
         // tombstone 主导触发时借此缩回合适容量（hashbrown 的 rebuild 规则）。
         let mutable new_cap = 16;
-        while self.size * 2 >= new_cap then {
+        while min_entries * 2 >= new_cap then {
             new_cap = new_cap * 2;
         };
         let new_buckets = alloc_memory[HashBucket[K, V]](UInt(new_cap));
@@ -134,8 +137,23 @@ given[K: Hash, V: Any] Dict[K, V] {
         };
     };
 
+    /// Grow capacity so the dict can hold `additional` more entries without
+    /// rehashing. Panics when `additional` is negative（容量族负值 panic）。
+    public reserve(self, additional: Int): Void = {
+        if additional < 0 then {
+            panic("Dict reserve negative additional");
+        };
+        let needed = self.size + additional;
+        if needed * 2 < self.capacity and self.deleted * 2 <= self.capacity then {
+            return;
+        };
+        self.rehash_for(needed);
+    };
+
     /// Store `value` under `key`, replacing any entry already stored there.
-    public insert(self, key: K, value: V): Void = unsafe {
+    /// Returns the displaced previous value (`None` when the key was absent)，
+    /// 与 Rust `HashMap::insert` 同形。
+    public insert(self, key: K, value: V): Option[V] = unsafe {
         // 两个触发条件：存活负载满了要扩容；tombstone 过半要重建（缩回
         // 合适容量并清掉陈旧槽），否则删插交替会把表填满 Deleted 标签，
         // 每次查找退化成全表探测且永不再 rehash。
@@ -150,7 +168,11 @@ given[K: Hash, V: Any] Dict[K, V] {
                 let bucket_ptr = self.buckets + idx;
                 let old_tag = bucket_ptr.tag;
                 let was_occupied = old_tag == UInt(1);
+                let mutable displaced = Option[V].None();
                 if was_occupied then {
+                    // 先把旧值拷出来（句柄 retain 一份），deinit 释放的是
+                    // 桶里的那份，返回的这份由调用方接走。
+                    displaced = Option[V].Some(bucket_ptr.value);
                     deinit_memory(bucket_ptr);
                 };
                 init_memory(bucket_ptr, HashBucket[K, V](UInt(1), key, value));
@@ -161,6 +183,7 @@ given[K: Hash, V: Any] Dict[K, V] {
                 if not was_occupied then {
                     self.size = self.size + 1;
                 };
+                return displaced;
             },
         };
     };

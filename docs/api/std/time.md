@@ -95,6 +95,12 @@ given ClockTime: Ord {
     public compare(self, other: ClockTime): Int;
 };
 
+/// Hash conformance: the nanoseconds-since-midnight field.
+given ClockTime: Hash {
+    /// Hash the underlying nanosecond count.
+    public hash(self): UInt;
+};
+
 /// ToString conformance formatting as ISO 8601 time.
 given ClockTime: ToString {
     /// Formats as ISO 8601 time string: "HH:MM:SS[.fraction, trailing zeros trimmed]".
@@ -159,6 +165,12 @@ given Date: Eq {
 given Date: Ord {
     /// Compare two dates chronologically.
     public compare(self, other: Date): Int;
+};
+
+/// Hash conformance: the day-count field.
+given Date: Hash {
+    /// Hash the underlying day count.
+    public hash(self): UInt;
 };
 
 /// ToString conformance formatting as ISO 8601 "YYYY-MM-DD".
@@ -270,6 +282,12 @@ given DateTime: Ord {
     public compare(self, other: DateTime): Int;
 };
 
+/// Hash conformance: the instant fields combined with the timezone.
+given DateTime: Hash {
+    /// Hash the seconds, nanoseconds, and timezone and combine the results.
+    public hash(self): UInt;
+};
+
 /// ToString conformance formatting as ISO 8601 with a timezone suffix.
 given DateTime: ToString {
     /// Formats as ISO 8601 string.
@@ -330,6 +348,12 @@ given MonoTime: Ord {
     public compare(self, other: MonoTime): Int;
 };
 
+/// Hash conformance: the seconds and nanoseconds fields combined.
+given MonoTime: Hash {
+    /// Hash both fields and combine the results.
+    public hash(self): UInt;
+};
+
 /// Constructors for UTC, local, fixed-offset, and named timezones.
 given TimeZone {
     /// Returns the UTC timezone (offset zero).
@@ -348,5 +372,11 @@ given TimeZone {
 given TimeZone: Eq {
     /// Compare two timezones by kind and name or offset.
     public equals(self, other: TimeZone): Bool;
+};
+
+/// Hash conformance: the kind discriminant mixed with its payload.
+given TimeZone: Hash {
+    /// Hash the discriminant, then the name or offset when present.
+    public hash(self): UInt;
 };
 ```

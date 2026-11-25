@@ -17,8 +17,10 @@ Import the module with `using "std/json" { ... };`.
 
 ## Types
 ```koral
-/// JSON parse failure with `msg` and the `position` in the input where parsing stopped.
-public type sendable JsonError(public msg: String, public position: Int);
+/// JSON parse failure with the failure `detail` text and the `position` in
+/// the input where parsing stopped. The payload field is named `detail`,
+/// matching `IoError.Other(detail: String)`.
+public type sendable JsonError(public detail: String, public position: Int);
 
 /// A JSON value: `Null`, `Bool`, `Number`, `String`, `Array`, or `Object`.
 /// `Number` holds a `Float64`, `Array` a frozen list of values, and `Object` a

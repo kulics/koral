@@ -209,16 +209,32 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
         return self.version_counter;
     };
 
+    /// Grow capacity so the dict can hold `additional` more entries without
+    /// rehashing. Panics when `additional` is negative.
+    public reserve(self, additional: Int): Void = {
+        if additional < 0 then {
+            panic("ConcurrentDict reserve negative additional");
+        };
+        self.rw_lock.lock();
+        let needed = self.size + additional;
+        if needed * 2 >= self.capacity or self.deleted * 2 > self.capacity then {
+            self.rehash_for(needed);
+        };
+        self.rw_lock.unlock();
+    };
+
     // Grow / rebuild the table. Tombstones carry no key or value here, so a
     // rebuild frees nothing and no destructor runs (the caller holds the
     // exclusive lock).
-    private rehash(self): Void = {
+    private rehash(self): Void = self.rehash_for(self.size);
+
+    private rehash_for(self, min_entries: Int): Void = {
         let old_capacity = self.capacity;
         let old_slots = self.slots;
-        // 新容量只由存活条目决定：负载保持 ≤ 0.5（size * 2 < new_cap），空表
-        // 首次分配 16 槽；tombstone 主导触发时借此缩回合适容量。
+        // 新容量只由存活条目决定：负载保持 ≤ 0.5（min_entries * 2 < new_cap），
+        // 空表首次分配 16 槽；tombstone 主导触发时借此缩回合适容量。
         let mutable new_cap = 16;
-        while self.size * 2 >= new_cap then {
+        while min_entries * 2 >= new_cap then {
             new_cap = new_cap * 2;
         };
         let new_slots = unsafe { alloc_memory[ConcurrentDictSlot[K, V]](UInt(new_cap)) };
