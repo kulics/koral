@@ -80,6 +80,12 @@ type foreign CFile {};
 
 let unsafe foreign fwrite(buf: *UInt8, size: UInt, count: UInt, file: *CFile): UInt;
 let unsafe foreign fflush(file: *CFile): Void;
+/// The serialized stdio write with the Go-style broken-pipe rule attached
+/// (stdout/stderr re-raise SIGPIPE on EPIPE; see the runtime note).
+let unsafe foreign __koral_stdio_write(file: *CFile, data: *UInt8, len: UInt): Void;
+/// The quiet abort: bypasses the CRT/WER fault dialog on Windows, so a
+/// panic dies immediately (the bare `abort()` can sit in the dialog 6-9s).
+let foreign __koral_abort_quiet(): Never;
 // libc's fgetc returns a 32-bit `int` (0..255, or EOF = -1); declaring the
 // result `Int32` keeps the sign when the call crosses the FFI boundary.
 let unsafe foreign fgetc(file: *CFile): Int32;
@@ -89,7 +95,8 @@ let unsafe foreign __koral_stderr(): *CFile;
 
 /// Terminate the process with the given exit code.
 public let foreign exit(code: Int): Never;
-/// Terminate the process immediately.
+/// Terminate the process immediately (on Windows this may trigger the
+/// WER fault dialog -- `panic` and friends use the quiet abort instead).
 public let foreign abort(): Never;
 
 private let unsafe foreign __koral_set_args(argc: Int32, argv: **UInt8): Void;
@@ -165,10 +172,9 @@ public let panic(message: String): Never = {
     let line = "Panic: " + message + "\n";
     stderr_write_lock.lock();
     unsafe {
-        fwrite(line.bytes.data, 1, UInt(line.len), __koral_stderr());
-        fflush(__koral_stderr());
+        __koral_stdio_write(__koral_stderr(), line.bytes.data, UInt(line.len));
     };
-    abort();
+    __koral_abort_quiet();
 };
 
 /// Panic with `message` when `condition` is false.
@@ -189,8 +195,7 @@ public let print[T: ToString](value: T): Void = {
     stdout_write_lock.lock();
     defer stdout_write_lock.unlock();
     unsafe {
-        fwrite(s.bytes.data, 1, UInt(s.len), __koral_stdout());
-        fflush(__koral_stdout());
+        __koral_stdio_write(__koral_stdout(), s.bytes.data, UInt(s.len));
     };
 };
 
@@ -202,8 +207,7 @@ public let println[T: ToString](value: T): Void = {
     stdout_write_lock.lock();
     defer stdout_write_lock.unlock();
     unsafe {
-        fwrite(line.bytes.data, 1, UInt(line.len), __koral_stdout());
-        fflush(__koral_stdout());
+        __koral_stdio_write(__koral_stdout(), line.bytes.data, UInt(line.len));
     };
 };
 
@@ -214,8 +218,7 @@ public let eprint[T: ToString](value: T): Void = {
     stderr_write_lock.lock();
     defer stderr_write_lock.unlock();
     unsafe {
-        fwrite(s.bytes.data, 1, UInt(s.len), __koral_stderr());
-        fflush(__koral_stderr());
+        __koral_stdio_write(__koral_stderr(), s.bytes.data, UInt(s.len));
     };
 };
 

@@ -461,13 +461,33 @@ CFile* __koral_stderr(void) {
     return (CFile*)stderr;
 }
 
+// The stdio writer every `print`-family write goes through: one locked
+// write, then the Go-style broken-pipe rule. stdout/stderr keep the shell
+// convention -- a write over a closed pipe ends the process by SIGPIPE
+// (re-raised with the default disposition, since init ignores it) -- while
+// everything else just gets an EPIPE error.
+void __koral_stdio_write(CFile* file, const uint8_t* data, uint64_t len) {
+#if defined(_WIN32) || defined(_WIN64)
+    fwrite(data, 1, (size_t)len, (FILE*)file);
+    fflush((FILE*)file);
+#else
+    size_t n = fwrite(data, 1, (size_t)len, (FILE*)file);
+    fflush((FILE*)file);
+    if (n < (size_t)len && errno == EPIPE) {
+        signal(SIGPIPE, SIG_DFL);
+        raise(SIGPIPE);
+    }
+#endif
+}
+
 // abort() on Windows triggers the WER/JIT-debugger fault dialog and can hang
 // or take seconds to die -- a panic must die immediately. _set_abort_behavior
 // turns off both the CRT "abnormal program termination" message and the fault
 // report dialog first, so abort() is just the process death. POSIX abort() is
 // already immediate; the helper keeps every panic/overflow death site on one
-// spelling.
-static KORAL_NORETURN void __koral_abort_quiet(void) {
+// spelling. EXPORTED: std's `panic()` calls it too (the bare CRT `abort()`
+// would put every Koral panic back in the WER dialog's 6-9s path).
+KORAL_NORETURN void __koral_abort_quiet(void) {
 #if defined(_WIN32) || defined(_WIN64)
     _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
 #endif
@@ -3818,15 +3838,8 @@ int32_t __koral_spawn(
         posix_spawn_file_actions_init(&actions);
         posix_spawnattr_init(&attr);
 
-        short spawn_flags = 0;
-#if defined(POSIX_SPAWN_SETPGROUP)
-        if (posix_spawnattr_setpgroup(&attr, 0) == 0) {
-            spawn_flags |= POSIX_SPAWN_SETPGROUP;
-        }
-#endif
-        if (spawn_flags != 0) {
-            posix_spawnattr_setflags(&attr, spawn_flags);
-        }
+        // No POSIX_SPAWN_SETPGROUP: the child stays in the parent's process
+        // group (Go/Rust default; see the fork path's note).
 
         // stdin
         if (stdin_mode == 1) {
@@ -4598,6 +4611,13 @@ int32_t __koral_run_main(int32_t argc, uint8_t** argv, int (*body)(void)) {
     __koral_set_args(argc, argv);
     __koral_thread_set_name((uint8_t*)"main", 4);
     __koral_stack_guard_install();
+#if !defined(_WIN32) && !defined(_WIN64)
+    // Go-style SIGPIPE policy: never die silently mid-write. Socket sends
+    // carry MSG_NOSIGNAL and the stdio writer below re-raises on an EPIPE
+    // over stdout/stderr, so a broken pipe still ends the process the way
+    // shells expect (`prog | head`) -- and every other fd just reports EPIPE.
+    signal(SIGPIPE, SIG_IGN);
+#endif
 
     if (__koral_current_thread_stack_size() >= KORAL_DEFAULT_STACK_SIZE) {
         return (int32_t)body();
@@ -5511,6 +5531,11 @@ int32_t __koral_socket_connect(int64_t fd, uint8_t* addr, uint32_t addr_len) {
 }
 
 int64_t __koral_socket_send(int64_t fd, uint8_t* buf, uint64_t len, int32_t flags) {
+#if defined(MSG_NOSIGNAL)
+    // EPIPE on a closed peer, never a SIGPIPE death (Go's runtime does the
+    // same per-send).
+    flags |= MSG_NOSIGNAL;
+#endif
     ssize_t n = send((int)fd, buf, (size_t)len, flags);
     return (int64_t)n;
 }
@@ -5527,6 +5552,9 @@ int64_t __koral_socket_sendto(int64_t fd, uint8_t* buf, uint64_t len,
     if (__koral_decode_sockaddr_portable(addr, addr_len, &native_addr, &native_len) != 0) {
         return -1;
     }
+#if defined(MSG_NOSIGNAL)
+    flags |= MSG_NOSIGNAL;
+#endif
     ssize_t n = sendto((int)fd, buf, (size_t)len, flags,
                        (const struct sockaddr*)&native_addr, native_len);
     return (int64_t)n;
