@@ -28,33 +28,36 @@ let unsafe foreign __koral_parse_float64(cstr: *UInt8): Float64;
 // ============================================================================
 // JsonValue Type Definition
 // ============================================================================
-/// A JSON number as ONE type over three internal representations. The split
-/// is about exactness, not API: integers that fit `Int`/`UInt` are stored
-/// exactly (JSON carries IDs that must survive a round trip, and a Float64
-/// rounds past 2^53), floats keep shortest-round-trip printing. 构造走
-/// `from_int` / `from_uint` / `from_float`，读取走 `as_int` / `as_uint` /
-/// `as_float`；相等按数值（`1` 与 `1.0` 相等），序列化保构造/解析形式。
-public type sendable JsonNumber {
+/// `JsonNumber` 的内部表示（不对外：构造走 `from_int` / `from_uint` /
+/// `from_float`，读取走 `as_int` / `as_uint` / `as_float`）。三种形态是
+/// 精度策略不是 API：整数保精确（JSON 的 ID 要活过 round trip，Float64
+/// 过 2^53 就取整），浮点保最短往返打印。
+private type sendable JsonNumberRep {
     IntRep(value: Int),
     UIntRep(value: UInt),
     FloatRep(value: Float64),
 };
 
+/// A JSON number as ONE opaque type. 构造走 `from_int` / `from_uint` /
+/// `from_float`，读取走 `as_int` / `as_uint` / `as_float`；相等按数值
+/// （`1` 与 `1.0` 相等，传递性见 `equals`），序列化保构造/解析形式。
+public type sendable JsonNumber(private rep: JsonNumberRep);
+
 /// Construction from the three numeric forms and extraction back out.
 given JsonNumber {
 
     /// Build a number from an exact `Int`.
-    public from_int(value: Int): JsonNumber = JsonNumber.IntRep(value);
+    public from_int(value: Int): JsonNumber = JsonNumber(JsonNumberRep.IntRep(value));
 
     /// Build a number from an exact `UInt`.
-    public from_uint(value: UInt): JsonNumber = JsonNumber.UIntRep(value);
+    public from_uint(value: UInt): JsonNumber = JsonNumber(JsonNumberRep.UIntRep(value));
 
     /// Build a number from a `Float64`.
-    public from_float(value: Float64): JsonNumber = JsonNumber.FloatRep(value);
+    public from_float(value: Float64): JsonNumber = JsonNumber(JsonNumberRep.FloatRep(value));
 
     /// The exact `Int` value of an integer form (`UInt` converts when it
     /// fits). A float form is not an integer -- `None`（Option 访问器全函数）.
-    public as_int(self): Option[Int] = when self in {
+    public as_int(self): Option[Int] = when self.rep in {
         .IntRep(v) then Option[Int].Some(v),
         .UIntRep(v) then {
             if v <= UInt(Int.max_value()) then {
@@ -68,7 +71,7 @@ given JsonNumber {
 
     /// The exact `UInt` value of an integer form (`Int` converts when it is
     /// non-negative). A float form is not an integer -- `None`.
-    public as_uint(self): Option[UInt] = when self in {
+    public as_uint(self): Option[UInt] = when self.rep in {
         .UIntRep(v) then Option[UInt].Some(v),
         .IntRep(v) then {
             if v >= 0 then {
@@ -82,10 +85,26 @@ given JsonNumber {
 
     /// The value as `Float64` (an integer beyond 2^53 rounds -- read the
     /// integer form with `as_int` / `as_uint` for the exact value).
-    public as_float(self): Float64 = when self in {
+    public as_float(self): Float64 = when self.rep in {
         .IntRep(v) then Float64(v),
         .UIntRep(v) then Float64(v),
         .FloatRep(v) then v,
+    };
+
+    // 精确桥：只在 |n| <= 2^53 的安全整数域内做浮点-整数相等（该域内
+    // Float64(n) 精确，`f == Float64(n)` 即数学相等）。
+    private float_equals_int(f: Float64, n: Int): Bool = {
+        if n > 9007199254740992 or n < 0 - 9007199254740992 then {
+            return false;
+        };
+        return f == Float64(n);
+    };
+
+    private float_equals_uint(f: Float64, n: UInt): Bool = {
+        if n > UInt(9007199254740992) then {
+            return false;
+        };
+        return f == Float64(n);
     };
 };
 
@@ -93,24 +112,25 @@ given JsonNumber {
 /// matching JSON's number semantics.
 given JsonNumber: Eq {
 
-    /// Compare numerically: like forms compare directly, across forms the
-    /// float side must be exactly representable（大整数超过 2^53 时跨形式
-    /// 比较按 Float64 精度，与 Rust serde 同口径）。
-    public equals(self, other: JsonNumber): Bool = when self in {
-        .IntRep(a) then when other in {
+    /// Compare numerically (`1` equals `1.0`). Cross-form comparisons
+    /// bridge through the EXACTLY representable integer range (|n| <= 2^53):
+    /// past it a Float64 rounds, and a rounded bridge breaks transitivity
+    /// (2^53 and 2^53+1 would both equal the same float). 结果是等价关系。
+    public equals(self, other: JsonNumber): Bool = when self.rep in {
+        .IntRep(a) then when other.rep in {
             .IntRep(b) then a == b,
             .UIntRep(b) then a >= 0 and UInt(a) == b,
-            .FloatRep(b) then b == Float64(a),
+            .FloatRep(b) then JsonNumber.float_equals_int(b, a),
         },
-        .UIntRep(a) then when other in {
+        .UIntRep(a) then when other.rep in {
             .UIntRep(b) then a == b,
             .IntRep(b) then b >= 0 and UInt(b) == a,
-            .FloatRep(b) then b == Float64(a),
+            .FloatRep(b) then JsonNumber.float_equals_uint(b, a),
         },
-        .FloatRep(a) then when other in {
+        .FloatRep(a) then when other.rep in {
             .FloatRep(b) then a == b,
-            .IntRep(b) then a == Float64(b),
-            .UIntRep(b) then a == Float64(b),
+            .IntRep(b) then JsonNumber.float_equals_int(a, b),
+            .UIntRep(b) then JsonNumber.float_equals_uint(a, b),
         },
     };
 };
@@ -120,7 +140,7 @@ given JsonNumber: Eq {
 given JsonNumber: ToString {
 
     /// Print the number in its original form.
-    public to_string(self): String = when self in {
+    public to_string(self): String = when self.rep in {
         .IntRep(v) then v.to_string(),
         .UIntRep(v) then v.to_string(),
         .FloatRep(v) then format_json_number(v),

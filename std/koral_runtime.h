@@ -235,6 +235,11 @@ struct __koral_StringPayload {
 // 一致。alloc_bytes intrinsic 的运行时侧。
 void* __koral_string_alloc(uintptr_t len);
 
+// The checked array allocator behind `alloc_memory`: a size that overflows
+// the address space or cannot be served ends the process cleanly instead of
+// handing back NULL (Rust's handle_alloc_error).
+void* __koral_alloc_array(uint64_t count, uint64_t elem_size);
+
 // memcmp 垫片：签名必须与 codegen 按 `let foreign` 声明生成的原型逐字一致
 // （uint8_t* 而不是 const void*），否则同一翻译单元里两份声明冲突。
 // 结果同 memcmp：首个差异字节的无符号序；0 表示前 n 字节相等。

@@ -222,16 +222,19 @@ extension TypeChecker {
   func checkToolMethodAmbiguity(on selfType: Type, name: String) throws {
     let owner = context.methodOwner(of: selfType)
     guard let records = declaredMethodRecords[owner]?[name] else { return }
-    var toolTraits: [DefId] = []
+    // Distinct DECLARATION sources only: one tool delivered via parent/child
+    // traits or several conformances is one method, not an ambiguity.
+    // Mirrors koralc's `ambiguous_tool_method_at_call`.
+    var toolSources: [DefId] = []
     for r in records {
       switch r.kind {
       case .inherent, .requirement:
         return
-      case .tool(let traitDefId):
-        if !toolTraits.contains(traitDefId) { toolTraits.append(traitDefId) }
+      case .tool:
+        if !toolSources.contains(r.sourceDefId) { toolSources.append(r.sourceDefId) }
       }
     }
-    if toolTraits.count > 1 {
+    if toolSources.count > 1 {
       // Recoverable (the `handleError` family): one complaint per unqualified
       // call site, resolution continues -- mirrors koralc's
       // `ambiguous_tool_method_at_call`.

@@ -2862,10 +2862,21 @@ given TypeChecker {
                 };
                 when type_form_base_type_opt in {
                     .Some(base_type) then {
-                        if (not args.is_empty()) and self.qualified_method_has_receiver(
-                            self.trait_def_id_of(trait_name) or else def_id_invalid(),
+                        // 指名了 trait 就走 trait 锚定派发：receiver 形重写。
+                        // 判定除签名自参外，再认「该 trait 的工具方法」——工具
+                        // 方法的签名自参常写在 trait 的 Self 上，只看接收者签名
+                        // 会漏判、掉进按名的静态解析（选到同名的另一把工具）。
+                        let qmc_any_trait_def = self.trait_def_id_of(trait_name) or else def_id_invalid();
+                        let qmc_is_tool_of_trait = self.trait_tool_method_def_id(
+                            qmc_any_trait_def,
                             method_name,
-                            base_type,
+                        ).is_valid();
+                        if (not args.is_empty()) and (
+                            qmc_is_tool_of_trait or self.qualified_method_has_receiver(
+                                qmc_any_trait_def,
+                                method_name,
+                                base_type,
+                            )
                         ) then {
                             let mutable rest_args = List[Expr].new();
                             for pair in args.lazy().enumerate() then {
@@ -3012,12 +3023,22 @@ given TypeChecker {
                     method_name,
                     qmc_ret_type,
                 );
+                // 需求走需求 DefId；工具方法退到工具**源声明** DefId
+                // （type_checker_members 的同名助手）——占位符带对身份，
+                // mono 的同源偏好才能选中「指定 trait」的那把工具。
+                let qmc_trait_def_id = self.trait_def_id_of(trait_name) or else def_id_invalid();
+                let qmc_req_def_id = self.trait_method_def_id_of(trait_type, method_name);
+                let qmc_method_def_id = if qmc_req_def_id.is_valid() then {
+                    qmc_req_def_id
+                } else {
+                    self.trait_tool_method_def_id(qmc_trait_def_id, method_name)
+                };
                 let callee = make_typed_expr(
                     TypedExprKind.TraitMethodPlaceholder(
                         typed_base,
                         trait_type,
                         method_symbol,
-                        self.trait_method_def_id_of(trait_type, method_name),
+                        qmc_method_def_id,
                         List[Type].new(),
                         .None(),
                     ),

@@ -349,6 +349,12 @@ given[K: Hash, V: Any] Dict[K, V] {
             .Some(i) then i,
         };
         let bucket_ptr = self.buckets + final_idx;
+        // `find_slot` 的 Some 可能只是「可插入的空槽」提示：缺失键与
+        // `__index_get` 同款 panic，绝不能把空槽当条目写（那会 deinit
+        // 未初始化内存并写坏账目）。
+        if bucket_ptr.tag != UInt(1) then {
+            panic_dict_key_not_found("subscript set", self.count());
+        };
         deinit_memory(bucket_ptr);
         init_memory(bucket_ptr, HashBucket[K, V](UInt(1), key, value));
     };
@@ -363,6 +369,10 @@ given[K: Hash, V: Any] Dict[K, V] {
             .Some(i) then i,
         };
         let bucket_ptr = self.buckets + final_idx;
+        // 同 `__index_set`：空槽提示不是条目，缺失键 panic。
+        if bucket_ptr.tag != UInt(1) then {
+            panic_dict_key_not_found("subscript", self.count());
+        };
         return (&bucket_ptr.value) as *mutable V;
     };
 };

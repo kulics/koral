@@ -284,7 +284,8 @@ given DateTime: Ord {
 
 /// Hash conformance: the instant fields combined with the timezone.
 given DateTime: Hash {
-    /// Hash the seconds, nanoseconds, and timezone and combine the results.
+    /// Hash the seconds and nanoseconds -- the same fields `equals` sees
+    /// (timezone-independent: equal values must hash equal).
     public hash(self): UInt;
 };
 

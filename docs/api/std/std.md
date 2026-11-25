@@ -62,7 +62,8 @@ public let min[T: Ord](a: T, b: T): T;
 /// Terminate the process with the given exit code.
 public let foreign exit(code: Int): Never;
 
-/// Terminate the process immediately.
+/// Terminate the process immediately (on Windows this may trigger the
+/// WER fault dialog -- `panic` and friends use the quiet abort instead).
 public let foreign abort(): Never;
 
 /// Get the last OS error as a human-readable String. Windows failure paths

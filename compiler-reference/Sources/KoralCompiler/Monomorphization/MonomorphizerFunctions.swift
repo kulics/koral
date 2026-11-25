@@ -429,11 +429,17 @@ extension Monomorphizer {
         } else {
             mangledName = "\(structureName)_\(argLayoutKeys)_\(methodBaseName)_\(methodArgLayoutKeys)\(ownerSuffix)"
         }
+        // The METHOD's declaration identity joins the mangle too (`_d<DefId>`,
+        // the vtable C-name convention): same-named tools from two traits
+        // (`given A { m }` / `given B { m }`) must not collapse into one C
+        // symbol -- the second would reuse the first's body and a qualified
+        // call would reach the wrong trait. Mirrors koralc's mangle suffix.
+        let methodDefSuffix = "_d\(method.defId.id)"
         let disambiguatedMangledName: String
         if requiresSelfDisambiguation {
-            disambiguatedMangledName = "\(mangledName)_self_\(receiverLayoutKey)"
+            disambiguatedMangledName = "\(mangledName)_self_\(receiverLayoutKey)\(methodDefSuffix)"
         } else {
-            disambiguatedMangledName = mangledName
+            disambiguatedMangledName = "\(mangledName)\(methodDefSuffix)"
         }
         let key = "ext:\(disambiguatedMangledName)"
         

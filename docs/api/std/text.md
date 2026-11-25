@@ -328,7 +328,7 @@ given Regex {
     /// Returns `None` when the pattern does not match.
     public find(self, text: String): Option[Match];
     /// Return the first match in `text` starting at byte `offset`.
-    public find_at(self, text: String, offset: Int): Option[Match];
+    public find_at(self, offset: Int, text: String): Option[Match];
 };
 
 /// Capture-group search plus match and capture iterators.
@@ -343,7 +343,7 @@ given Regex {
     public captures(self, text: String): Option[Captures];
     /// Return the first match in `text` starting at byte `offset`, with
     /// all of its capture groups.
-    public captures_at(self, text: String, offset: Int): Option[Captures];
+    public captures_at(self, offset: Int, text: String): Option[Captures];
     /// Return a view over every non-overlapping match in `text`, each with its
     /// capture groups. The view is `Iterable` (`for`, and `lazy()` for
     /// pipelines); it hands out a fresh cursor per `iterator()` and is never
@@ -358,13 +358,15 @@ given Regex {
     public replace(self, text: String, with: String =): String;
     /// Replace every match in `text` with `with`, expanding `$0`..`$9` and `$$` as in `replace`.
     public replace_all(self, text: String, with: String =): String;
-    /// Replace the first match in `text` with the string `f` builds from it
+    /// Replace the first match in `text` by the string `f` builds from it
     /// (the closure sees every capture group). Returns `text` unchanged when
-    /// there is no match.
-    public replace_with(self, text: String, f: (Captures) -> String): String;
-    /// Replace every match in `text` with the string `f` builds from it.
-    /// Zero-width matches step one rune at a time.
-    public replace_all_with(self, text: String, f: (Captures) -> String): String;
+    /// there is no match. The `by` argument leads, `text` trails -- same
+    /// order as `find_at`'s `offset`.
+    public replace_by(self, f: (Captures) -> String, text: String): String;
+    /// Replace every match in `text` by the string `f` builds from it.
+    /// Zero-width matches step one rune at a time. The `by` argument leads,
+    /// `text` trails -- same order as `find_at`'s `offset`.
+    public replace_all_by(self, f: (Captures) -> String, text: String): String;
     /// Escape every regex metacharacter in `text`, so it matches literally.
     public escape(text: String): String;
 };

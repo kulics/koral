@@ -464,13 +464,20 @@ private let select_conformance_extension_template(
     base_type: Type,
     method_name: String,
     method_type_arg_count: Option[Int],
+    trait_filter: Option[DefId],
 ): Option[GenericExtensionMethodTemplate] = {
     let mutable parameterized_base_type = resolve_parameterized_type(mono, base_type);
     let count_key = when method_type_arg_count in {
         .Some(count) then count.to_string(),
         .None() then "*",
     };
-    let cache_key = "\(stable_type_key(parameterized_base_type))|\(method_name)|\(count_key)";
+    // 键带 trait 身份：同名工具来自不同 trait 时绝不能共享缓存条目
+    //（那会把 A 的模板答给 B 的调用）。
+    let trait_key = when trait_filter in {
+        .Some(d) then "d\(d.id)",
+        .None() then "_",
+    };
+    let cache_key = "\(stable_type_key(parameterized_base_type))|\(method_name)|\(count_key)|\(trait_key)";
     if mono.storage.conformance_extension_template_missing.contains(cache_key) then {
         return Option[GenericExtensionMethodTemplate].None();
     };
@@ -481,11 +488,46 @@ private let select_conformance_extension_template(
         .None() then {},
     };
 
+    // 严格匹配（conformance target 精确对上接收者）优先于宽松匹配
+    // （template-binding 形）：同 trait 的两个 conform（ListIterator 的
+    // next 与 SetIterator 的 next）宽松形会互相认领，把对方的形状补进
+    // 本次实例化——参数类型错乱（ListIterator 的函数收 SetIterator）。
+    // 三档挑选：条目所属 owner 与接收者 owner **精确相等**者优先（同一
+    // trait 的两个 conform——ListIterator 的 next 与 SetIterator 的 next——
+    // 目标匹配两档都会认领，owner 是唯一区分器）；其次严格目标匹配；最后
+    // 宽松（template-binding）匹配兜底。每档内带体者优先。
+    let receiver_owner = mono.storage.context.method_owner_of(parameterized_base_type);
     let mutable first_match = Option[GenericExtensionMethodTemplate].None();
+    let mutable loose_match = Option[GenericExtensionMethodTemplate].None();
+    let mutable pass_index = 0;
+    while pass_index < 3 then {
     for ext_entry in mono.storage.generic_templates.extension_methods then {
         for ext_ref in ext_entry.second then {
             if ext_ref.method.name != method_name then {
                 continue;
+            };
+            let owner_exact = ext_entry.first == receiver_owner;
+            let pass_ok = if pass_index == 0 then owner_exact
+            else if pass_index == 1 then (not owner_exact)
+            else true;
+            if pass_index < 2 and not pass_ok then {
+                continue;
+            };
+            // 同名多 trait：只认调用方指名的那个 trait 的模板。
+            when trait_filter in {
+                .Some(wanted) then {
+                    when ext_ref.conformance_trait_def_id in {
+                        .Some(got) then {
+                            if got != wanted then {
+                                continue;
+                            };
+                        },
+                        .None() then {
+                            continue;
+                        },
+                    };
+                },
+                .None() then {},
             };
             when method_type_arg_count in {
                 .Some(count) then {
@@ -498,33 +540,65 @@ private let select_conformance_extension_template(
             let target_type = ext_ref.conformance_target_type or else {
                 continue;
             };
-            if not trait_conformance_target_matches(
+            let strict_match = trait_conformance_target_matches(
                 mono,
                 target_type,
                 parameterized_base_type,
-            ) and not trait_conformance_target_matches_for_template_binding(
+            );
+            let loose_ok = (not strict_match) and trait_conformance_target_matches_for_template_binding(
                 mono,
                 target_type,
                 parameterized_base_type,
-            ) then {
+            );
+            if not strict_match and not loose_ok then {
+                continue;
+            };
+            if pass_index == 2 and strict_match then {
                 continue;
             };
             if ext_ref.checked_body is .Some(_) then {
-                mono.storage.conformance_extension_template_cache.insert(
-                    cache_key,
-                    ext_ref,
-                );
-                return Option[GenericExtensionMethodTemplate].Some(ext_ref);
+                if pass_index < 2 then {
+                    mono.storage.conformance_extension_template_cache.insert(
+                        cache_key,
+                        ext_ref,
+                    );
+                    return Option[GenericExtensionMethodTemplate].Some(ext_ref);
+                };
+                when loose_match in {
+                    .Some(_) then {},
+                    .None() then {
+                        loose_match = Option[GenericExtensionMethodTemplate].Some(ext_ref);
+                    },
+                };
             };
             when first_match in {
                 .Some(_) then {},
                 .None() then {
-                    first_match = Option[GenericExtensionMethodTemplate].Some(ext_ref);
+                    if pass_index < 2 then {
+                        first_match = Option[GenericExtensionMethodTemplate].Some(ext_ref);
+                    } else {
+                        when loose_match in {
+                            .Some(_) then {},
+                            .None() then {
+                                loose_match = Option[GenericExtensionMethodTemplate].Some(ext_ref);
+                            },
+                        };
+                    };
                 },
             };
         };
     };
-    when first_match in {
+    if first_match is .Some(_) then {
+        pass_index = 3;
+    } else {
+        pass_index += 1;
+    };
+    };
+    let final_pick = when first_match in {
+        .Some(_) then first_match,
+        .None() then loose_match,
+    };
+    when final_pick in {
         .Some(template_ref) then {
             mono.storage.conformance_extension_template_cache.insert(
                 cache_key,
@@ -535,7 +609,7 @@ private let select_conformance_extension_template(
             mono.storage.conformance_extension_template_missing.insert(cache_key);
         },
     };
-    return first_match;
+    return final_pick;
 };
 
 private let patched_extension_template_with_body(
@@ -2880,6 +2954,9 @@ public let instantiate_extension_method_from_entry(
 ): Symbol = {
     // "Is the owner a trait?" is a question about the DECLARATION. It used to be
     // answered by looking a name up in the trait registry.
+    // 形状合并来自**同一 trait** 的模板：按 (base, 名字) 找会把同名的
+    // 另一把工具的体/形状补进来（「限定调用调到错误 trait」与参数类型
+    // 错乱的共同根）。trait 过滤进选择与缓存键。
     let conformance_template = when mono.storage.generic_templates.is_trait_owner(
         effective_owner,
     ) in {
@@ -2888,14 +2965,21 @@ public let instantiate_extension_method_from_entry(
             base_type,
             template.method.name,
             Option[Int].Some(template.method.type_params.count()),
+            Option[DefId].None(),
         ),
         false then Option[GenericExtensionMethodTemplate].None(),
     };
     let resolved_template = when conformance_template in {
-        .Some(conformance_ref) then patched_extension_template_with_body(
-            template,
-            conformance_ref,
-        ),
+        .Some(conformance_ref) then {
+            // 只认**同一声明**的补体：跨声明补体（同名的另一把工具）会把
+            // 对方的 checked body 铸给本符号——值层错乱（zip 的第二个
+            // 迭代器吐 None）。不同声明各有各的体，无需也绝不互补。
+            if conformance_ref.method.def_id == template.method.def_id then {
+                patched_extension_template_with_body(template, conformance_ref)
+            } else {
+                template
+            }
+        },
         .None() where template.checked_body is .Some(_) then template,
         .None() then {
             // A trait-tool body is stored under the TRAIT's owner; an ordinary
@@ -3024,6 +3108,17 @@ public let instantiate_extension_method_from_entry(
     if instance_type_args.is_empty() then {
         for a in type_args then instance_type_args.push(a);
     };
+    // 声明身份入名（`_d<DefId>` 惯例，同 vtable 的 C 名规则）：同名工具
+    // 来自不同声明时（`given A { m }` 与 `given B { m }`）必须各有其符号——
+    // 只按 (类型, 参数, 名字) 铸名会让第二把工具复用第一把的实现
+    // （「限定调用调到错误 trait」的根）。物化副本的新铸 id 归一到原始
+    // 声明，同源多路到达仍共用一个符号。
+    let mangle_method_source = mono.storage.context.get_original_def_id(
+        resolved_template.method.def_id,
+    ) or else resolved_template.method.def_id;
+    // 声明身份入名（`_d<DefId>` 惯例）：同名工具来自不同声明时各有符号。
+    // 用**模板方法自身**的 DefId（注册表条目，唯一且稳定）——不走
+    // original 归一（那在迁移中途会给出不稳定的键，同方法铸出两个符号）。
     let mangled_name = make_extension_method_layout_name(
         mono,
         mangle_template_name,
@@ -3111,8 +3206,54 @@ public let instantiate_extension_method_from_entry(
     let mutable concrete_params = List[TypedParam].new();
     let mutable concrete_param_types = List[Type].new();
 
+    // checked_parameters 是「注册期已解析」的快照——共享模板条目会被
+    // 先到的那次解析固化 self 形（SetIterator 的 self 铸进条目，后到的
+    // ListIterator 请求沿用即错型）。self 型与基型不符时回退声明参数
+    // 代换路径（下面的 `.None()` 分支），保证签名随本次接收者走。
+    let checked_self_matches = when resolved_template.checked_parameters in {
+        .Some(checked_params_list) then {
+            let mutable ok_self = true;
+            when checked_params_list.get(0) in {
+                .Some(first_param) then {
+                    if not first_param.symbol_type is .GenericParameter(_)
+                        and mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, first_param.symbol_type),
+                        ) != mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, base_type),
+                        ) then {
+                        ok_self = false;
+                    };
+                },
+                .None() then {},
+            };
+            ok_self
+        },
+        .None() then true,
+    };
     when resolved_template.checked_parameters in {
         .Some(checked_params_list) then {
+            if not checked_self_matches then {
+                let node_subst_x = template_substitution(
+                    resolved_template.type_params,
+                    substitution,
+                );
+                for p in resolved_template.method.params then {
+                    let mutable resolved_type_x = resolve_parameterized_type(
+                        mono,
+                        mono.resolve_type_node_impl(p.param_type, node_subst_x),
+                    );
+                    concrete_params.push(
+                        TypedParam(
+                            p.name,
+                            p.is_mutable,
+                            resolved_type_x,
+                            p.named,
+                            p.default_value,
+                        ),
+                    );
+                    concrete_param_types.push(resolved_type_x);
+                };
+            } else {
             for sym in checked_params_list then {
                 let mutable substituted_type = mono.substitute_type_impl(
                     sym.symbol_type,
@@ -3132,6 +3273,7 @@ public let instantiate_extension_method_from_entry(
                     ),
                 );
                 concrete_param_types.push(resolved_type);
+            };
             };
         },
         .None() then {
@@ -5110,6 +5252,7 @@ public let instantiate_trait_placeholder_method(
             resolved_base_type,
             method_name,
             method_type_arg_count,
+            Option[DefId].None(),
         ),
     };
     let matched_template = matched_template_opt or else {

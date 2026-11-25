@@ -1468,29 +1468,50 @@ given TypeChecker {
         // 强制元素类型）。元素位还是泛型参数时（echo guard）没有元素信息
         // 可强制，保持按提示检查、交给结果类型推导。
         if not defaulted and elem_expected is .Some(elem_t) then {
-            if not self.contains_generic_parameter(elem_t) then {
-                let mutable checked = List[TypedExpr].new();
-                for e in elements then {
-                    let typed = self.check_expr_scoped_ref(e, elem_expected, scope);
-                    let enforced = self.enforce_collection_element(typed, elem_t, span);
-                    if enforced is .Some(adapted) then {
-                        checked.push(adapted);
-                    } else {
-                        return self.empty_typed_block(Type.Unknown());
+            if self.contains_generic_parameter(elem_t) then {
+                // echo guard（元素位是泛型参数）：元素**之间**仍要两向对账
+                // ——`first_of([1, 2.5])` 该报错（元素类型缺少检查的口子）。
+                // 对账得到的元素类型重建家族（种子里 `try?` swallow 的那
+                // 一格改为放行错误）。
+                let reconciled = self.reconcile_collection_elements(elements, scope, span);
+                if reconciled is .Some(pair) then {
+                    let mutable bind_args = List[Type].new();
+                    bind_args.push(pair.first);
+                    let rebuilt_type = when expected in {
+                        .Some(full) then when full in {
+                            .GenericStruct(head, _) then Type.GenericStruct(head, bind_args),
+                            .GenericEnum(head, _) then Type.GenericEnum(head, bind_args),
+                            _ then full,
+                        },
+                        .None() then {
+                            let mutable args = List[Type].new();
+                            args.push(pair.first);
+                            Type.GenericStruct(
+                                self.context().std_type_def_id("List") or else def_id_invalid(),
+                                args,
+                            )
+                        },
                     };
+                    return self.lower_collection_literal_from_typed(pair.second, rebuilt_type);
                 };
-                let checked_type = self.infer_collection_literal_result_type(
-                    checked,
-                    expected,
-                );
-                return self.lower_collection_literal_from_typed(checked, checked_type);
+                return self.empty_typed_block(Type.Unknown());
             };
-            let mutable hinted = List[TypedExpr].new();
+            // 元素位是具体类型：逐元素落地。
+            let mutable checked = List[TypedExpr].new();
             for e in elements then {
-                hinted.push(self.check_expr_scoped_ref(e, elem_expected, scope));
+                let typed = self.check_expr_scoped_ref(e, elem_expected, scope);
+                let enforced = self.enforce_collection_element(typed, elem_t, span);
+                if enforced is .Some(adapted) then {
+                    checked.push(adapted);
+                } else {
+                    return self.empty_typed_block(Type.Unknown());
+                };
             };
-            let hinted_type = self.infer_collection_literal_result_type(hinted, expected);
-            return self.lower_collection_literal_from_typed(hinted, hinted_type);
+            let checked_type = self.infer_collection_literal_result_type(
+                checked,
+                expected,
+            );
+            return self.lower_collection_literal_from_typed(checked, checked_type);
         };
 
         // 无目标 / 默认 List：两向对账定元素类型，再按最终类型统一物化。

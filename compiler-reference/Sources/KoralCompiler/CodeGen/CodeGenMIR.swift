@@ -2266,7 +2266,7 @@ final class MIRFunctionCodeEmitter {
       }
       let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resultType))
       codeGen.addIndent()
-      codeGen.appendToBuffer("\(expression) = malloc(\(countEmission.expression) * sizeof(\(codeGen.cTypeName(elementType))));\n")
+      codeGen.appendToBuffer("\(expression) = __koral_alloc_array(\(countEmission.expression), sizeof(\(codeGen.cTypeName(elementType))));\n")
       emitCleanups(countEmission.cleanups)
       return MIRValueEmission(expression: expression, cleanups: [])
 

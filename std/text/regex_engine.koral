@@ -35,7 +35,9 @@ type ReRange(lo: UInt32, hi: UInt32);
 /// compile). Instructions are compile-time only -- the step loop reads the
 /// flattened `ReCode` -- so handles here cost nothing at match time.
 type ReInst {
-    /// Match one rune (code point). `ci` folds ASCII case; `cp` is stored lowercase.
+    /// Match one rune (code point), stored AS WRITTEN. `ci` folds ASCII case
+    /// at build time (both cases join the matcher); without it the match is
+    /// exactly the pattern's own case.
     Rune(cp: UInt32, ci: Bool),
     /// Match one rune against a sorted disjoint range list (negation folded at compile).
     Class(ranges: List[ReRange]),
@@ -495,7 +497,7 @@ given ReParser {
             return self.fail("Invalid preceding regular expression");
         };
         self.step();
-        out.push(ReInst.Rune(re_fold_cp(c.to_uint32()), self.ignore_case));
+        out.push(ReInst.Rune(c.to_uint32(), self.ignore_case));
         return true;
     };
 
@@ -598,7 +600,7 @@ given ReParser {
             out.push(ReInst.Rune(13, false));
             return true;
         };
-        out.push(ReInst.Rune(re_fold_cp(c.to_uint32()), self.ignore_case));
+        out.push(ReInst.Rune(c.to_uint32(), self.ignore_case));
         return true;
     };
 
@@ -1053,9 +1055,15 @@ let re_build_code(insts: List[ReInst]): ReCode = unsafe {
                 if cp < 128 then {
                     let i = Int(cp);
                     match_bits[base + (i >> 3)] = match_bits[base + (i >> 3)] | (UInt8(1) << UInt8(i & 7));
+                    // `ci` 折叠只补 ASCII 双案；大小写敏感时**恰好**匹配
+                    // 模式自身的字形（绝不把大写当小写）。
                     if ci and cp >= 97 and cp <= 122 then {
                         let up = Int(cp - 32);
                         match_bits[base + (up >> 3)] = match_bits[base + (up >> 3)] | (UInt8(1) << UInt8(up & 7));
+                    };
+                    if ci and cp >= 65 and cp <= 90 then {
+                        let lo = Int(cp + 32);
+                        match_bits[base + (lo >> 3)] = match_bits[base + (lo >> 3)] | (UInt8(1) << UInt8(lo & 7));
                     };
                 } else {
                     hi_cnt[pc] = 1;
@@ -1539,8 +1547,9 @@ let re_build_required(
             if re_cp_match(code, u, req_cp) then {
                 return Option[ReReq].None();
             };
-            if req_ci and req_cp >= 97 and req_cp <= 122 then {
-                if re_cp_match(code, u, req_cp - UInt32(32)) then {
+            if req_ci and re_fold_cp(req_cp) != req_cp then {
+                // ci 的双案孪生也走这里：模式若是大写，孪生是小写。
+                if re_cp_match(code, u, re_fold_cp(req_cp)) then {
                     return Option[ReReq].None();
                 };
             };
@@ -2144,7 +2153,7 @@ let re_find_occurrence(req: ReReq, bp: *UInt8, text_len: Int, from: Int): Int = 
     let mutable q = from;
     while q < text_len then {
         let cp = re_rune_at(bp, q, text_len);
-        if cp == req.cp or (req.ci and re_fold_cp(cp) == req.cp) then {
+        if cp == req.cp or (req.ci and re_fold_cp(cp) == re_fold_cp(req.cp)) then {
             return q;
         };
         q += re_rune_width(bp[q]);

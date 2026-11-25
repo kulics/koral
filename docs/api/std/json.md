@@ -22,17 +22,10 @@ Import the module with `using "std/json" { ... };`.
 /// matching `IoError.Other(detail: String)`.
 public type sendable JsonError(public detail: String, public position: Int);
 
-/// A JSON number as ONE type over three internal representations. The split
-/// is about exactness, not API: integers that fit `Int`/`UInt` are stored
-/// exactly (JSON carries IDs that must survive a round trip, and a Float64
-/// rounds past 2^53), floats keep shortest-round-trip printing. 构造走
-/// `from_int` / `from_uint` / `from_float`，读取走 `as_int` / `as_uint` /
-/// `as_float`；相等按数值（`1` 与 `1.0` 相等），序列化保构造/解析形式。
-public type sendable JsonNumber {
-    IntRep(value: Int),
-    UIntRep(value: UInt),
-    FloatRep(value: Float64),
-};
+/// A JSON number as ONE opaque type. 构造走 `from_int` / `from_uint` /
+/// `from_float`，读取走 `as_int` / `as_uint` / `as_float`；相等按数值
+/// （`1` 与 `1.0` 相等，传递性见 `equals`），序列化保构造/解析形式。
+public type sendable JsonNumber;
 
 /// A JSON value: `Null`, `Bool`, `Number`, `String`, `Array`, or `Object`.
 /// `Number` holds a `JsonNumber`, `Array` a frozen list of values, and
@@ -90,9 +83,10 @@ given JsonNumber {
 /// `Eq` for `JsonNumber`: numeric equality across forms (`1` equals `1.0`),
 /// matching JSON's number semantics.
 given JsonNumber: Eq {
-    /// Compare numerically: like forms compare directly, across forms the
-    /// float side must be exactly representable（大整数超过 2^53 时跨形式
-    /// 比较按 Float64 精度，与 Rust serde 同口径）。
+    /// Compare numerically (`1` equals `1.0`). Cross-form comparisons
+    /// bridge through the EXACTLY representable integer range (|n| <= 2^53):
+    /// past it a Float64 rounds, and a rounded bridge breaks transitivity
+    /// (2^53 and 2^53+1 would both equal the same float). 结果是等价关系。
     public equals(self, other: JsonNumber): Bool;
 };
 

@@ -544,17 +544,16 @@ given String {
                 i += 1;
                 continue;
             };
-            // 最大非法子序列 = 引导字节 + 能吃下的续字节前缀。范围越界
-            // 的续字节（如 surrogate 前缀 ED A0）也算进子序列——Rust /
-            // Python 的 U+FFFD 替换同规则；非续字节不吞，从它重新开始。
+            // 最大非法子序列 = 引导字节 + 严格符合范围的续字节前缀。越界
+            // 续字节（如 surrogate 前缀 ED A0 的 A0）**不**吞进子序列——
+            // 它自己另算一个非法序列（Python/Rust errors=replace 同数：
+            // ED A0 80 出三个 U+FFFD，F0 80 80 80 出四个）。
             let mutable j = 0;
             let mutable stopped = false;
             while j < need and i + 1 + j < len and not stopped then {
                 let b = bytes[i + 1 + j];
-                if b < 128 or b > 191 then {
-                    stopped = true;
-                } else if j == 0 and (b < lo1 or b > hi1) then {
-                    j += 1;
+                let fits = if j == 0 then (b >= lo1 and b <= hi1) else (b >= 128 and b <= 191);
+                if not fits then {
                     stopped = true;
                 } else {
                     j += 1;
@@ -735,7 +734,7 @@ given String {
     /// Whether `byte_index` falls on a rune boundary: 0, the byte length, or the
     /// start of a UTF-8 sequence; `false` when the index is past the end.
     public is_rune_boundary(self, byte_index: Int): Bool = unsafe {
-        if byte_index > self.len then {
+        if byte_index < 0 or byte_index > self.len then {
             return false;
         };
         if byte_index == 0 or byte_index == self.len then {
@@ -748,7 +747,7 @@ given String {
         if start > end then {
             panic_substring_invalid_range(start, end);
         };
-        if end > self.len then {
+        if start < 0 or end > self.len then {
             panic_substring_bounds(start, end, self.len);
         };
         if not self.is_rune_boundary(start) or not self.is_rune_boundary(end) then {

@@ -3555,10 +3555,15 @@ extension TypeChecker {
       // generic body the elements carry the parameter (`[x]`, x: T) and the
       // derivation reproduces the target unchanged.
       var reclassified = classified
-      if collectionTargetElementIsGeneric(classified), !elements.isEmpty,
-         let derived = try? inferCommonElementType(elements: elements, span: span),
-         !isGenericParameterType(derived) {
-        reclassified = retargetCollectionElement(classified, to: derived)
+      if collectionTargetElementIsGeneric(classified), !elements.isEmpty {
+        // The echo guard still CHECKS the elements against each other: a
+        // mismatched literal (`first_of([1, 2.5])`) must complain here just
+        // like it does for concrete targets. The derivation used to swallow
+        // its own throw (`try?`), leaving the element types unchecked.
+        let derived = try inferCommonElementType(elements: elements, span: span)
+        if !isGenericParameterType(derived) {
+          reclassified = retargetCollectionElement(classified, to: derived)
+        }
       }
       target = reclassified
     } else {

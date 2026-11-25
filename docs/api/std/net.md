@@ -24,9 +24,13 @@ public trait ToSocketAddr {
 ## Types
 ```koral
 /// IPv4 address type, stored as four octets.
+/// An IPv4 address as four octets. 表示用定长数组（`[4]UInt8`，值语义零
+/// RC）；构造双入口——标量 `new(a, b, c, d)` 与数组 `from_octets`。
 public type sendable Ipv4Addr;
 
 /// IPv6 address type, stored as eight 16-bit segments.
+/// An IPv6 address as eight segments. 表示用定长数组（`[8]UInt16`）；
+/// 构造双入口——标量 `new(...)` 与数组 `from_segments`。
 public type sendable Ipv6Addr;
 
 /// Unified IP address enum, containing either an IPv4 or IPv6 address.
@@ -74,6 +78,8 @@ public type unsafe sendable mutable UdpSocket;
 given Ipv4Addr {
     /// Create an IPv4 address from four octets.
     public new(a: UInt8, b: UInt8, c: UInt8, d: UInt8): Ipv4Addr;
+    /// Create an IPv4 address from an octet array.
+    public from_octets(octets: [4]UInt8): Ipv4Addr;
     /// Return the loopback address 127.0.0.1.
     public localhost(): Ipv4Addr;
     /// Return the unspecified address 0.0.0.0.
@@ -81,7 +87,7 @@ given Ipv4Addr {
     /// Return the broadcast address 255.255.255.255.
     public broadcast(): Ipv4Addr;
     /// Return the four octets as a list.
-    public octets(self): List[UInt8];
+    public octets(self): [4]UInt8;
     /// Check if this is a loopback address (127.0.0.0/8).
     public is_loopback(self): Bool;
     /// Check if this is the unspecified address (0.0.0.0).
@@ -123,12 +129,14 @@ given Ipv4Addr: Parseable {
 given Ipv6Addr {
     /// Create an IPv6 address from eight 16-bit segments.
     public new(a: UInt16, b: UInt16, c: UInt16, d: UInt16, e: UInt16, f: UInt16, g: UInt16, h: UInt16): Ipv6Addr;
+    /// Create an IPv6 address from a segment array.
+    public from_segments(segments: [8]UInt16): Ipv6Addr;
     /// Return the loopback address ::1.
     public localhost(): Ipv6Addr;
     /// Return the unspecified address ::.
     public unspecified(): Ipv6Addr;
     /// Return the eight 16-bit segments as a list.
-    public segments(self): List[UInt16];
+    public segments(self): [8]UInt16;
     /// Check if this is the loopback address (::1).
     public is_loopback(self): Bool;
     /// Check if this is the unspecified address (::).

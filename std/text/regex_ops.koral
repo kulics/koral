@@ -43,10 +43,10 @@ given Regex {
 
     /// Return the first match in `text`, recording only the whole match's span.
     /// Returns `None` when the pattern does not match.
-    public find(self, text: String): Option[Match] = Regex.find_at(self, text, 0);
+    public find(self, text: String): Option[Match] = Regex.find_at(self, 0, text);
 
     /// Return the first match in `text` starting at byte `offset`.
-    public find_at(self, text: String, offset: Int): Option[Match] = {
+    public find_at(self, offset: Int, text: String): Option[Match] = {
         return when re_run(self.prog, text, offset, false) in {
             .Some(m) then {
                 Option[Match].Some(Match(text, Int(m.slot(0)), Int(m.slot(1))))
@@ -72,11 +72,11 @@ given Regex {
     /// Return the first match in `text` with all of its capture groups.
     /// Returns `None` when the pattern does not match.
     public captures(self, text: String): Option[Captures] =
-        Regex.captures_at(self, text, 0);
+        Regex.captures_at(self, 0, text);
 
     /// Return the first match in `text` starting at byte `offset`, with
     /// all of its capture groups.
-    public captures_at(self, text: String, offset: Int): Option[Captures] = {
+    public captures_at(self, offset: Int, text: String): Option[Captures] = {
         return when re_run(self.prog, text, offset, true) in {
             .Some(m) then {
                 Option[Captures].Some(
@@ -130,7 +130,7 @@ given Regex {
         let mutable had_match = false;
 
         while offset <= text_len then {
-            when Regex.captures_at(self, text, offset) in {
+            when Regex.captures_at(self, offset, text) in {
                 .Some(c) then {
                     had_match = true;
                     if c.start() > offset then {
@@ -194,10 +194,11 @@ given Regex {
         return result.to_string();
     };
 
-    /// Replace the first match in `text` with the string `f` builds from it
+    /// Replace the first match in `text` by the string `f` builds from it
     /// (the closure sees every capture group). Returns `text` unchanged when
-    /// there is no match.
-    public replace_with(self, text: String, f: (Captures) -> String): String = {
+    /// there is no match. The `by` argument leads, `text` trails -- same
+    /// order as `find_at`'s `offset`.
+    public replace_by(self, f: (Captures) -> String, text: String): String = {
         when self.captures(text) in {
             .None() then {
                 return text;
@@ -216,16 +217,17 @@ given Regex {
         };
     };
 
-    /// Replace every match in `text` with the string `f` builds from it.
-    /// Zero-width matches step one rune at a time.
-    public replace_all_with(self, text: String, f: (Captures) -> String): String = {
+    /// Replace every match in `text` by the string `f` builds from it.
+    /// Zero-width matches step one rune at a time. The `by` argument leads,
+    /// `text` trails -- same order as `find_at`'s `offset`.
+    public replace_all_by(self, f: (Captures) -> String, text: String): String = {
         let mutable result = StringBuilder.new();
         let mutable offset = 0;
         let text_len = text.count();
         let mutable had_match = false;
 
         while offset <= text_len then {
-            when Regex.captures_at(self, text, offset) in {
+            when Regex.captures_at(self, offset, text) in {
                 .Some(c) then {
                     had_match = true;
                     if c.start() > offset then {

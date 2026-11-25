@@ -156,6 +156,15 @@ given JsonParser {
     make_string_error(self, msg: String): Result[String] =
         Result[String].Error(JsonError(msg, self.pos));
 
+    /// 把 `pos` 处的整符追加进错误消息：消息构造器持文本，绝不能塞多字节
+    /// 字符的碎片字节（那会让消息自身的 to_string 判非法 UTF-8 而 panic）。
+    push_error_char(self, msg: StringBuilder, pos: Int): Void = {
+        let b0 = self.input[pos];
+        let w = if b0 < 128 then 1 else if b0 < 224 then 2 else if b0 < 240 then 3 else 4;
+        let end = if pos + w > self.input.count() then self.input.count() else pos + w;
+        msg.push_string(self.input.substring(pos..<end));
+    };
+
     // --- Hex digit parsing ---
 
     parse_hex4(self): Result[UInt] = {

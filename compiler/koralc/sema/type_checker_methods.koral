@@ -985,25 +985,31 @@ given TypeChecker {
             },
             .None() then return false,
         };
-        let mutable tool_traits = List[DefId].new();
+        // 按**声明身份**计数：一个工具经父子 trait / 多个 conform 物化
+        // 多次仍是同一个声明，不是歧义。物化副本的 DefId 是新铸的，归一
+        // 到原始声明（record_original_def_id）再比。
+        let mutable tool_sources = List[DefId].new();
         for r in records then {
             when r.kind in {
                 .Inherent() then return false,
                 .Requirement(_) then return false,
-                .Tool(trait_def_id) then {
-                    let mutable seen_trait = false;
-                    for t in tool_traits then {
-                        if t == trait_def_id then {
-                            seen_trait = true;
+                .Tool(_) then {
+                    let src = self.context().get_original_def_id(
+                        r.source_def_id,
+                    ) or else r.source_def_id;
+                    let mutable seen_src = false;
+                    for t in tool_sources then {
+                        if t == src then {
+                            seen_src = true;
                         };
                     };
-                    if not seen_trait then {
-                        tool_traits.push(trait_def_id);
+                    if not seen_src then {
+                        tool_sources.push(src);
                     };
                 },
             };
         };
-        if tool_traits.count() > 1 then {
+        if tool_sources.count() > 1 then {
             // 可恢复地记录（种子的 `handleError` 同型）：每处未限定调用
             // 一条歧义，随后继续解析——不静默选择的底线由**报错**守住，
             // 恢复路径只是让一个文件里的多处问题一次说全。
@@ -2220,7 +2226,7 @@ given TypeChecker {
         };
     };
 
-    resolve_trait_tool_method_signature(
+resolve_trait_tool_method_signature(
         self,
         base_type: Type,
         trait_name: String,
