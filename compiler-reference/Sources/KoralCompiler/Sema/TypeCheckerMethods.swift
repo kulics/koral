@@ -214,8 +214,36 @@ extension TypeChecker {
     return extensionMethods[owner]?[name]
   }
 
+  /// Same-name tool methods from several trait tool sources: an UNQUALIFIED
+  /// call does not choose implicitly (guide "Override and Conflict Rules" --
+  /// `Type(Trait).method(...)` is the disambiguation). An inherent or
+  /// requirement occupant makes the winner unique (a tool defers), so those
+  /// names pass. Mirrors koralc `ambiguous_tool_method_at_call`.
+  func checkToolMethodAmbiguity(on selfType: Type, name: String) throws {
+    let owner = context.methodOwner(of: selfType)
+    guard let records = declaredMethodRecords[owner]?[name] else { return }
+    var toolTraits: [DefId] = []
+    for r in records {
+      switch r.kind {
+      case .inherent, .requirement:
+        return
+      case .tool(let traitDefId):
+        if !toolTraits.contains(traitDefId) { toolTraits.append(traitDefId) }
+      }
+    }
+    if toolTraits.count > 1 {
+      // Recoverable (the `handleError` family): one complaint per unqualified
+      // call site, resolution continues -- mirrors koralc's
+      // `ambiguous_tool_method_at_call`.
+      try handleError(SemanticError(.generic(
+        "Ambiguous method '\(name)' for type '\(selfType.description)' via trait extensions"
+      ), span: currentSpan))
+    }
+  }
+
   /// A method-table read that honours the method face (§3.4).
-  func visibleDeclaredMethod(on selfType: Type, name: String) -> Symbol? {
+  func visibleDeclaredMethod(on selfType: Type, name: String) throws -> Symbol? {
+    try checkToolMethodAmbiguity(on: selfType, name: name)
     let owner = context.methodOwner(of: selfType)
     let selfArgs = context.methodOwnerAndArgs(of: selfType).args
     // An instance-scoped slot (`given List[Int] { … }`) answers first and for
@@ -404,7 +432,7 @@ extension TypeChecker {
     switch selfType {
     case .structure(let defId):
       let typeName = context.getName(defId) ?? ""
-      if let sym = visibleDeclaredMethod(on: selfType, name: name) {
+      if let sym = try visibleDeclaredMethod(on: selfType, name: name) {
         return sym
       }
       // METHOD FACE (§3.4): an extension template with a conformance trait is
@@ -437,7 +465,7 @@ extension TypeChecker {
 
     case .`enum`(let defId):
       let typeName = context.getName(defId) ?? ""
-      if let sym = visibleDeclaredMethod(on: selfType, name: name) {
+      if let sym = try visibleDeclaredMethod(on: selfType, name: name) {
         return sym
       }
       if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
@@ -607,7 +635,7 @@ extension TypeChecker {
       .float32, .float64,
       .bool:
       let typeName = selfType.description
-      if let sym = visibleDeclaredMethod(on: selfType, name: name) {
+      if let sym = try visibleDeclaredMethod(on: selfType, name: name) {
         return sym
       }
       if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],

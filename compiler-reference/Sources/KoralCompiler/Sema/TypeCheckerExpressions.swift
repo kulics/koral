@@ -7709,7 +7709,7 @@ extension TypeChecker {
       )
     }
     // METHOD FACE (§3.4): the instance-method read goes through the face gate.
-    if let methodSym = visibleDeclaredMethod(on: typeToLookup, name: memberName) {
+    if let methodSym = try visibleDeclaredMethod(on: typeToLookup, name: memberName) {
       guard isReceiverStyleMethod(methodSym) else {
         return nil
       }

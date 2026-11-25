@@ -1590,11 +1590,15 @@ public class TypeChecker {
   /// A type conforms to a trait once -- the trait rule a non-generic duplicate
   /// `given` already gets ("Conflicting conformance ... already declared at
   /// line N"). `given Vec: Add[Int]` and `given Vec: Add[Vec]` collide exactly
-  /// like two `given Point: T` do. The EARLIEST prior declaration is the one
-  /// named, so the report never depends on set iteration order.
+  /// like two `given Point: T` do -- and two INSTANCES of one base may not
+  /// split a trait between them (`given Box[Int]: Name` and
+  /// `given Box[String]: Name` overlap: a lookup answers for both). The
+  /// EARLIEST prior declaration is the one named, so the report never depends
+  /// on set iteration order.
   func conformanceOwnerClash(in set: Set<ConformanceKey>, matching key: ConformanceKey) -> SourceSpan? {
     var best: SourceSpan? = nil
-    for prior in set where prior.selfType == key.selfType && prior.traitDefId == key.traitDefId {
+    for prior in set
+    where conformanceBasesClash(prior.selfType, key.selfType) && prior.traitDefId == key.traitDefId {
       guard let origin = conformanceDeclOrigins[prior] else { continue }
       if let current = best {
         if (origin.line, origin.column) < (current.line, current.column) {
@@ -1607,6 +1611,31 @@ public class TypeChecker {
     return best
   }
   
+  /// The BASE identity of a conformance self type: the template/declaration
+  /// DefId regardless of type arguments -- `Box[Int]` and `Box[String]` share
+  /// one base, so two instantiated givens of one base collide.
+  private func conformanceBaseDefId(_ t: ConformanceTypeKey) -> DefId? {
+    switch t {
+    case .structure(let defId), .enum(let defId), .opaque(let defId):
+      return defId
+    case .genericStruct(let templateDefId, _), .genericEnum(let templateDefId, _):
+      return templateDefId
+    default:
+      return nil
+    }
+  }
+
+  /// Two self types clash when their bases are the same declaration; shapes
+  /// with no base fall back to full-type identity.
+  private func conformanceBasesClash(_ a: ConformanceTypeKey, _ b: ConformanceTypeKey) -> Bool {
+    switch (conformanceBaseDefId(a), conformanceBaseDefId(b)) {
+    case (.some(let x), .some(let y)):
+      return x == y
+    default:
+      return a == b
+    }
+  }
+
   // MARK: - Pass Architecture Support
   
   /// CompilerContext - 统一查询与更新上下文

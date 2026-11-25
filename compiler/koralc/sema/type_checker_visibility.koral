@@ -1343,12 +1343,19 @@ given TypeChecker {
     };
 
     /// Conflict detection for `given X as T`: a second DECLARATION of the same
-    /// (self type, trait) pair is `Conflicting conformance: 'given X T' already
-    /// declared at line N`, N being the first declaration's line -- the same
-    /// text Swift prints from `declaredConformances`/`explicitConformances`.
-    /// The pair is the trait's DECLARATION: a second `given` conflicts whatever
-    /// type arguments the trait carries, so `given Vec Add[Int]` and
-    /// `given Vec Add[Vec]` collide exactly like two `given Point T` do.
+    /// (BASE self type, trait) pair is `Conflicting conformance: 'given X T'
+    /// already declared at line N`, N being the first declaration's line --
+    /// the same text Swift prints from `declaredConformances`/
+    /// `explicitConformances`.
+    ///
+    /// The pair is the trait's DECLARATION and the self type's BASE (template
+    /// identity): a second `given` conflicts whatever type arguments either
+    /// side carries, so `given Vec Add[Int]` and `given Vec Add[Vec]` collide
+    /// exactly like two `given Point T` do -- and two INSTANCES of one base
+    /// may not split a trait between them (`given Box[Int] Name` and
+    /// `given Box[String] Name` overlap: a lookup answers for both). The
+    /// instance-level rule is the point: disjoint instances of one base still
+    /// collide, so exactly one `given` per (base, trait) pair survives.
     ///
     /// Returns false after reporting. The same declaration arrives here once
     /// per pass and must not conflict with itself, so identity is the stored
@@ -1362,11 +1369,13 @@ given TypeChecker {
         trait_name: String,
         span: SourceSpan,
     ): Bool = {
+        let key_base = self.conformance_template_key(key.target_type);
         let mutable clashes = List[SourceSpan].new();
         let mutable own = false;
         for pair in self.storage.conformance_decl_origins then {
             let prior = pair.first;
-            if not (prior.target_type == key.target_type and prior.trait_def_id == key.trait_def_id) then {
+            if not (self.conformance_template_key(prior.target_type) == key_base
+                and prior.trait_def_id == key.trait_def_id) then {
                 continue;
             };
             if self.spans_equal(pair.second, span) then {

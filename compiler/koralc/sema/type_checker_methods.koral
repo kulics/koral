@@ -961,6 +961,61 @@ given TypeChecker {
         self.push_diagnostic(msg.to_string(), span);
     };
 
+    /// 同名工具方法出现在多个 trait 工具源时，未限定调用报歧义——guide
+    /// 「Override and Conflict Rules」：Koral 不隐式选择，`Type(Trait).method`
+    /// 的完全限定调用显式消歧（那条路不经过这里）。inherent / requirement
+    /// 占位时冲突代数保证唯一胜者（工具让位），不歧义。返回 true 表示已
+    /// 报，调用方放弃解析。
+    ambiguous_tool_method_at_call(
+        self,
+        base_type: Type,
+        method_name: String,
+        span: SourceSpan,
+    ): Bool = {
+        // 限定调用（`Type(Trait).m` / `recv(Trait).m`）就是门要求的消歧，
+        // 走到这里的都是未限定调用。
+        if self.storage.qualified_method_depth > 0 then {
+            return false;
+        };
+        let owner = self.extension_template_key(base_type);
+        let records = when self.storage.method_table.declared.get(owner) in {
+            .Some(by_name) then when by_name.get(method_name) in {
+                .Some(rs) then rs,
+                .None() then return false,
+            },
+            .None() then return false,
+        };
+        let mutable tool_traits = List[DefId].new();
+        for r in records then {
+            when r.kind in {
+                .Inherent() then return false,
+                .Requirement(_) then return false,
+                .Tool(trait_def_id) then {
+                    let mutable seen_trait = false;
+                    for t in tool_traits then {
+                        if t == trait_def_id then {
+                            seen_trait = true;
+                        };
+                    };
+                    if not seen_trait then {
+                        tool_traits.push(trait_def_id);
+                    };
+                },
+            };
+        };
+        if tool_traits.count() > 1 then {
+            // 可恢复地记录（种子的 `handleError` 同型）：每处未限定调用
+            // 一条歧义，随后继续解析——不静默选择的底线由**报错**守住，
+            // 恢复路径只是让一个文件里的多处问题一次说全。
+            self.push_ambiguous_trait_extension_method_diagnostic(
+                base_type,
+                method_name,
+                span,
+            );
+        };
+        return false;
+    };
+
     inject_trait_type_args(self, trait_type: TypeNode, trait_name: String): Void = {
         self.inject_trait_type_args_with_bindings(
             trait_type,
@@ -4780,6 +4835,12 @@ given TypeChecker {
             .MutableReferenceType(inner) or .ReferenceType(inner) or .MutableBorrowedReferenceType(inner)
             or .BorrowedReferenceType(inner) then inner,
             _ then normalized_base_type,
+        };
+
+        // 工具方法调用歧义：同名工具方法来自多个 trait 时未限定调用不
+        // 隐式选择（`Type(Trait).method` 的限定调用走另一条路，不受此门）。
+        if self.ambiguous_tool_method_at_call(inner_type, method_name, span) then {
+            return Option[Symbol].None();
         };
 
         when inner_type in {

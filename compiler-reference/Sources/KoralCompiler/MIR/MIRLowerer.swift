@@ -3010,11 +3010,20 @@ private final class MIRFunctionBuilder {
       }
     case .variable(let symbol):
       if symbol.type != .void {
-        if symbol.type == subjectType {
-          patternPlaceByDefId[symbol.defId.id] = subjectPlace
-        } else {
-          patternPlaceByDefId[symbol.defId.id] = matchedPlace
-        }
+        // Value semantics: a binding is a SNAPSHOT copy, not an alias into
+        // the matched value (mirrors koralc's Alias materialization -- the
+        // `let` destructuring it should agree with). Eliding the copy is
+        // only sound when mutability is completely unobservable, a window
+        // whose benefit approaches zero (a trivial copy is a load), so every
+        // binding materializes.
+        let sourcePlace: MIRPlace = symbol.type == subjectType ? subjectPlace : matchedPlace
+        let bindName = context.getName(symbol.defId) ?? ""
+        let bindLocal = makeTemporary(
+          type: symbol.type,
+          nameHint: sanitizeCIdentifier(bindName.isEmpty ? "pattern_binding" : bindName))
+        append(.declare(bindLocal.id))
+        append(.assign(.local(bindLocal.id), .placeRead(sourcePlace, ownership: .copy)))
+        patternPlaceByDefId[symbol.defId.id] = .local(bindLocal.id)
       }
     case .traitObjectTypeBinding(let symbol, let targetType):
       assignTraitObjectPatternBinding(symbol: symbol, targetType: targetType, sourcePlace: matchedPlace)

@@ -2093,6 +2093,32 @@ given TypeChecker {
                             ) then {
                                 continue;
                             };
+                            // 命名空间收口（method-namespace.md 的「工具物化」
+                            // 漏斗）：工具成员按（目标 owner, 名字）记一条
+                            // `Tool(trait)` 记录——调用歧义检查看的就是它，
+                            // 也是「同名工具方法不隐式选择」的判据来源。
+                            // `declare_method` 按 source DefId 幂等：物化重访
+                            // 同一 conformance 不会记重。
+                            let materialize_owner_args = self.context().method_owner_and_args(
+                                target_type,
+                            ).second;
+                            let materialize_scope = if type_params.is_empty()
+                                and not materialize_owner_args.is_empty() then {
+                                MethodScope.Instance(materialize_owner_args)
+                            } else {
+                                MethodScope.Family()
+                            };
+                            let _ = self.storage.method_table.declare_method(
+                                MethodDeclRecord(
+                                    self.extension_template_key(target_type),
+                                    tool_name,
+                                    materialize_scope,
+                                    MethodDeclKind.Tool(
+                                        self.trait_def_id_of(trait_name) or else DefId(UInt(0)),
+                                    ),
+                                    source_method.def_id,
+                                ),
+                            );
                             // Two distinct roles, and Swift keeps them apart:
                             //
                             //  *SCOPE. `TypeCheckerPasses` opens the member scope by

@@ -765,13 +765,32 @@ given MIRFunctionBuilder {
                     let binding_name = self.context.symbol_name(symbol);
                     when mode in {
                         .Alias() then {
+                            // 值语义：`?name` 绑定同样是快照拷贝（与
+                            // `.Variable` 的 Alias 同规则），不别名进升级
+                            // 结果的 Option 载荷存储。
+                            let bind_local = self.make_temporary(
+                                binding_type,
+                                if binding_name.is_empty() then "weak_bind"
+                                else binding_name,
+                            );
+                            self.append_statement(
+                                MIRStatement.Declare(bind_local.id),
+                            );
+                            let bind_slot = MIRPlace.Local(bind_local.id);
+                            self.append_statement(MIRStatement.Assign(
+                                bind_slot,
+                                MIRValue.PlaceRead(
+                                    payload_place,
+                                    MIROwnershipUse.Copy(),
+                                ),
+                            ));
                             self.pattern_place_by_def_id.insert(
                                 symbol.def_id.id,
-                                payload_place,
+                                bind_slot,
                             );
                             self.pattern_place_by_name.insert(
                                 binding_name,
-                                payload_place,
+                                bind_slot,
                             );
                         },
                         .Claim() then {
@@ -825,11 +844,29 @@ given MIRFunctionBuilder {
                     let binding_name = self.context.symbol_name(symbol);
                     when mode in {
                         .Alias() then {
-                            self.pattern_place_by_def_id.insert(
-                                symbol.def_id.id,
-                                source_place,
+                            // 值语义：绑定是**快照拷贝**，不是被匹配值的别名
+                            // （type-semantics.md 的 `let` 解构同义）。可省略
+                            // 拷贝的窗口只有「可变性完全不可观察」——而那扇
+                            // 窗口（不可变绑定 × 平凡类型 × 稳定不可变位置）
+                            // 的收益趋近于零（平凡拷贝就是一次 load），所以
+                            // 一律物化：可观察的别名（`mutable` 绑定写穿、
+                            // 换变体后的悬挂）就无从发生。
+                            let local = self.make_temporary(
+                                binding_type,
+                                if binding_name.is_empty() then "pattern_binding"
+                                else binding_name,
                             );
-                            self.pattern_place_by_name.insert(binding_name, source_place);
+                            self.append_statement(MIRStatement.Declare(local.id));
+                            let slot = MIRPlace.Local(local.id);
+                            self.append_statement(MIRStatement.Assign(
+                                slot,
+                                MIRValue.PlaceRead(
+                                    source_place,
+                                    MIROwnershipUse.Copy(),
+                                ),
+                            ));
+                            self.pattern_place_by_def_id.insert(symbol.def_id.id, slot);
+                            self.pattern_place_by_name.insert(binding_name, slot);
                         },
                         .Claim() then {
                             if self.pattern_place_by_def_id.get(symbol.def_id.id) is .None() then {

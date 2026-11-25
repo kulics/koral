@@ -1,0 +1,85 @@
+// EXPECT: binding_copy_ok
+// 模式绑定是快照拷贝（值语义，type-semantics.md 的 `let` 解构同义）：源的
+// 后续写入不影响绑定；`mutable` 绑定写入拷贝、不写穿源；换变体后旧载荷
+// 仍可读（旧行为是别名 + UAF 静默死亡）。
+
+type Opt {
+    None(),
+    Some(value: Int),
+};
+type OptS {
+    None(),
+    Some(value: String),
+};
+type mutable Cell(mutable value: Int);
+type Duo(l: Int, r: Int);
+
+let main(): Int = {
+    // A/B: when / if-is 绑定不随源更新。
+    let mutable e = Opt.Some(1);
+    when e in {
+        .Some(v) then {
+            e = Opt.Some(2);
+            assert(v == 1, "A when binding snapshot");
+        },
+        _ then {},
+    };
+    let mutable e2 = Opt.Some(1);
+    if e2 is .Some(v2) then {
+        e2 = Opt.Some(2);
+        assert(v2 == 1, "B is binding snapshot");
+    };
+
+    // C/D: 可变字段与结构解构都是快照。
+    let c = Cell(1);
+    when c in {
+        Cell(v3) then {
+            c.value = 2;
+            assert(v3 == 1, "C mutable field snapshot");
+        },
+    };
+    let mutable d = Duo(1, 2);
+    when d in {
+        Duo(a, b) then {
+            d = Duo(3, 4);
+            assert(a == 1 and b == 2, "D struct snapshot");
+        },
+    };
+
+    // F/G: `mutable` 绑定写入拷贝，不写穿源。
+    let mutable d2 = Duo(1, 2);
+    when d2 in {
+        Duo(mutable a2, _) then {
+            a2 = 99;
+            assert(d2.l == 1, "F no write-through");
+        },
+    };
+    let mutable e3 = Opt.Some(5);
+    when e3 in {
+        .Some(mutable v3) then {
+            v3 = 7;
+            when e3 in {
+                .Some(p) then {
+                    assert(p == 5, "G no write-through on enum");
+                },
+                _ then {},
+            };
+        },
+        _ then {},
+    };
+
+    // E: String 载荷换变体后绑定仍有效（旧实现在此 UAF 静默死亡）。
+    let mutable es = OptS.Some("hello");
+    when es in {
+        .Some(vs) then {
+            es = OptS.None();
+            assert(vs == "hello", "E payload survives variant swap");
+            es = OptS.Some("world");
+            assert(vs == "hello", "E binding stays a snapshot");
+        },
+        _ then {},
+    };
+
+    println("binding_copy_ok");
+    return 0;
+};

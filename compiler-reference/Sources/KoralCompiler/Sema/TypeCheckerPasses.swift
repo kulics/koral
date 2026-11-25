@@ -4890,6 +4890,28 @@ extension TypeChecker {
           conformanceTraitDefId: traitDefId,
           traitMethodDefId: toolTraitMethodDefId
         )
+        // Namespace funnel (method-namespace.md): tool materialization
+        // records its (owner, name) declaration -- the call-site ambiguity
+        // gate (`checkToolMethodAmbiguity`) reads these records. Mirrors
+        // koralc's materialization-time `declare_method` (idempotent by the
+        // declaration DefId, so revisits do not double-register).
+        let toolOwnerKey = context.methodOwner(of: selfType)
+        let toolOwnerArgs = context.methodOwnerAndArgs(of: selfType).args
+        let toolScope: MethodScope = (!toolOwnerArgs.isEmpty
+          && !toolOwnerArgs.contains(where: { context.containsGenericParameter($0) }))
+          ? .instance(args: toolOwnerArgs) : .family
+        _ = declareMethod(MethodDeclRecord(
+          owner: toolOwnerKey,
+          name: toolName,
+          scope: toolScope,
+          kind: givenMemberDeclKind(providingTrait: traitDefId, methodName: toolName),
+          sourceDefId: toolMethod.defId))
+        // METHOD FACE (§3.4): a materialized tool is the TRAIT's method -- stamp
+        // its provider so the face gate enforces "the trait must be in scope at
+        // the call site" exactly as it does for the un-materialized template
+        // path. Without the stamp the gate saw no trait and the call slipped
+        // past the scope rule.
+        markTraitProvidedMethod(owner: toolOwnerKey, name: toolName, traitDefId: traitDefId)
 
         methodInfos.append(
           ImplMethodInfo(
