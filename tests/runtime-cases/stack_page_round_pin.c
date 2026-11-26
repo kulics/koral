@@ -39,11 +39,13 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 #if !defined(_WIN32) && !defined(_WIN64)
 #include <pthread.h>
 #include <limits.h>
 #include <unistd.h>
+#include <sys/wait.h>
 #endif
 
 static struct {
@@ -61,7 +63,11 @@ static size_t current_thread_stack_size(void) {
     size_t size = 0;
     pthread_attr_t attr;
     if (pthread_getattr_np(pthread_self(), &attr) == 0) {
-        (void)pthread_attr_getstack(&attr, NULL, &size);
+        // glibc's pthread_attr_getstack dereferences BOTH out-params
+        // unconditionally -- passing NULL for the base segfaults even when
+        // only the size is wanted.
+        void* base = NULL;
+        (void)pthread_attr_getstack(&attr, &base, &size);
         pthread_attr_destroy(&attr);
     }
     return size;
@@ -114,23 +120,44 @@ int main(void) {
     };
 
     for (int i = 0; i < 2; i++) {
-        if (run_probe(probes[i].label, probes[i].request) != 0) {
+        // glibc recycles freed thread stacks across sizes: a later, smaller
+        // request can land on an earlier, bigger block and then report THAT
+        // block's size through getattr_np (measured: a 65536 request after a
+        // 200704 thread reports 200704). Each probe therefore runs in its own
+        // process, where its spawned thread is the first one ever created and
+        // the measurement is of the thread's own stack.
+        pid_t pid = fork();
+        if (pid < 0) {
+            printf("spawn_failed fork\n");
             return 1;
         }
-        uint64_t resolved = (probes[i].request < floor) ? floor : probes[i].request;
-        uint64_t rem = resolved % page;
-        if (rem != 0) {
-            resolved += page - rem;
+        if (pid == 0) {
+            int rc = 0;
+            if (run_probe(probes[i].label, probes[i].request) != 0) {
+                rc = 1;
+            } else {
+                uint64_t resolved = (probes[i].request < floor) ? floor : probes[i].request;
+                uint64_t rem = resolved % page;
+                if (rem != 0) {
+                    resolved += page - rem;
+                }
+                uint64_t actual = (uint64_t)g_current.actual;
+                // No exact byte equality and no page-multiple assertion: the
+                // OS adds its own rounding and guard on top of what we request
+                // (16KB round + 12KB guard on arm64 macOS). These two bounds
+                // are the contract -- the request landed, and nothing silently
+                // fell back to a bigger platform default.
+                if (actual < resolved || actual >= 2 * resolved) {
+                    printf("bounds_fail %s actual=%llu expected=%llu\n", probes[i].label,
+                           (unsigned long long)actual, (unsigned long long)resolved);
+                    rc = 1;
+                }
+            }
+            exit(rc);
         }
-        uint64_t actual = (uint64_t)g_current.actual;
-        // No exact byte equality and no page-multiple assertion: the OS adds
-        // its own rounding and guard on top of what we request (16KB round +
-        // 12KB guard on arm64 macOS). These two bounds are the contract --
-        // the request landed, and nothing silently fell back to a bigger
-        // platform default.
-        if (actual < resolved || actual >= 2 * resolved) {
-            printf("bounds_fail %s actual=%llu expected=%llu\n", probes[i].label,
-                   (unsigned long long)actual, (unsigned long long)resolved);
+        int status = 0;
+        if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status) ||
+            WEXITSTATUS(status) != 0) {
             return 1;
         }
     }

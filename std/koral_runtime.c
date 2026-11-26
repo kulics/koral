@@ -1,4 +1,11 @@
 // Koral runtime helpers (platform shims)
+
+// glibc 只在 _GNU_SOURCE 下声明 pthread_getattr_np（线程栈界限查询用）。
+// 必须在任何 include 之前定义；macOS/Windows 各自走 _np / Win32 路径，不受影响。
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -2496,7 +2503,18 @@ int64_t __koral_read(int32_t fd, uint8_t* buf, uint64_t count) {
 }
 
 int64_t __koral_write(int32_t fd, const uint8_t* buf, uint64_t count) {
-    return (int64_t)write(fd, buf, (size_t)count);
+    ssize_t n = write(fd, buf, (size_t)count);
+    // Go-style SIGPIPE policy (same rule as __koral_stdio_write): a write to
+    // stdout/stderr over a closed pipe ends the process by SIGPIPE -- the
+    // shell convention `prog | head` relies on -- while every other fd just
+    // reports EPIPE. Without this, an io.Writer to stdout() reports a
+    // "Broken pipe" error the caller may print and exit(2) with, which no
+    // shell filter may do.
+    if (n < 0 && errno == EPIPE && (fd == 1 || fd == 2)) {
+        signal(SIGPIPE, SIG_DFL);
+        raise(SIGPIPE);
+    }
+    return (int64_t)n;
 }
 
 int32_t __koral_isatty(int32_t fd) {
@@ -4635,7 +4653,9 @@ static uint64_t __koral_current_thread_stack_size(void) {
     size_t size = 0;
     pthread_attr_t attr;
     if (pthread_getattr_np(pthread_self(), &attr) == 0) {
-        (void)pthread_attr_getstack(&attr, NULL, &size);
+        // glibc 无条件解引用两个出参，NULL 会段错误：要 size 也必须给 base 一个实参。
+        void* base = NULL;
+        (void)pthread_attr_getstack(&attr, &base, &size);
         pthread_attr_destroy(&attr);
     }
     return (uint64_t)size;

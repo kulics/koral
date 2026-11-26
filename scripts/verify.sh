@@ -41,6 +41,17 @@ else
   WIN_STACK=""
 fi
 
+# Libraries for the hand-rolled clang LINK lines. Windows folds them into the
+# CRT; POSIX needs them spelled out (Linux in particular: the f32 math shims
+# in koral_runtime.c resolve against libm, and glibc keeps pthread separate on
+# older releases). The driver links the same set via std/koral.json's platform
+# overlay; only the lines below bypass that manifest.
+if [ "$WINDOWS" = "1" ]; then
+  LINK_LIBS="$WIN_LIBS"
+else
+  LINK_LIBS="-lm -lpthread"
+fi
+
 SEED="compiler-reference/.build/release/koralc$EXE"
 BOOTSTRAP="bin/compiler/koralc$EXE"
 RUNNER="bin/compiler-test-runner/compiler_runner$EXE"
@@ -104,7 +115,7 @@ say "4. self-host + fixed point"
 "$BOOTSTRAP" emit-c \
   --package-config compiler/koral.json --target-module koralc -o "$WORK/s2"
 clang "$WORK/s2/koralc.c" std/koral_runtime.c -I std -o "$WORK/s2/koralc$EXE" \
-  -Wno-everything -O1 $WIN_LIBS $WIN_STACK
+  -Wno-everything -O1 $LINK_LIBS $WIN_STACK
 
 "$WORK/s2/koralc$EXE" emit-c \
   --package-config compiler/koral.json --target-module koralc -o "$WORK/s3"
@@ -124,7 +135,7 @@ if cmp -s "$WORK/s2/koralc.c" "$WORK/s3/koralc.c"; then
   echo "FIXED POINT (s2 == s3)"
 else
   clang "$WORK/s3/koralc.c" std/koral_runtime.c -I std -o "$WORK/s3/koralc$EXE" \
-    -Wno-everything -O1 $WIN_LIBS $WIN_STACK
+    -Wno-everything -O1 $LINK_LIBS $WIN_STACK
   PIN_KORALC="$WORK/s3/koralc$EXE"
   "$WORK/s3/koralc$EXE" emit-c \
     --package-config compiler/koral.json --target-module koralc -o "$WORK/s4"
@@ -221,7 +232,7 @@ say "6. differential oracle"
 # double free, and pins the codegen/runtime init contract (a fresh block
 # starts at strong = 1, weak = 1: the implicit weak) by grepping emitted C.
 say "runtime stress"
-if [ "$WINDOWS" = "1" ]; then RT_LIBS="$WIN_LIBS"; else RT_LIBS="-lm -lpthread"; fi
+RT_LIBS="$LINK_LIBS"
 clang -c -Dfree=koral_test_free -I std std/koral_runtime.c \
   -o "$WORK/rt_track.o" -Wno-everything -O1
 clang -I std tests/runtime-cases/refcount_release_race.c "$WORK/rt_track.o" \
@@ -264,8 +275,35 @@ if [ "$WINDOWS" = "1" ]; then
 else
   clang -c -I std -fsanitize=thread std/koral_runtime.c -o "$WORK/rt_tsan.o" \
     -Wno-everything -O1
-  clang -I std -fsanitize=thread tests/runtime-cases/str_region_race.c \
-    "$WORK/rt_tsan.o" -o "$WORK/str_region_race$EXE" -Wno-everything -O1 $RT_LIBS $WIN_STACK
+  # A bare TSan link suffices on macOS and on toolchains whose TSan runtime
+  # does not reference libdispatch. The Swift toolchain's clang on Linux does
+  # (its compiler-rt is built with the libdispatch interceptors), and those
+  # pull in dispatch_* / _Block_* symbols a plain C link does not provide.
+  # The toolchain ships both libraries -- retry with them when the bare link
+  # fails. Never fall back to the plain build: the sanitizer run is the pin.
+  TSAN_LINK_OK=0
+  if clang -I std -fsanitize=thread tests/runtime-cases/str_region_race.c \
+      "$WORK/rt_tsan.o" -o "$WORK/str_region_race$EXE" \
+      -Wno-everything -O1 $RT_LIBS $WIN_STACK 2> "$WORK/tsan_link.err"; then
+    TSAN_LINK_OK=1
+  else
+    CLANG_REAL="$(readlink -f "$(command -v clang)")"
+    SWIFT_LIB_DIR="$(cd "$(dirname "$CLANG_REAL")/../lib/swift/linux" 2>/dev/null && pwd)"
+    if [ -n "$SWIFT_LIB_DIR" ] && [ -f "$SWIFT_LIB_DIR/libdispatch.so" ]; then
+      if clang -I std -fsanitize=thread tests/runtime-cases/str_region_race.c \
+          "$WORK/rt_tsan.o" -o "$WORK/str_region_race$EXE" \
+          -Wno-everything -O1 $RT_LIBS $WIN_STACK \
+          -L"$SWIFT_LIB_DIR" -ldispatch -lBlocksRuntime \
+          -Wl,-rpath,"$SWIFT_LIB_DIR"; then
+        TSAN_LINK_OK=1
+      fi
+    fi
+  fi
+  if [ "$TSAN_LINK_OK" != "1" ]; then
+    echo "error: TSan link failed for str_region_race (the sanitizer run is the pin)" >&2
+    cat "$WORK/tsan_link.err" >&2 || true
+    exit 1
+  fi
 fi
 "$WORK/str_region_race$EXE"
 echo "str region publication OK"
@@ -370,7 +408,7 @@ echo "atomic shape pin OK"
 # committed up front).
 say "stack contract pins"
 clang -I std tests/runtime-cases/stack_contract_pin.c std/koral_runtime.c \
-  -o "$WORK/stack_contract_pin$EXE" -Wno-everything -O1 $WIN_LIBS
+  -o "$WORK/stack_contract_pin$EXE" -Wno-everything -O1 $LINK_LIBS
 "$WORK/stack_contract_pin$EXE" > "$WORK/stack_contract_pin.out"
 grep -q 'default_ok' "$WORK/stack_contract_pin.out" || {
   echo "stack pin failed: default stack must be >= 4MB (unified 8MB)" >&2; exit 1; }
@@ -380,7 +418,7 @@ grep -q 'clamp_ok' "$WORK/stack_contract_pin.out" || {
   echo "stack pin failed: below-floor request must clamp up to the floor" >&2; exit 1; }
 
 clang -I std tests/runtime-cases/stack_overflow_pin.c std/koral_runtime.c \
-  -o "$WORK/stack_overflow_pin$EXE" -Wno-everything -O1 $WIN_LIBS
+  -o "$WORK/stack_overflow_pin$EXE" -Wno-everything -O1 $LINK_LIBS
 if "$WORK/stack_overflow_pin$EXE" > "$WORK/stack_overflow_pin.out" 2> "$WORK/stack_overflow_pin.err"; then
   echo "stack pin failed: the 1-byte-stack recursion must overflow" >&2; exit 1
 fi
@@ -388,7 +426,7 @@ grep -q 'Panic: stack overflow (thread: pin-overflow)' "$WORK/stack_overflow_pin
   echo "stack pin failed: overflow must report 'Panic: stack overflow (thread: <name>)'" >&2; exit 1; }
 
 clang -I std tests/runtime-cases/stack_page_round_pin.c std/koral_runtime.c \
-  -o "$WORK/stack_page_round_pin$EXE" -Wno-everything -O1 $WIN_LIBS
+  -o "$WORK/stack_page_round_pin$EXE" -Wno-everything -O1 $LINK_LIBS
 "$WORK/stack_page_round_pin$EXE" > "$WORK/stack_page_round_pin.out"
 grep -q 'all_ok' "$WORK/stack_page_round_pin.out" || {
   echo "stack pin failed: non-page-multiple request must round up and spawn" >&2; exit 1; }
@@ -397,7 +435,7 @@ if grep -q 'bounds_fail\|spawn_failed' "$WORK/stack_page_round_pin.out"; then
 fi
 
 clang -I std tests/runtime-cases/stack_reserve_pin.c std/koral_runtime.c \
-  -o "$WORK/stack_reserve_pin$EXE" -Wno-everything -O1 $WIN_LIBS
+  -o "$WORK/stack_reserve_pin$EXE" -Wno-everything -O1 $LINK_LIBS
 "$WORK/stack_reserve_pin$EXE" > "$WORK/stack_reserve_pin.out"
 grep -q 'reserve_ok' "$WORK/stack_reserve_pin.out" || {
   echo "stack pin failed: 8 held 8MB stacks must spawn (reservation, not commit)" >&2; exit 1; }
@@ -414,13 +452,23 @@ mkdir -p bin/samples
 "$BOOTSTRAP" build samples/grep/src/grep.koral -o bin/samples
 "$BOOTSTRAP" build samples/grep-j/src/grep_j.koral -o bin/samples
 
+# Assert on captured output, not on `sample | grep -q` pipelines: `grep -q`
+# exits at the first match and the sample then dies by SIGPIPE (the shell
+# convention for writes to a closed pipe), which `set -o pipefail` reports as
+# a pipeline failure even though every check passed.
 echo "hello koral" > "$WORK/sample_in.txt"
-"bin/samples/cat$EXE" "$WORK/sample_in.txt" | grep -q "hello koral"
-"bin/samples/sha256sum$EXE" "$WORK/sample_in.txt" | grep -q "  "
-printf '1+2*3\nquit\n' | "bin/samples/expr_eval$EXE" | grep -q "^> 7$"
-printf 'apple\nbanana\n' | "bin/samples/grep$EXE" 'an' | grep -q "^banana$"
-printf 'apple\nbanana\n' | "bin/samples/grep_j$EXE" 'an' | grep -q "^banana$"
-"bin/samples/grep_j$EXE" -j 2 -h 'koral' "$WORK/sample_in.txt" "$WORK/sample_in.txt" | grep -q "^hello koral$"
+"bin/samples/cat$EXE" "$WORK/sample_in.txt" > "$WORK/sample_cat.out"
+grep -q "hello koral" "$WORK/sample_cat.out"
+"bin/samples/sha256sum$EXE" "$WORK/sample_in.txt" > "$WORK/sample_sha.out"
+grep -q "  " "$WORK/sample_sha.out"
+printf '1+2*3\nquit\n' | "bin/samples/expr_eval$EXE" > "$WORK/sample_expr.out"
+grep -q "^> 7$" "$WORK/sample_expr.out"
+printf 'apple\nbanana\n' | "bin/samples/grep$EXE" 'an' > "$WORK/sample_grep.out"
+grep -q "^banana$" "$WORK/sample_grep.out"
+printf 'apple\nbanana\n' | "bin/samples/grep_j$EXE" 'an' > "$WORK/sample_grepj.out"
+grep -q "^banana$" "$WORK/sample_grepj.out"
+"bin/samples/grep_j$EXE" -j 2 -h 'koral' "$WORK/sample_in.txt" "$WORK/sample_in.txt" > "$WORK/sample_grepj2.out"
+grep -q "^hello koral$" "$WORK/sample_grepj2.out"
 echo "samples OK"
 
 # ── toolchain ─────────────────────────────────────────────────────────────────

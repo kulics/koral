@@ -30,9 +30,13 @@ let main(): Void = {
         .Some(d) then assert(d.as_milliseconds() == Int64(1500), "read timeout 1500ms"),
         .None() then assert(false, "read timeout should be Some"),
     };
-    sock.set_read_timeout(Option[Duration].Some(250ms)).unwrap();
+    // 240ms, not 250ms: the kernel stores SO_RCVTIMEO in timer ticks, and
+    // 250ms lands on a half tick at HZ=250 -- it reads back 252ms there.
+    // 240ms is a whole number of ticks at every standard HZ (25/100/250/
+    // 300/1000), so the set/get round-trip is exact on Windows and POSIX.
+    sock.set_read_timeout(Option[Duration].Some(240ms)).unwrap();
     when sock.read_timeout().unwrap() in {
-        .Some(d) then assert(d.as_milliseconds() == Int64(250), "read timeout 250ms"),
+        .Some(d) then assert(d.as_milliseconds() == Int64(240), "read timeout 240ms"),
         .None() then assert(false, "read timeout should be Some"),
     };
 
