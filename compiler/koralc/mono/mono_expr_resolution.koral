@@ -2,14 +2,18 @@
 // member paths, and pattern binding types.
 
 public let resolve_types_in_expression(mono: Monomorphizer, expr: TypedExpr): TypedExpr = {
+    // The step budgets are pathology guards (env-armed, off by default) --
+    // matching the Swift reference, which resolves unconditionally. A guard
+    // that silently truncates a body marks half-resolved work as resolved and
+    // leaks unbound generic operands into MIR, so a tripped guard is loud.
     if mono.storage.expression_resolve_total_limit > 0 and mono.storage.expression_resolve_total_steps >= mono.storage.expression_resolve_total_limit then {
         mono.storage.expression_resolve_total_limited = true;
-        return expr;
+        panic("KORAL_MONO_EXPR_TOTAL_LIMIT exceeded -- expression resolution budget is a runaway guard, raise or unset it");
     };
 
     if mono.storage.expression_resolve_limit > 0 and mono.storage.expression_resolve_steps >= mono.storage.expression_resolve_limit then {
         mono.storage.expression_resolve_limited = true;
-        return expr;
+        panic("KORAL_MONO_EXPR_LIMIT exceeded -- expression resolution budget is a runaway guard, raise or unset it");
     };
     mono.storage.expression_resolve_steps += 1;
     mono.storage.expression_resolve_total_steps += 1;

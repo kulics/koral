@@ -167,6 +167,33 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                 },
                 _ then {},
             };
+            // A generic function callee that sema did not classify as a
+            // `GenericCall` (its template lookup can miss on substitution
+            // snapshots) must still be bound and instantiated here: the
+            // GenericCall branch below is the same treatment, and an unbound
+            // generic function operand would leak into MIR. The kind filter is
+            // deliberately absent -- a function-typed symbol needs binding
+            // whatever kind slot it arrived under.
+            when new_callee.expr_kind in {
+                .Variable(sym) then {
+                    if has_generic_parameter(
+                        resolve_parameterized_type(mono, sym.symbol_type),
+                    ) then {
+                        let declared_return_type = resolve_parameterized_type(
+                            mono,
+                            expr.expr_type,
+                        );
+                        let bound_callee = bind_generic_function_call_callee(
+                            mono,
+                            new_callee,
+                            new_args,
+                            declared_return_type,
+                        );
+                        return TypedExprKind.Call(bound_callee, new_args);
+                    };
+                },
+                _ then {},
+            };
             TypedExprKind.Call(new_callee, new_args)
         },
         .GenericCall(function_symbol, type_args, args) then {
@@ -185,6 +212,28 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                 new_args.push(resolve_types_in_expression(mono, arg));
             };
             if contains_generic_type_arg then {
+                // The recorded type args can carry un-inferred slots even in a
+                // final (non-generic) body -- sema inference misses happen on
+                // snapshot order. Re-bind from the arguments before giving up:
+                // a GenericCall that reaches MIR unbound is a verifier
+                // failure. Only a genuinely still-generic call keeps the form.
+                let retry_return_type = resolve_parameterized_type(mono, expr.expr_type);
+                let retry_callee = TypedExpr(
+                    TypedExprKind.Variable(new_function_symbol),
+                    new_function_symbol.symbol_type,
+                    expr.span,
+                );
+                let retry_bound = bind_generic_function_call_callee(
+                    mono,
+                    retry_callee,
+                    new_args,
+                    retry_return_type,
+                );
+                if not has_generic_parameter(
+                    resolve_parameterized_type(mono, retry_bound.expr_type),
+                ) then {
+                    return TypedExprKind.Call(retry_bound, new_args);
+                };
                 return TypedExprKind.GenericCall(
                     new_function_symbol,
                     new_type_args,
