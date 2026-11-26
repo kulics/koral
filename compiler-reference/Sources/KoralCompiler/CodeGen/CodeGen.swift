@@ -578,7 +578,7 @@ public class CodeGen {
   /// The static-initializer side of `generateStringLiteral`: hoists an
   /// immortal storage block into the current buffer (file scope) and
   /// returns the brace initializer for the String value around it. A literal
-  /// string global is then `T name = { .bytes = { .ptr = ... }, .len = N };`
+  /// string global is then `T name = { .bytes = { .ptr = ... }, .off = 0, .len = N };`
   /// -- address constants only, so the C initializer is valid.
   func stringLiteralStaticInitializer(_ value: String, type: Type) -> String {
     let bytesVar = nextTemp() + "_bytes"
@@ -593,7 +593,7 @@ public class CodeGen {
     // The payload is `__koral_StringPayload` -- the `Bytes` managed-block
     // layout (see std/koral_runtime.h).
     buffer += "static const struct { struct __koral_Control ctrl; struct __koral_StringPayload payload; } \(storageVar)_block = { { -1, -1 }, { (uint8_t*)\(bytesVar), \(utf8Bytes.count) } };\n"
-    return "{ .bytes = { .ptr = (void*)&\(storageVar)_block.payload }, .len = \(utf8Bytes.count) }"
+    return "{ .bytes = { .ptr = (void*)&\(storageVar)_block.payload }, .off = 0, .len = \(utf8Bytes.count) }"
   }
 
   func cIdentifier(for symbol: Symbol) -> String {
@@ -1856,10 +1856,10 @@ public class CodeGen {
     buffer += "static const struct { struct __koral_Control ctrl; struct __koral_StringPayload payload; } \(storageVar)_block = { { -1, -1 }, { (uint8_t*)\(bytesVar), \(utf8Bytes.count) } };\n"
 
     let cType = cTypeName(type)
-    // The value shape: String = { bytes: handle, len: content length }.
+    // The value shape: String = { bytes: handle, off: window start, len: content length }.
     return nextTempWithInit(
       cType: cType,
-      initExpr: "(\(cType)){ .bytes = { .ptr = (void*)&\(storageVar)_block.payload }, .len = \(utf8Bytes.count) }")
+      initExpr: "(\(cType)){ .bytes = { .ptr = (void*)&\(storageVar)_block.payload }, .off = 0, .len = \(utf8Bytes.count) }")
   }
 
   // MARK: - Unified Copy/Move Helpers

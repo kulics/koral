@@ -1,0 +1,33 @@
+// EXPECT: float_window_ok
+// float 解析长度化（不依赖 NUL）：窗口子串的尾端不是块尾、更不是 NUL，
+// 解析只看 [borrow_ptr, count) 的字节。这在拷贝时代是天然正确的，窗口
+// 化后由 __koral_parse_float64(ptr, len) 保持。
+
+using "std/text" { Parseable };
+
+let main(): Int = {
+    // "3.5junk" 的前 3 字节是 "3.5"；窗口尾后是 'j'，不是 NUL。
+    let raw = "3.5junk";
+    let win = raw.substring(0..<3);
+    when Float64.parse(win) in {
+        .Ok(v) then assert(v == 3.5, "window float parse"),
+        .Error(_) then panic("window float parse failed"),
+    };
+
+    // 负号 + 指数窗口。
+    let raw2 = "-2.5e1zzz";
+    let win2 = raw2.substring(0..<6);
+    when Float64.parse(win2) in {
+        .Ok(v) then assert(v == -25.0, "window exp parse"),
+        .Error(_) then panic("window exp parse failed"),
+    };
+
+    // 整串解析照旧。
+    when Float64.parse("6.25") in {
+        .Ok(v) then assert(v == 6.25, "whole float parse"),
+        .Error(_) then panic("whole float parse failed"),
+    };
+
+    println("float_window_ok");
+    return 0;
+};

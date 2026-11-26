@@ -10,6 +10,7 @@
 #include <math.h>
 #include <stdatomic.h>
 #include <ctype.h>
+#include <signal.h>
 #include "koral_runtime.h"
 
 typedef struct CFile CFile;
@@ -131,6 +132,11 @@ void* __koral_string_alloc(uintptr_t len) {
         sizeof(struct __koral_Control) + sizeof(struct __koral_StringPayload) + 1;
     if (len > UINTPTR_MAX - overhead) {
         __koral_panic_print("string length overflow while allocating a string block", NULL);
+    }
+    // 实现上限闸（与 std/string.koral 的 `string_length_limit()` 同数 2^31-1）：
+    // 插值等不经 Koral 侧构造器的分配路径在这里收口。
+    if (len > (uintptr_t)2147483647) {
+        __koral_panic_print("string length exceeds implementation limit", NULL);
     }
     uintptr_t need = overhead + len;
     struct __koral_Control* control = NULL;
@@ -630,8 +636,26 @@ uint8_t* __koral_format_float64(double value, uint8_t type_char, intptr_t precis
 // Correctly-rounded decimal -> double. The Koral side has already validated
 // the syntax; strtod supplies the rounding (Clinger's algorithm in libc) that
 // hand-rolled digit accumulation gets wrong. Strings are NUL-terminated.
-double __koral_parse_float64(const uint8_t* cstr) {
-    return strtod((const char*)cstr, NULL);
+double __koral_parse_float64(uint8_t* bytes, uintptr_t len) {
+    // Length-based: the caller's buffer is a `String` window and promises no
+    // trailing NUL (the window may end mid-block), so copy into NUL-terminated
+    // scratch before strtod -- which would otherwise read past the window.
+    // Stack scratch for the common short literal, heap beyond that.
+    char stack_buf[128];
+    char* buf = stack_buf;
+    if (len + 1 > sizeof(stack_buf)) {
+        buf = (char*)malloc(len + 1);
+        if (buf == NULL) {
+            __koral_panic_print("out of memory while parsing a float", NULL);
+        }
+    }
+    memcpy(buf, bytes, (size_t)len);
+    buf[len] = 0;
+    double result = strtod(buf, NULL);
+    if (buf != stack_buf) {
+        free(buf);
+    }
+    return result;
 }
 
 // Define Koral-side timespec layout (must match generated struct in C output)

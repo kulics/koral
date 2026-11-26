@@ -283,6 +283,22 @@ public trait Clone {
 
 ## Types
 ```koral
+/// A NUL-terminated byte string for handing text to C APIs that take `char*`.
+///
+/// `String` promises no trailing NUL (its window may end anywhere in its
+/// block), so crossing into C copies the content bytes into a fresh block
+/// whose byte `[count()]` is 0. Rust `CString` shaped: the type is built only
+/// from a `String` (one constructor, checked for interior NUL bytes), and it
+/// converts back to `String` without a copy (`to_string` shares the block as
+/// a window). The content is valid UTF-8 whenever it came from a `String`.
+///
+/// Implementation limit: like `String`, at most 2^31-1 content bytes.
+///
+/// `sendable` (safe): `Bytes` carries the construction-then-immutable promise
+/// and the atomic RC for the shared block, `len` is a scalar -- so values
+/// cross threads freely.
+public type sendable CString;
+
 /// A growable double-ended queue of `T` in a ring buffer: pushes and pops at
 /// both ends are O(1) amortized, and indexing is O(1).
 public type mutable Deque[T: Any];
@@ -545,16 +561,24 @@ public type mutable FrozenSetIterator[T: Hash];
 /// String is immutable value data with fixed storage length.
 /// The contents are UTF-8 bytes, so `count` measures bytes and not runes.
 ///
-/// Swift-struct shaped: the value is an unboxed `{bytes, len}` pair whose
-/// copies retain and release the inner `Bytes` block, so the refcount lives on
-/// the buffer and not on the string value. `len` is read straight from the
-/// value (no handle chase), and a value owes no user destructor -- dropping it
-/// releases the field, which drives the block's RC to zero.
+/// Go-style windowed value: the value is an unboxed 16-byte
+/// `{bytes, off: UInt32, len: UInt32}` triple -- a handle to the managed
+/// `Bytes` block plus a byte window into it. Every derived substring shares
+/// the block (O(1), no copy, window chains fold to the root block), so a
+/// small window kept long-term pins the whole block; `clone` detaches the
+/// content into its own block when that matters (the retention valve -- use
+/// it when profiling indicates, same policy as Go's `strings.Clone`).
+/// The value owes no user destructor -- dropping it releases the `bytes`
+/// field, which drives the block's RC to zero.
+///
+/// Implementation limit: a string holds at most 2^31-1 content bytes.
+/// Constructors, concatenation, interpolation and `StringBuilder` growth
+/// panic past the limit.
 ///
 /// `sendable` (safe): the field check verifies the declaration -- `Bytes`
 /// carries the construction-then-immutable promise (and the atomic RC) for
-/// the shared block, `len` is a scalar -- so string values cross threads
-/// freely.
+/// the shared block, `off`/`len` are scalars -- so string values cross
+/// threads freely.
 public type sendable String;
 
 /// Mutable builder for incremental string construction without relying on
@@ -2577,6 +2601,30 @@ given WrappingUInt64: Ord {
     public compare(self, other: WrappingUInt64): Int;
 };
 
+/// Construction from `String`, and the NUL-terminated accessors C needs.
+given CString {
+    /// Copy `value` into a NUL-terminated block. Returns an error when the
+    /// string contains an interior NUL byte -- C would truncate there.
+    public from_string(value: String): Result[CString];
+    /// Copy `value` into a NUL-terminated block without the interior-NUL
+    /// check. Behavior is undefined when the string contains one (C sees a
+    /// truncated value).
+    /// 调用契约（`let unsafe`）：担保 `value` 无内嵌 NUL 字节。
+    public unsafe from_string_unchecked(value: String): CString;
+    /// The content length in bytes, without the trailing NUL.
+    public count(self): Int;
+    /// Whether there are no content bytes (the block still holds the NUL).
+    public is_empty(self): Bool;
+    /// Borrow the NUL-terminated bytes; `count() + 1` bytes are readable from
+    /// the returned pointer and byte `[count()]` is 0. Valid while the value
+    /// lives. This is the pointer to hand to C `char*` parameters.
+    public borrow_ptr(self): *UInt8;
+    /// The content as a `String`, without a copy -- the result is a window on
+    /// this block (the NUL is not part of the content). Use `clone` on the
+    /// result to detach it from this block.
+    public to_string(self): String;
+};
+
 /// `Drop` for `Deque[T]`: frees every element and the ring buffer when the last handle dies.
 given[T: Any] Deque[T]: Drop {};
 
@@ -3870,6 +3918,7 @@ given StringBuilder {
     /// 最小分配，不随 `new()` 不分配的容器规则。）
     public new(): StringBuilder;
     /// Create an empty builder with room for at least `capacity` bytes.
+    /// Panics when `capacity` exceeds the string length limit (2^31-1).
     public with_capacity(capacity: Int): StringBuilder;
     /// Grow capacity so the builder can hold `additional` more bytes without
     /// reallocating. Panics when `additional` is negative（容量族负值 panic）。
@@ -3920,7 +3969,8 @@ given String {
     /// The concatenation of `left` and `right` in ONE allocation: both parts
     /// copy straight into the result's own buffer. `String.add` routes here --
     /// building a temporary raw buffer and copying it again into the result
-    /// doubled the cost of every `+`.
+    /// doubled the cost of every `+`. A result past the string length limit
+    /// (2^31-1) panics before any allocation happens.
     public concat(left: String, right: String): String;
     /// Checked constructor: copy `len` bytes, validating UTF-8.
     /// Return an error when the bytes are not valid UTF-8.
@@ -3958,7 +4008,9 @@ given String {
     public count(self): Int;
     /// Whether the string is empty.
     public is_empty(self): Bool;
-    /// Borrow the internal null-terminated bytes; valid while the string lives.
+    /// Borrow the window's bytes; `count()` bytes are readable from the
+    /// returned pointer. NOT null-terminated -- pass a `CString` when the C
+    /// side expects a NUL-terminated `char*`. Valid while the string lives.
     public borrow_ptr(self): *UInt8;
     /// Return the UTF-8 bytes as a new list.
     public to_bytes(self): List[UInt8];
@@ -3978,7 +4030,8 @@ given String {
     /// Whether `byte_index` falls on a rune boundary: 0, the byte length, or the
     /// start of a UTF-8 sequence; `false` when the index is past the end.
     public is_rune_boundary(self, byte_index: Int): Bool;
-    /// Return the substring that `range` names.
+    /// Return the substring that `range` names -- an O(1) window sharing this
+    /// string's block (see `make_substring`; `clone` detaches).
     /// Panics when the range is invalid, out of bounds, or off a rune boundary.
     public substring(self, range: Range[Int]): String;
     /// Return the string with leading ASCII whitespace removed.
@@ -4008,6 +4061,8 @@ given String {
     /// in every string).
     public contains(self, pat: String): Bool;
     /// Return the string repeated `times` times, or the empty string when `times` is 0.
+    /// A result past the string length limit (2^31-1) panics before any
+    /// allocation happens.
     public repeat(self, times: Int): String;
     /// Replace only the first `n` occurrences of `pat` with `with`.
     /// If `n` is 0, return a copy of the string unchanged; panic on an empty `pat`.
@@ -4056,6 +4111,16 @@ given String {
     public runes(self): StringRunesView;
     /// Convert the string to a `List` of runes for random access.
     public to_runes(self): List[Rune];
+};
+
+/// `Clone` for `String`: the backing storage is duplicated -- the content
+/// bytes copy into a fresh block and the result keeps nothing of the source's
+/// storage alive. This is the retention valve for windows (Go's
+/// `strings.Clone` policy: use it when profiling indicates that a kept window
+/// pins more of its block than is worthwhile).
+given String: Clone {
+    /// Detach: an equal string backed by its own block.
+    public clone(self): Self;
 };
 
 /// `Default` for `String`: the empty string.

@@ -187,7 +187,8 @@ given WalkDirIterator: Iterator[DirEntry] {
 /// Create single directory (parent must exist)
 public let create_dir[T: ToPath](path: T): Result[Void] = {
     let s = path.to_path().to_string();
-    return if unsafe { __koral_mkdir(s.bytes.data, 493) } == 0 then .Ok({})
+    let cs = CString.from_string(s) or return;
+    return if unsafe { __koral_mkdir(cs.borrow_ptr(), 493) } == 0 then .Ok({})
     else .Error(last_error_message());
 };
 
@@ -275,7 +276,8 @@ public let create_dir_all[T: ToPath](path: T): Result[Void] = {
 
         let current_path = current_text.to_path();
         if not path_exist(current_path) then {
-            if unsafe { __koral_mkdir(current_text.bytes.data, 493) } != 0 then {
+            let current_cs = CString.from_string(current_text) or return;
+            if unsafe { __koral_mkdir(current_cs.borrow_ptr(), 493) } != 0 then {
                 // Another process/thread may have created the directory concurrently.
                 if not path_exist(current_path) then {
                     return Result[Void].Error(last_error_message());
@@ -302,7 +304,8 @@ private let dir_all_final_check(target: Path): Result[Void] = when file_info(tar
 /// Remove empty directory
 public let remove_dir[T: ToPath](path: T): Result[Void] = {
     let s = path.to_path().to_string();
-    return if unsafe { __koral_rmdir(s.bytes.data) } == 0 then .Ok({}) else .Error(last_error_message());
+    let cs = CString.from_string(s) or return;
+    return if unsafe { __koral_rmdir(cs.borrow_ptr()) } == 0 then .Ok({}) else .Error(last_error_message());
 };
 
 /// Remove directory recursively (removes all contents first).
@@ -347,7 +350,8 @@ public let remove_dir_all[T: ToPath](path: T): Result[Void] = {
     // The tree walk lives in the runtime: handle-relative, no-follow, and
     // identity-checked per child, so races cannot move deletion out of the
     // tree. `-2` is the root changing shape after the checks above.
-    let rc = unsafe { __koral_remove_dir_all(s.bytes.data) };
+    let cs = CString.from_string(s) or return;
+    let rc = unsafe { __koral_remove_dir_all(cs.borrow_ptr()) };
     return if rc == 0 then Result[Void].Ok({})
     else if rc == -2 then Result[Void].Error("remove_dir_all: not a directory")
     else Result[Void].Error(last_error_message());
@@ -358,7 +362,8 @@ public let remove_dir_all[T: ToPath](path: T): Result[Void] = {
 public let read_dir[T: ToPath](path: T): Result[DirIterator] = {
     let p = path.to_path();
     let s = p.to_string();
-    let dir = unsafe { __koral_opendir(s.bytes.data) };
+    let cs = CString.from_string(s) or return;
+    let dir = unsafe { __koral_opendir(cs.borrow_ptr()) };
     if dir == null then {
         return Result[DirIterator].Error(last_error_message());
     };
@@ -394,9 +399,13 @@ public let create_temp_dir[T: ToPath](dir: T, prefix: String =): Result[Path] = 
     };
     template.push_string(prefix);
     template.push_string("XXXXXX");
-    // __koral_mkdtemp modifies the template in-place, replacing XXXXXX with random chars
-    let mutable template_text = template.to_string();
-    let result = unsafe { __koral_mkdtemp(template_text.bytes.data) };
+    // __koral_mkdtemp modifies the template in-place, replacing XXXXXX with
+    // random chars -- hand C a writable NUL-terminated buffer (a `CString` is
+    // immutable once built), then re-read the result as a C string.
+    let template_text = template.to_string();
+    let mutable buf = template_text.to_bytes();
+    buf.push(0);
+    let result = unsafe { __koral_mkdtemp(buf.borrow_mut_ptr()) };
     if result == null then {
         return .Error(last_error_message());
     };

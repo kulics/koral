@@ -90,6 +90,8 @@ let v = Vec(1, 2);
 ### `Clone` 是浅拷贝
 
 `clone(self): Self` 复制句柄或底仓一层，**不递归深拷贝**。嵌套的 `type mutable` 元素保持共享。
+`String` 的 `clone()` 是解钉（底仓一层=内容字节拷进新块）：子串窗口共享源块，
+`clone` 是长期留存窗口的保留阀（Go `strings.Clone` 同策略，由 profiling 指示再用）。
 
 出处：`std/traits.koral` 的 `Clone` 约定；`../guide/document.md`「`clone()`」一节是用户说明。
 

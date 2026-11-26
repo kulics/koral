@@ -535,6 +535,32 @@ sb.push_string(" World");
 let s = sb.to_string();
 ```
 
+##### 字符串的值与窗口
+
+`String` 是定长字节的不可变文本。它的值是共享字节块上的一个**窗口**：派生
+子串（`substring`、`trim_ascii`、`strip_prefix`、`split` / `lines` 的各个
+部分等）都是 O(1)、零拷贝——共享源串的块。内容相等、哈希、排序全部按字节
+判，所以窗口与同内容的任何其它字符串行为完全一致。
+
+两个要知道的后果：
+
+- **被留住的窗口钉住整块。** 把大串的一小段长期存下来，大串的内存就一直活
+  着。当 profiling 显示这有影响时，用 `clone()` 把片段解钉——副本自带块。
+  与 Go 的 `strings.Clone` 同一策略：由 profiling 指示再用。
+- **`String` 不以 NUL 结尾。** 它的窗口可以在块内任意位置结束，内容本身也
+  可以含 `\0`。C 侧要 `char*` 时，先用 `CString` 从字符串构建（一次拷贝、
+  NUL 结尾）；`CString.to_string` 转回时零拷贝。
+
+实现限制：一个字符串最多 2^31-1 个内容字节。构建更大的结果——拼接、插值、
+`StringBuilder` 扩容、`repeat`——panic。
+
+```koral
+let big = read_file("data.txt");           // 一整块
+let token = big.substring(0..<16);        // O(1) 窗口；钉住 big 的块
+let owned = token.clone();                // 解钉副本：自带块
+let c = CString.from_string(owned) or return; // 交 C 用的 NUL 结尾形
+```
+
 #### Rune 字面量
 
 Rune 字面量使用单引号 `''`，表示恰好一个 Unicode 标量值。
@@ -1842,6 +1868,11 @@ let b = a.clone();
 b.push(3);
 // a 仍是 [1, 2]
 ```
+
+`String` 实现的 `clone()` 是**解钉**：内容字节拷进新块，结果不保留接收者
+存储的任何部分。子串类结果是共享源串块的窗口（见
+[字符串的值与窗口](#字符串的值与窗口)），所以 `clone()` 就是长期留存窗口
+时的保留阀。
 
 #### 弱引用
 
@@ -3640,6 +3671,23 @@ let foreign add_one(x: Int32): Int32 = {                 // 定义：导出给 C
   它在 Koral 侧可直接调用，名字作值的类型是 `foreign (A) -> R`——可作为回调传给 C。
 - 可见性（`public` / `internal` / …）只管 Koral 侧名字；**C 符号恒导出**（C 没有模块可见性）。
 - panic 跨导出边界不展开栈：打印 + `abort()`。
+
+#### 字符串过 C 边界
+
+`String` 不带结尾 NUL（窗口可以在块内任意位置结束）。**不要**把
+`borrow_ptr()` 传给 C 的 `char*` 参数；改用 `CString` 构建——它把内容一次
+拷进 NUL 结尾的块，`CString.borrow_ptr()` 才是交给 C 的指针。从 C 读回同
+样是拷贝（`String.from_cstring` 一族扫描到 NUL 为止）。
+
+```koral
+let cs = CString.from_string(path) or return;
+let fd = unsafe { c_open(cs.borrow_ptr(), 0) };
+```
+
+`CString` 只能从 `String` 构建；含内嵌 NUL 字节的字符串会被拒绝
+（`CString.from_string` 报错），因为 C 会在那里悄悄截断。C 侧需要**可写**
+缓冲时（如 `mkstemp` 式出入参），交给它可变字节缓冲（`List[UInt8]`，留出
+NUL 的位置）再回读结果，不要给 `String` 或 `CString`。
 
 #### Foreign 变量
 

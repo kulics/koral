@@ -559,6 +559,37 @@ sb.push_string(" World");
 let s = sb.to_string();
 ```
 
+##### String Values and Windows
+
+A `String` is immutable text with a fixed byte length. Its value is a window
+into a shared byte block: derived substrings (`substring`, `trim_ascii`,
+`strip_prefix`, the parts from `split` / `lines`, and friends) are O(1) and
+copy nothing -- they share the source's block. Content equality, hashing and
+ordering all follow the bytes, so a window behaves exactly like any other
+string with the same content.
+
+Two consequences to know:
+
+- **A kept window pins its whole block.** Storing a small piece of a huge
+  string keeps the huge string's memory alive. When profiling shows this
+  matters, detach the piece with `clone()` -- the copy carries its own block.
+  Same policy as Go's `strings.Clone`: use it when profiling indicates.
+- **A `String` is not NUL-terminated.** Its window may end anywhere inside
+  the block, and the content itself may contain `\0`. When a C API expects a
+  `char*`, build a `CString` from the string first (one copy, NUL-terminated);
+  `CString.to_string` converts back without a copy.
+
+Implementation limit: a string holds at most 2^31-1 content bytes. Building
+something larger -- concatenation, interpolation, `StringBuilder` growth,
+`repeat` -- panics.
+
+```koral
+let big = read_file("data.txt");           // one block
+let token = big.substring(0..<16);        // O(1) window; pins big's block
+let owned = token.clone();                // detached copy: its own block
+let c = CString.from_string(owned) or return; // NUL-terminated for C
+```
+
 #### Runes
 
 Rune literals use single quotes `''` and represent exactly one Unicode scalar value.
@@ -1909,6 +1940,12 @@ let b = a.clone();
 b.push(3);
 // a is still [1, 2]
 ```
+
+`String` implements `clone()` as a **detach**: the content bytes copy into a
+fresh block, so the result keeps nothing of the receiver's storage alive.
+Substring-style results are windows that share their source's block (see
+[String Values and Windows](#string-values-and-windows)), so `clone()` is the
+retention valve for a window that must be kept long-term.
 
 #### Weak References
 
@@ -3819,6 +3856,25 @@ let foreign add_one(x: Int32): Int32 = {                 // definition: exported
 - Visibility (`public` / `internal` / …) governs the Koral-side name only; the
   **C symbol is always exported** (C has no module visibility).
 - A panic never unwinds across an export boundary: it prints and `abort()`s.
+
+#### Strings at the C Boundary
+
+A `String` carries no trailing NUL (its window may end anywhere inside its
+block). Never pass `borrow_ptr()` to a C parameter of type `char*`; build a
+`CString` instead -- it copies the content once into a NUL-terminated block,
+and `borrow_ptr()` on the `CString` is the pointer to hand to C. Reading a C
+string back copies too (`String.from_cstring` and friends scan up to the NUL).
+
+```koral
+let cs = CString.from_string(path) or return;
+let fd = unsafe { c_open(cs.borrow_ptr(), 0) };
+```
+
+`CString` is built only from a `String`; a string with an interior NUL byte is
+rejected (`CString.from_string` reports it), because C would silently truncate
+there. When C needs a **writable** buffer (e.g. `mkstemp`-style in/out
+parameters), hand it a mutable byte buffer (`List[UInt8]` with room for the
+NUL) and re-read the result, not a `String` or `CString`.
 
 #### Foreign Variables
 

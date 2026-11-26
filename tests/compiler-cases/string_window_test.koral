@@ -1,0 +1,51 @@
+// EXPECT: window_ok
+// 窗口语义（Go 式视图）：子串/trim/split 项是共享块的 O(1) 窗口，内容与同
+// 内容整串完全一致（相等/哈希/比较/逐字节/下标）；窗中窗内容正确（折叠只
+// 影响表示，可观察面只有内容）。borrow_ptr 契约：count 字节可读、指向窗口
+// 起点、无 NUL 承诺。
+
+let main(): Int = {
+    let base = "abcdef0123456789XYZ";
+    let mid = base.substring(3..<16);        // "def0123456789"
+    assert(mid.count() == 13, "window count");
+    assert(mid == "def0123456789", "window equals literal");
+    assert(mid.hash() == "def0123456789".hash(), "window hash matches content");
+    assert(mid.compare("def0123456789") == 0, "window compare matches content");
+
+    // 窗中窗：内容正确。
+    let inner = mid.substring(2..<7);        // "f0123"
+    assert(inner == "f0123", "window of window");
+    let deep = inner.trim_prefix("f");       // "0123"
+    assert(deep == "0123", "trim on window");
+
+    // borrow_ptr 指向窗口起点：逐字节读窗口即其内容。
+    let p = inner.borrow_ptr();
+    let window_bytes_ok = unsafe { p[0] == 102 and p[1] == 48 and p[4] == 51 };
+    assert(window_bytes_ok, "borrow_ptr window bytes");
+
+    // 下标/访问器走窗口寻址。
+    assert(mid[0] == 100 and mid[12] == 57, "subscript window bytes");
+    assert(mid.get(13).is_none(), "get past window end");
+
+    // 在窗口上 split / find / starts_with。
+    let once = mid.split_once("34");         // ("def012", "56789")
+    when once in {
+        .Some(pair) then {
+            assert(pair.first == "def012" and pair.second == "56789", "split_once windows");
+        },
+        .None() then panic("split_once found nothing"),
+    };
+    when mid.find("678") in {
+        .Some(i) then assert(i == 9, "find on window"),
+        .None() then panic("find on window failed"),
+    };
+    assert(mid.starts_with("def") and mid.ends_with("6789"), "affixes on window");
+
+    // trim_ascii 的派生窗口同样只认内容（窗口本身带空白）。
+    let src = "xx  pad  yy";
+    let padded = src.substring(2..<9);       // "  pad  "
+    assert(padded.trim_ascii() == "pad", "trim window content");
+
+    println("window_ok");
+    return 0;
+};

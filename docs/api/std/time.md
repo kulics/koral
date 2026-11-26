@@ -190,6 +190,10 @@ given TimeZone {
     /// Returns the timezone name.
     public name(self): String;
     /// Returns the UTC offset at the given DateTime as a Duration.
+    /// Named/local zone names reach C as NUL-terminated copies; both names
+    /// are NUL-free by construction (`TimeZone.from_name` rejects interior
+    /// NUL, `TimeZone.local` scans a C string up to its NUL), so the
+    /// unchecked form is sound here.
     public offset_at(self, datetime: DateTime): Duration;
 };
 
@@ -365,7 +369,9 @@ given TimeZone {
     /// Returns Error if the absolute offset is >= 86400 seconds.
     public from_offset(offset: Duration): Result[TimeZone];
     /// Creates a named timezone from an IANA timezone name.
-    /// Returns Error if the timezone name is not found.
+    /// Returns Error if the timezone name is not found. This is the only way
+    /// a `TimeZoneKind.Named` name enters a `TimeZone` (the name is NUL-free
+    /// here, which `offset_at` relies on).
     public from_name(name: String): Result[TimeZone];
 };
 

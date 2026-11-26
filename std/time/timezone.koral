@@ -47,9 +47,12 @@ given TimeZone {
     ) else Result[TimeZone].Ok(TimeZone(TimeZoneKind.Fixed(Int32(offset.secs))));
 
     /// Creates a named timezone from an IANA timezone name.
-    /// Returns Error if the timezone name is not found.
+    /// Returns Error if the timezone name is not found. This is the only way
+    /// a `TimeZoneKind.Named` name enters a `TimeZone` (the name is NUL-free
+    /// here, which `offset_at` relies on).
     public from_name(name: String): Result[TimeZone] = {
-        let exists = unsafe { __koral_timezone_name_exists(name.bytes.data) };
+        let cs = CString.from_string(name) or return;
+        let exists = unsafe { __koral_timezone_name_exists(cs.borrow_ptr()) };
         return if exists == 0 then Result[TimeZone].Error("unknown timezone: " + name)
         else Result[TimeZone].Ok(TimeZone(TimeZoneKind.Named(name)));
     };

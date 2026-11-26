@@ -65,17 +65,33 @@ given TimeZone {
     };
 
     /// Returns the UTC offset at the given DateTime as a Duration.
+    /// Named/local zone names reach C as NUL-terminated copies; both names
+    /// are NUL-free by construction (`TimeZone.from_name` rejects interior
+    /// NUL, `TimeZone.local` scans a C string up to its NUL), so the
+    /// unchecked form is sound here.
     public offset_at(self, datetime: DateTime): Duration = when self.kind in {
         .Utc() then Duration.zero(),
         .Fixed(offset_secs) then 1s * Int(offset_secs),
         .Local(n) then {
             let mutable out: Int32 = 0;
-            unsafe { __koral_timezone_offset_at(n.bytes.data, datetime.unix_secs, &out) };
+            unsafe {
+                __koral_timezone_offset_at(
+                    CString.from_string_unchecked(n).borrow_ptr(),
+                    datetime.unix_secs,
+                    &out,
+                )
+            };
             1s * Int(out)
         },
         .Named(n) then {
             let mutable out: Int32 = 0;
-            unsafe { __koral_timezone_offset_at(n.bytes.data, datetime.unix_secs, &out) };
+            unsafe {
+                __koral_timezone_offset_at(
+                    CString.from_string_unchecked(n).borrow_ptr(),
+                    datetime.unix_secs,
+                    &out,
+                )
+            };
             1s * Int(out)
         },
     };

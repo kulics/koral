@@ -62,8 +62,9 @@ private let stdio_to_fd(s: IoRedirect): Int32 = when s in {
     .Null() then Int32(0) - 1,
 };
 
-/// Convert a list of strings to an array of UInt8 pointers for FFI.
-private let argv_to_ptrs(argv: List[String]): **UInt8 = {
+/// Convert a list of C strings to an array of NUL-terminated UInt8 pointers
+/// for FFI. The `CString` values must outlive the FFI call.
+private let argv_to_ptrs(argv: List[CString]): **UInt8 = {
     let count = argv.count();
     let ptrs = unsafe { alloc_memory[*UInt8](UInt(count)) };
     for i in 0..<count then {
@@ -119,8 +120,9 @@ private let build_env_strings(actions: List[EnvAction]): List[String] = {
     return result;
 };
 
-/// Convert env strings list to pointer array for FFI.
-private let env_strs_to_ptrs(strs: List[String]): **UInt8 = {
+/// Convert env strings list to pointer array for FFI. The `CString` values
+/// must outlive the FFI call.
+private let env_strs_to_ptrs(strs: List[CString]): **UInt8 = {
     let count = strs.count();
     if count == 0 then {
         return null;
@@ -272,21 +274,32 @@ given Command {
             .None() then String.new(),
         };
 
-        // Pointer arrays are spawn-time scratch. The strings they borrow live
-        // in argv/env_strs and stay alive until after the call returns.
-        let argv_ptrs = argv_to_ptrs(argv);
-        let env_ptrs = env_strs_to_ptrs(env_strs);
+        // Pointer arrays are spawn-time scratch. Crossing into C copies into
+        // NUL-terminated `CString` blocks; those (and the program/cwd ones)
+        // live in these bindings until after the call returns.
+        let program_cs = CString.from_string(self.storage.program) or return;
+        let cwd_cs = CString.from_string(cwd) or return;
+        let mutable argv_cs = List[CString].new();
+        for arg in argv then {
+            argv_cs.push(CString.from_string(arg) or return);
+        };
+        let mutable env_cs = List[CString].new();
+        for entry in env_strs then {
+            env_cs.push(CString.from_string(entry) or return);
+        };
+        let argv_ptrs = argv_to_ptrs(argv_cs);
+        let env_ptrs = env_strs_to_ptrs(env_cs);
 
         // Call FFI to create child process
         let mutable proc = KoralProcess(0, -1, -1, -1);
         let result = unsafe {
             __koral_spawn(
-                self.storage.program.borrow_ptr(),
+                program_cs.borrow_ptr(),
                 argv_ptrs,
                 Int32(argv.count()),
                 env_ptrs,
                 envc,
-                cwd.borrow_ptr(),
+                cwd_cs.borrow_ptr(),
                 stdin_mode,
                 stdout_mode,
                 stderr_mode,

@@ -1,0 +1,75 @@
+// ============================================================================
+// Koral Standard Library - CString (NUL-terminated C interop string)
+// ============================================================================
+// NOTE: This file is merged into core.koral, so primitives, traits, and string
+// are already available.
+// ============================================================================
+
+/// A NUL-terminated byte string for handing text to C APIs that take `char*`.
+///
+/// `String` promises no trailing NUL (its window may end anywhere in its
+/// block), so crossing into C copies the content bytes into a fresh block
+/// whose byte `[count()]` is 0. Rust `CString` shaped: the type is built only
+/// from a `String` (one constructor, checked for interior NUL bytes), and it
+/// converts back to `String` without a copy (`to_string` shares the block as
+/// a window). The content is valid UTF-8 whenever it came from a `String`.
+///
+/// Implementation limit: like `String`, at most 2^31-1 content bytes.
+///
+/// `sendable` (safe): `Bytes` carries the construction-then-immutable promise
+/// and the atomic RC for the shared block, `len` is a scalar -- so values
+/// cross threads freely.
+public type sendable CString(protected bytes: Bytes, protected len: Int);
+
+/// Construction from `String`, and the NUL-terminated accessors C needs.
+given CString {
+
+    /// Copy `value` into a NUL-terminated block. Returns an error when the
+    /// string contains an interior NUL byte -- C would truncate there.
+    public from_string(value: String): Result[CString] = unsafe {
+        let len = value.count();
+        let data = value.borrow_ptr();
+        let mutable i = 0;
+        while i < len then {
+            if data[i] == UInt8(0) then {
+                return Result[CString].Error(
+                    "nul byte found in string at position \(i)",
+                );
+            };
+            i += 1;
+        };
+        let s = alloc_bytes(UInt(len));
+        if len > 0 then {
+            copy_memory(s.data, data, UInt(len));
+        };
+        return Result[CString].Ok(CString(s, len));
+    };
+
+    /// Copy `value` into a NUL-terminated block without the interior-NUL
+    /// check. Behavior is undefined when the string contains one (C sees a
+    /// truncated value).
+    /// 调用契约（`let unsafe`）：担保 `value` 无内嵌 NUL 字节。
+    public unsafe from_string_unchecked(value: String): CString = unsafe {
+        let len = value.count();
+        let s = alloc_bytes(UInt(len));
+        if len > 0 then {
+            copy_memory(s.data, value.borrow_ptr(), UInt(len));
+        };
+        return CString(s, len);
+    };
+
+    /// The content length in bytes, without the trailing NUL.
+    public count(self): Int = self.len;
+    /// Whether there are no content bytes (the block still holds the NUL).
+    public is_empty(self): Bool = self.len == 0;
+
+    /// Borrow the NUL-terminated bytes; `count() + 1` bytes are readable from
+    /// the returned pointer and byte `[count()]` is 0. Valid while the value
+    /// lives. This is the pointer to hand to C `char*` parameters.
+    public borrow_ptr(self): *UInt8 = self.bytes.data;
+
+    /// The content as a `String`, without a copy -- the result is a window on
+    /// this block (the NUL is not part of the content). Use `clone` on the
+    /// result to detach it from this block.
+    public to_string(self): String = String(self.bytes, UInt32(0), UInt32(self.len));
+};

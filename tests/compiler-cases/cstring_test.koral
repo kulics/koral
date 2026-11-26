@@ -1,0 +1,43 @@
+// EXPECT: cstring_ok
+// CString：只能从 String 构建；交 C 的形是 NUL 结尾（count+1 字节可读、
+// [count] 为 0）；to_string 是共享块的零拷贝窗口；内嵌 NUL 被 checked 形
+// 拒绝（C 会在那里截断）。
+
+let main(): Int = {
+    let s = "abc";
+    let cs = when CString.from_string(s) in {
+        .Ok(v) then v,
+        .Error(_) then panic("from_string failed"),
+    };
+    assert(cs.count() == 3, "cstring count");
+    let p = cs.borrow_ptr();
+    let content_ok = unsafe { p[0] == 97 and p[1] == 98 and p[2] == 99 };
+    assert(content_ok, "cstring content");
+    assert(unsafe { p[3] == 0 }, "cstring nul terminator");
+
+    // to_string 零拷贝：窗口共享块（borrow_ptr 同址）。
+    let back = cs.to_string();
+    assert(back == "abc", "cstring to_string content");
+    assert(back.borrow_ptr() == cs.borrow_ptr(), "to_string shares the block");
+
+    // 内嵌 NUL：checked 形拒绝，免检形照建（契约在调用方）。
+    let bad = unsafe { String.from_bytes_unchecked([97, 0, 98]) };
+    let rejected = when CString.from_string(bad) in {
+        .Ok(_) then false,
+        .Error(_) then true,
+    };
+    assert(rejected, "interior nul rejected");
+    let unchecked = unsafe { CString.from_string_unchecked(bad) };
+    assert(unchecked.count() == 3, "unchecked keeps length");
+
+    // 空串：块里只有一个 NUL。
+    let empty = when CString.from_string("") in {
+        .Ok(v) then v,
+        .Error(_) then panic("empty from_string failed"),
+    };
+    let empty_ok = unsafe { empty.is_empty() and empty.borrow_ptr()[0] == 0 };
+    assert(empty_ok, "empty cstring is one nul");
+
+    println("cstring_ok");
+    return 0;
+};
