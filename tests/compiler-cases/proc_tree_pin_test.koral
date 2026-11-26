@@ -1,0 +1,110 @@
+// EXPECT: child_sigpipe_default_ok
+// EXPECT: kill_tree_root_ok
+// EXPECT: kill_tree_descendants_ok
+// The spawn / kill-tree contract (Go-shaped):
+//   * the runtime starts with SIGPIPE ignored so its own writes follow the
+//     EPIPE rule, but a spawned child must get SIGPIPE back at SIG_DFL --
+//     an ignored disposition is inherited across spawn, and a shell command
+//     that pipes into `head` must die of SIGPIPE like any other program;
+//   * kill_process_tree walks the PARENT-CHILD tree. Spawn keeps the child
+//     in the parent's process group (Go/Rust default), so the old group
+//     signal (kill(-pgid)) would sweep in unrelated members of that group;
+//     the two spawn paths (fork/exec and posix_spawn) must agree.
+
+using "std/os" { ... };
+using "std/proc" { ... };
+
+let wait_for_text(path: String): String = {
+    let mutable i = 0;
+    while i < 1000 then {
+        when read_text_file(path) in {
+            .Ok(text) then {
+                if not text.trim_ascii().is_empty() then {
+                    return text.trim_ascii();
+                };
+            },
+            .Error(_) then {},
+        };
+        sleep(10ms);
+        i += 1;
+    };
+    return "";
+};
+
+let wait_for_death(pid: UInt32): Bool = {
+    let mutable i = 0;
+    while i < 1000 then {
+        if not is_process_alive(pid) then {
+            return true;
+        };
+        sleep(10ms);
+        i += 1;
+    };
+    return false;
+};
+
+let main(): Void = {
+    // ── child SIGPIPE disposition ──────────────────────────────────────────
+    if is_windows_host() then {
+        // No SIGPIPE on Windows; the disposition question is POSIX-only.
+        println("child_sigpipe_default_ok");
+    } else {
+        let mutable targs = List[String].new();
+        targs.push("-c");
+        targs.push("trap -p PIPE");
+        when run_command_output("sh", targs) in {
+            .Ok(out) then {
+                // `trap -p PIPE` prints nothing when the disposition is the
+                // default, and `trap -- '' PIPE` when it is inherited-ignored.
+                assert(
+                    out.stdout_text().trim_ascii().is_empty(),
+                    "child SIGPIPE must be SIG_DFL, got: \(out.stdout_text().trim_ascii())",
+                );
+            },
+            .Error(e) then {
+                assert(false, "trap probe failed: \(e.message())");
+            },
+        };
+        println("child_sigpipe_default_ok");
+    };
+
+    // ── kill tree reaches the root ─────────────────────────────────────────
+    let root_proc = if is_windows_host() then {
+        Command.new("ping").arg("-n").arg("30").arg("127.0.0.1").spawn()
+    } else {
+        Command.new("sh").arg("-c").arg("sleep 30").spawn()
+    };
+    let proc = root_proc.unwrap();
+    let root_pid = proc.pid();
+    kill_process_tree(root_pid).unwrap();
+    let _ = proc.wait();
+    assert(wait_for_death(root_pid), "kill_process_tree must kill the root");
+    println("kill_tree_root_ok");
+
+    // ── kill tree reaches the descendants ──────────────────────────────────
+    if is_windows_host() then {
+        // Child pids are not observable through cmd; the root pin above
+        // covers the Windows tree walk shape.
+        println("kill_tree_descendants_ok");
+    } else {
+        // sh stays alive while its `sleep` child runs -- a two-level tree.
+        // The grandchild's pid goes to a file (the runner's stdout may be
+        // anything), then the tree kill must reach both levels.
+        let gpid_path = "proc_tree_pin_gpid.txt";
+        let _ = remove_file(gpid_path);
+        let mutable sargs = List[String].new();
+        sargs.push("-c");
+        sargs.push("sleep 30 & echo $! > \(gpid_path); wait");
+        let child = Command.new("sh").args(sargs).spawn().unwrap();
+        let child_pid = child.pid();
+        let gpid_text = wait_for_text(gpid_path);
+        assert(not gpid_text.is_empty(), "grandchild pid file must appear");
+        let gpid = UInt32(Int.parse(gpid_text).unwrap());
+        kill_process_tree(child_pid).unwrap();
+        let _ = child.wait();
+        assert(wait_for_death(child_pid), "kill_process_tree must kill the child");
+        assert(wait_for_death(gpid), "kill_process_tree must kill the grandchild");
+        let _ = remove_file(gpid_path);
+        println("kill_tree_descendants_ok");
+    };
+};

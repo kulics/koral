@@ -510,8 +510,11 @@ void __koral_stdio_write(CFile* file, const uint8_t* data, uint64_t len) {
     fflush((FILE*)file);
 #else
     size_t n = fwrite(data, 1, (size_t)len, (FILE*)file);
-    fflush((FILE*)file);
-    if (n < (size_t)len && errno == EPIPE) {
+    // Small writes land in the stdio buffer and the real write happens in
+    // fflush -- its failure must feed the broken-pipe rule too, or a tiny
+    // line into a closed pipe silently "succeeds" and the process lives on.
+    int flushed = fflush((FILE*)file);
+    if ((n < (size_t)len || flushed != 0) && errno == EPIPE) {
         signal(SIGPIPE, SIG_DFL);
         raise(SIGPIPE);
     }
@@ -2766,6 +2769,7 @@ int32_t __koral_remove_dir_all(const uint8_t* path) {
 #include <poll.h>
 #if defined(__APPLE__)
 #include <libproc.h>
+#include <sys/sysctl.h>
 #endif
 #endif
 
@@ -2892,10 +2896,101 @@ int64_t __koral_process_working_set_bytes(uint32_t pid) {
 static int64_t __koral_process_tree_working_set_bytes_macos(uint32_t root_pid) {
     return __koral_process_working_set_bytes(root_pid);
 }
+
+// Parent-child tree collection on macOS via sysctl(KERN_PROC_ALL). This runs
+// only on kill/inspect (rare), never on the 50 ms memory poll above. The
+// start time guards against PID reuse, as on Linux and Windows.
+static int __koral_collect_tree_pids(uint32_t root_pid, uint32_t* out_pids, int cap) {
+    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
+    size_t len = 0;
+    if (sysctl(mib, 4, NULL, &len, NULL, 0) != 0) {
+        return -1;
+    }
+    len += len / 8 + sizeof(struct kinfo_proc) * 16;
+    struct kinfo_proc* kprocs = (struct kinfo_proc*)malloc(len);
+    if (!kprocs) return -1;
+    if (sysctl(mib, 4, kprocs, &len, NULL, 0) != 0) {
+        free(kprocs);
+        return -1;
+    }
+    int count = (int)(len / sizeof(struct kinfo_proc));
+
+    long root_ppid = 0;
+    unsigned long long root_start = 0;
+    int root_found = 0;
+    for (int i = 0; i < count; i++) {
+        if ((uint32_t)kprocs[i].kp_proc.p_pid == root_pid) {
+            root_ppid = kprocs[i].kp_eproc.e_ppid;
+            root_start = (unsigned long long)kprocs[i].kp_proc.p_starttime.tv_sec * 1000000ULL
+                + (unsigned long long)kprocs[i].kp_proc.p_starttime.tv_usec;
+            root_found = 1;
+            break;
+        }
+    }
+    if (!root_found) {
+        free(kprocs);
+        return -1;
+    }
+
+    uint32_t* queue = (uint32_t*)malloc(sizeof(uint32_t) * (size_t)cap);
+    unsigned long long* queue_start = (unsigned long long*)malloc(sizeof(unsigned long long) * (size_t)cap);
+    int* order = (int*)malloc(sizeof(int) * (size_t)cap);
+    unsigned char* claimed = (unsigned char*)calloc((size_t)count, 1);
+    if (!queue || !queue_start || !order || !claimed) {
+        free(kprocs); free(queue); free(queue_start); free(order); free(claimed);
+        out_pids[0] = root_pid;
+        return 1;
+    }
+    int qhead = 0, qtail = 0, n = 0;
+    queue[qtail] = root_pid;
+    queue_start[qtail] = root_start;
+    qtail++;
+    order[n++] = -1;
+    while (qhead < qtail) {
+        uint32_t current = queue[qhead];
+        unsigned long long current_start = queue_start[qhead];
+        qhead++;
+        for (int i = 0; i < count; i++) {
+            if (claimed[i]) continue;
+            if ((uint32_t)kprocs[i].kp_eproc.e_ppid != current) continue;
+            unsigned long long start = (unsigned long long)kprocs[i].kp_proc.p_starttime.tv_sec * 1000000ULL
+                + (unsigned long long)kprocs[i].kp_proc.p_starttime.tv_usec;
+            if (start < current_start) continue;  // PID reuse
+            claimed[i] = 1;
+            if (n < cap) order[n++] = i;
+            if (qtail < cap) {
+                queue[qtail] = (uint32_t)kprocs[i].kp_proc.p_pid;
+                queue_start[qtail] = start;
+                qtail++;
+            }
+        }
+    }
+    int out = 0;
+    for (int i = n - 1; i >= 0; i--) {
+        out_pids[out++] = (order[i] == -1) ? root_pid : (uint32_t)kprocs[order[i]].kp_proc.p_pid;
+    }
+    free(kprocs);
+    free(queue);
+    free(queue_start);
+    free(order);
+    free(claimed);
+    return out;
+}
 #endif
 
 #if defined(__linux__)
-static int __koral_linux_process_group_id(uint32_t pid, uint32_t* out_pgid) {
+// Parent-child tree collection on Linux: /proc/<pid>/stat yields ppid and
+// starttime (field 22). The start time guards against PID reuse -- a child
+// must have started no earlier than its parent (the same guard the Windows
+// walk makes with creation times). This replaces the old process-group scan,
+// which attributed unrelated same-group processes to the measured tree.
+typedef struct {
+    uint32_t pid;
+    long ppid;
+    unsigned long long starttime;
+} KoralLinuxProcEntry;
+
+static int __koral_linux_proc_stat(uint32_t pid, long* out_ppid, unsigned long long* out_starttime) {
     char path[64];
     snprintf(path, sizeof(path), "/proc/%u/stat", pid);
     FILE* f = fopen(path, "r");
@@ -2911,43 +3006,118 @@ static int __koral_linux_process_group_id(uint32_t pid, uint32_t* out_pgid) {
     char* closing_paren = strrchr(line, ')');
     if (!closing_paren) return -1;
 
-    char state = 0;
+    // After comm: state ppid pgrp session tty_nr tpgid flags minflt cminflt
+    // majflt cmajflt utime stime cutime cstime priority nice num_threads
+    // itrealvalue starttime (field 22).
     long ppid = 0;
-    long pgid = 0;
-    if (sscanf(closing_paren + 1, " %c %ld %ld", &state, &ppid, &pgid) != 3) {
+    unsigned long long starttime = 0;
+    if (sscanf(closing_paren + 1,
+               " %*c %ld %*ld %*ld %*ld %*ld %*lu %*lu %*lu %*lu %*lu"
+               " %*lu %*lu %*ld %*ld %*ld %*ld %*ld %*ld %llu",
+               &ppid, &starttime) != 2) {
         return -1;
     }
-    if (pgid <= 0) return -1;
 
-    *out_pgid = (uint32_t)pgid;
+    *out_ppid = ppid;
+    *out_starttime = starttime;
     return 0;
 }
 
-static int64_t __koral_process_group_working_set_bytes_linux(uint32_t root_pid) {
+// Collect root + descendants, deepest first. Returns the count, or -1 when
+// the root itself cannot be inspected.
+static int __koral_collect_tree_pids(uint32_t root_pid, uint32_t* out_pids, int cap) {
+    long root_ppid = 0;
+    unsigned long long root_start = 0;
+    if (__koral_linux_proc_stat(root_pid, &root_ppid, &root_start) != 0) {
+        return -1;
+    }
+
+    KoralLinuxProcEntry* procs = (KoralLinuxProcEntry*)malloc(sizeof(KoralLinuxProcEntry) * (size_t)cap);
+    if (!procs) return -1;
+    int count = 0;
+
     DIR* dir = opendir("/proc");
     if (!dir) {
-        return __koral_process_working_set_bytes(root_pid);
+        free(procs);
+        out_pids[0] = root_pid;
+        return 1;
     }
-
-    int64_t total = 0;
     struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
+    while ((entry = readdir(dir)) != NULL && count < cap) {
         if (!isdigit((unsigned char)entry->d_name[0])) continue;
-
         uint32_t pid = (uint32_t)strtoul(entry->d_name, NULL, 10);
         if (pid == 0) continue;
+        long ppid = 0;
+        unsigned long long starttime = 0;
+        if (__koral_linux_proc_stat(pid, &ppid, &starttime) != 0) continue;
+        procs[count].pid = pid;
+        procs[count].ppid = ppid;
+        procs[count].starttime = starttime;
+        count++;
+    }
+    closedir(dir);
 
-        uint32_t pgid = 0;
-        if (__koral_linux_process_group_id(pid, &pgid) != 0) continue;
-        if (pgid != root_pid) continue;
-
-        int64_t rss = __koral_process_working_set_bytes(pid);
-        if (rss > 0) total += rss;
+    // BFS from the root, then reverse for deepest-first output.
+    uint32_t* queue = (uint32_t*)malloc(sizeof(uint32_t) * (size_t)cap);
+    unsigned long long* queue_start = (unsigned long long*)malloc(sizeof(unsigned long long) * (size_t)cap);
+    int* order = (int*)malloc(sizeof(int) * (size_t)cap);
+    unsigned char* claimed = (unsigned char*)calloc((size_t)(count > 0 ? count : 1), 1);
+    if (!queue || !queue_start || !order || !claimed) {
+        free(procs); free(queue); free(queue_start); free(order); free(claimed);
+        out_pids[0] = root_pid;
+        return 1;
+    }
+    int qhead = 0, qtail = 0, n = 0;
+    queue[qtail] = root_pid;
+    queue_start[qtail] = root_start;
+    qtail++;
+    order[n++] = -1;  // the root itself, emitted first and reversed last
+    while (qhead < qtail) {
+        uint32_t current = queue[qhead];
+        unsigned long long current_start = queue_start[qhead];
+        qhead++;
+        for (int i = 0; i < count; i++) {
+            if (claimed[i]) continue;
+            if ((uint32_t)procs[i].ppid != current) continue;
+            if (procs[i].starttime < current_start) continue;  // PID reuse
+            claimed[i] = 1;
+            if (n < cap) order[n++] = i;
+            if (qtail < cap) {
+                queue[qtail] = procs[i].pid;
+                queue_start[qtail] = procs[i].starttime;
+                qtail++;
+            }
+        }
     }
 
-    closedir(dir);
-    if (total > 0) return total;
-    return __koral_process_working_set_bytes(root_pid);
+    int out = 0;
+    for (int i = n - 1; i >= 0; i--) {
+        uint32_t pid = (order[i] == -1) ? root_pid : procs[order[i]].pid;
+        if (pid != 0) out_pids[out++] = pid;
+    }
+    free(procs);
+    free(queue);
+    free(queue_start);
+    free(order);
+    free(claimed);
+    return out;
+}
+
+static int64_t __koral_process_tree_working_set_bytes_linux(uint32_t root_pid) {
+    uint32_t* pids = (uint32_t*)malloc(sizeof(uint32_t) * 4096);
+    if (!pids) return __koral_process_working_set_bytes(root_pid);
+    int n = __koral_collect_tree_pids(root_pid, pids, 4096);
+    if (n <= 0) {
+        free(pids);
+        return __koral_process_working_set_bytes(root_pid);
+    }
+    int64_t total = 0;
+    for (int i = 0; i < n; i++) {
+        int64_t rss = __koral_process_working_set_bytes(pids[i]);
+        if (rss > 0) total += rss;
+    }
+    free(pids);
+    return total;
 }
 #endif
 
@@ -3048,7 +3218,7 @@ int64_t __koral_process_tree_working_set_bytes(uint32_t root_pid) {
     // processes that merely share a process-group id.
     return __koral_process_tree_working_set_bytes_macos(root_pid);
 #elif defined(__linux__)
-    return __koral_process_group_working_set_bytes_linux(root_pid);
+    return __koral_process_tree_working_set_bytes_linux(root_pid);
 #else
     // On other POSIX targets, fall back to the root process only.
     return __koral_process_working_set_bytes(root_pid);
@@ -3057,23 +3227,87 @@ int64_t __koral_process_tree_working_set_bytes(uint32_t root_pid) {
 
 int32_t __koral_kill_process_tree(uint32_t root_pid, int32_t signal) {
 #if defined(_WIN32) || defined(_WIN64)
-    return __koral_send_signal(root_pid, signal);
-#else
-    pid_t group_pid = (pid_t)root_pid;
-    if (group_pid <= 0) {
+    // Windows: SIGTERM(15) / SIGKILL(9) mean TerminateProcess. Walk the
+    // parent-child tree (same Toolhelp snapshot the memory accounting uses)
+    // and terminate every node, children first.
+    if (signal != 9 && signal != 15) {
         errno = EINVAL;
         return -1;
     }
-
-    if (kill(-group_pid, signal) == 0) {
-        return 0;
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) {
+        return __koral_send_signal(root_pid, signal);
     }
-
-    if (errno == ESRCH) {
-        return kill(group_pid, signal) == 0 ? 0 : -1;
+    typedef struct { DWORD pid; DWORD ppid; } ProcEntry;
+    ProcEntry procs[4096];
+    int count = 0;
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(pe);
+    if (Process32First(snapshot, &pe)) {
+        do {
+            if (count < 4096) {
+                procs[count].pid = pe.th32ProcessID;
+                procs[count].ppid = pe.th32ParentProcessID;
+                count++;
+            }
+        } while (Process32Next(snapshot, &pe));
     }
+    CloseHandle(snapshot);
 
-    return -1;
+    DWORD tree[4096];
+    int n = 0;
+    tree[n++] = (DWORD)root_pid;
+    for (int i = 0; i < n && i < 4096; i++) {
+        for (int j = 0; j < count; j++) {
+            if (procs[j].pid != 0 && procs[j].ppid == tree[i]) {
+                if (n < 4096) tree[n++] = procs[j].pid;
+                procs[j].pid = 0;
+            }
+        }
+    }
+    int rc = 0;
+    for (int i = n - 1; i >= 0; i--) {
+        if (tree[i] == 0) continue;
+        if (__koral_send_signal(tree[i], signal) != 0 && i == 0) {
+            rc = -1;
+        }
+    }
+    return rc;
+#else
+    // POSIX: walk the parent-child tree and signal every node, children
+    // first. Group-based delivery (kill(-pgid)) is gone: spawn keeps the
+    // child in the parent's process group (Go/Rust default), so a group
+    // signal would sweep in unrelated members of that group.
+    if (root_pid == 0) {
+        errno = EINVAL;
+        return -1;
+    }
+#if defined(__linux__) || defined(__APPLE__)
+    uint32_t* pids = (uint32_t*)malloc(sizeof(uint32_t) * 4096);
+    if (!pids) {
+        return kill((pid_t)root_pid, signal) == 0 ? 0 : -1;
+    }
+    int n = __koral_collect_tree_pids(root_pid, pids, 4096);
+    if (n <= 0) {
+        free(pids);
+        // The root's own stat is unreadable (already gone, or no /proc):
+        // fall back to signalling just the root.
+        return kill((pid_t)root_pid, signal) == 0 ? 0 : -1;
+    }
+    int rc = 0;
+    for (int i = 0; i < n; i++) {
+        // pid 0 must never reach kill(): it signals the caller's whole
+        // process group.
+        if (pids[i] == 0) continue;
+        if (kill((pid_t)pids[i], signal) != 0 && errno != ESRCH && pids[i] == root_pid) {
+            rc = -1;
+        }
+    }
+    free(pids);
+    return rc;
+#else
+    return kill((pid_t)root_pid, signal) == 0 ? 0 : -1;
+#endif
 #endif
 }
 
@@ -3825,6 +4059,10 @@ int32_t __koral_spawn(
         }
         if (child_pid == 0) {
             // Child process
+            // The runtime starts with SIGPIPE ignored (the Go policy); an
+            // ignored disposition is inherited across exec. Restore the
+            // default so the child behaves like any other shell command.
+            signal(SIGPIPE, SIG_DFL);
             int report_fd = err_pipe[1];
             close(err_pipe[0]);
             // Keep the report fd clear of the stdio descriptors the code below
@@ -3838,7 +4076,10 @@ int32_t __koral_spawn(
             }
 #define KORAL_SPAWN_CHILD_FAIL(errn) \
     do { int e_ = (errn); (void)!write(report_fd, &e_, sizeof(e_)); _exit(127); } while (0)
-            if (setpgid(0, 0) < 0) KORAL_SPAWN_CHILD_FAIL(errno);
+            // No setpgid: the child stays in the parent's process group --
+            // the Go/Rust default, and what the posix_spawn path above
+            // already does. Kill and memory accounting walk the parent-child
+            // tree, so nothing depends on group membership.
             if (chdir((const char*)cwd) < 0) KORAL_SPAWN_CHILD_FAIL(errno);
 
             // Set up stdin
@@ -3907,6 +4148,15 @@ int32_t __koral_spawn(
 
         // No POSIX_SPAWN_SETPGROUP: the child stays in the parent's process
         // group (Go/Rust default; see the fork path's note).
+        //
+        // SIGPIPE back to SIG_DFL in the child: the runtime starts with it
+        // ignored (the Go policy) and an ignored disposition is inherited
+        // across spawn -- the child must behave like any other shell command.
+        sigset_t sigdefault;
+        sigemptyset(&sigdefault);
+        sigaddset(&sigdefault, SIGPIPE);
+        posix_spawnattr_setsigdefault(&attr, &sigdefault);
+        posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSIGDEF);
 
         // stdin
         if (stdin_mode == 1) {
