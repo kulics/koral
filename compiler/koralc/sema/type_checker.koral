@@ -4337,7 +4337,17 @@ given TypeChecker {
                         type_params,
                         Option[String].None(),
                     );
-                    for member in members then {
+                    // 声明身份与 collect/体检查趟同表（members_with_def_ids），
+                    // 注册的 source_def_id 才是那一个身份——register 的表外发号
+                    // 会给同一成员铸出第二个 DefId（双符号病）。目标传**原形**
+                    // （与体检查趟同键）：trait 工具的 template_target_type 是
+                    // GP("Self")，拿它当键会把所有工具折进一个身份。
+                    let id_members = self.members_with_def_ids(
+                        members,
+                        resolved_target,
+                        Option[String].None(),
+                    );
+                    for member in id_members then {
                         let method_name = member.name;
                         let method_access = member.access;
                         let method_type_params = member.type_params;
@@ -4547,7 +4557,15 @@ given TypeChecker {
                             trait_name,
                             bindings,
                         );
-                        for member in members then {
+                        // 声明身份与 collect/体检查趟同表（members_with_def_ids），
+                        // 注册的 source_def_id 才是那一个身份——register 的表外发号
+                        // 会给同一成员铸出第二个 DefId（双符号病）。
+                        let id_members = self.members_with_def_ids(
+                            members,
+                            resolved_target,
+                            Option[String].Some(trait_name),
+                        );
+                        for member in id_members then {
                             let should_register_template = if not type_params.is_empty() then true
                             else if not member.type_params.is_empty() then true
                             else when resolved_target in {
@@ -4656,7 +4674,15 @@ given TypeChecker {
                             Option[String].None(),
                         );
                     };
-                    for member in members then {
+                    // 声明身份与 collect/体检查趟同表（members_with_def_ids），
+                    // 注册的 source_def_id 才是那一个身份——register 的表外发号
+                    // 会给同一成员铸出第二个 DefId（双符号病）。
+                    let id_members = self.members_with_def_ids(
+                        members,
+                        resolved_target,
+                        Option[String].None(),
+                    );
+                    for member in id_members then {
                         // A GENERIC intrinsic given defers signature collection
                         // to instantiation, so the namespace algebra runs here
                         // instead of in `collect_given_signatures`.
@@ -4858,6 +4884,9 @@ given TypeChecker {
         // forking). The instantiation's arguments are part of the declaration
         // key; a generic given's own type parameters key it as before, one
         // shared template declaration.
+        // 键按目标的**声明身份**取（method_owner_of：trait 目标 → trait 的
+        // 声明、类型 → 类型的声明）。绝不能过 trait_extension_self_type——
+        // 那是 Self 语义（trait → GP("Self")），会把所有 trait 工具折进同一个键。
         let owner_display = self.context().method_owner_of(target_type).display();
         let args_key = stable_type_list_key(
             self.context().method_owner_and_args(target_type).second,

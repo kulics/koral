@@ -1826,6 +1826,8 @@ given MIRFunctionCodeEmitter {
                     );
                     // Auto-wrap: if the function parameter expects a borrowed reference
                     // but the argument is a raw value, wrap it in a stack borrow.
+                    // 弱句柄族（含 ?T 泛型形）已经就是借用形态：再包一层会按
+                    // Ref 惯例发射 `.ptr = &x`，而 __koral_WeakRef 没有 ptr 字段。
                     let mutable arg_type = self.type_of_value(call.arguments[0]);
                     let mutable expected_param_type = self.codegen.function_type_param_type(
                         function_type,
@@ -1833,7 +1835,8 @@ given MIRFunctionCodeEmitter {
                     ) or else Type.Unknown();
                     let needs_wrap = is_borrowed_reference_like_type(
                         expected_param_type,
-                    ) and not is_reference_like_type(arg_type);
+                    ) and not is_reference_like_type(arg_type)
+                        and not is_borrowed_reference_like_type(arg_type);
                     let final_emission = if needs_wrap then self.wrap_value_as_stack_borrow(
                         emission.expression,
                         arg_type,
@@ -1893,6 +1896,8 @@ given MIRFunctionCodeEmitter {
                     ) or else Type.Unknown();
                     let first = if is_borrowed_reference_like_type(first_expected) and not is_reference_like_type(
                         first_type,
+                    ) and not is_borrowed_reference_like_type(
+                        first_type,
                     ) then self.wrap_value_as_stack_borrow(
                         first_emission.expression,
                         first_type,
@@ -1904,6 +1909,8 @@ given MIRFunctionCodeEmitter {
                         first_expected,
                     );
                     let second = if is_borrowed_reference_like_type(second_expected) and not is_reference_like_type(
+                        second_type,
+                    ) and not is_borrowed_reference_like_type(
                         second_type,
                     ) then self.wrap_value_as_stack_borrow(
                         second_emission.expression,
@@ -1993,7 +2000,8 @@ given MIRFunctionCodeEmitter {
             let mutable arg_type = self.type_of_value(arg);
             let needs_wrap = arg_i < fn_param_types.count() and is_borrowed_reference_like_type(
                 fn_param_types[arg_i],
-            ) and not is_reference_like_type(arg_type);
+            ) and not is_reference_like_type(arg_type)
+                and not is_borrowed_reference_like_type(arg_type);
             if needs_wrap then {
                 let wrapped = self.wrap_value_as_stack_borrow(
                     emission.expression,
@@ -3326,6 +3334,33 @@ given MIRFunctionCodeEmitter {
     };
 
     emit_borrowed_reference(self, place: MIRPlace, result_type: Type): MIRValueEmission = {
+        // 弱句柄源借成弱结果 = 按值拷贝 + weak_retain（`?WeakRef ≡ WeakRef`：
+        // 弱的弱还是弱）。弱栈借用没有发射形态——__koral_WeakRef 无 ptr 字段，
+        // 栈值也没有 control 块可弱化；`.ptr = &` 的 Ref 惯例写不进去。
+        let result_is_weak = when result_type.indirection_info() in {
+            .Some(info) then info.family is .WeakReference(),
+            _ then false,
+        };
+        if result_is_weak and is_borrowed_reference_like_type(
+            self.type_of_place(place),
+        ) then {
+            let weak_access = self.emit_place_access(place);
+            let weak_result = self.codegen.next_temp_with_decl(
+                self.codegen.c_type_name(result_type),
+            );
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string(weak_result);
+            self.codegen.buffer.push_string(" = ");
+            self.codegen.buffer.push_string(weak_access.path);
+            self.codegen.buffer.push_string(";\n");
+            self.emit_cleanup(weak_access.cleanup);
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string(self.codegen.rc_weak_retain_fn(result_type));
+            self.codegen.buffer.push_string("((");
+            self.codegen.buffer.push_string(weak_result);
+            self.codegen.buffer.push_string(").control);\n");
+            return MIRValueEmission(weak_result, Option[MIRValueCleanup].None());
+        };
         let access = self.emit_place_access(place);
         let result = self.codegen.next_temp_with_decl(
             self.codegen.c_type_name(result_type),

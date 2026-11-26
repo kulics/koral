@@ -1488,10 +1488,52 @@ private let substitute_expr_kind(
                                 resolve_parameterized_type(mono, method_type_arg),
                             );
                         };
-                        let mutable expected_method_type = resolve_parameterized_type(
+                        let declared_method_type = resolve_parameterized_type(
                             mono,
-                            mono.substitute_type_impl(method.symbol_type, substitution),
+                            substitute_declared_callee_type(
+                                mono,
+                                method.symbol_type,
+                                substitution,
+                            ),
                         );
+                        // Seed parity（参考编译器 MonomorphizerExpressionSubstitution
+                        // .call 的 methodReference 块）：喂给实例解析的期望型用
+                        // **接收者 + 实参实际类型 + 调用返回型**重建；被调声明型
+                        // 自带的泛型槽属于它自己的作用域，绝不让外层代入表按名字
+                        // 裁决。`absolute_path[T]` 里 join 的 T 被外层 `{T: Path}`
+                        // 污染后，下游 infer_method_type_args_by_signature 顺着
+                        // 污染值铸出 join[Path] 并自证匹配，String 实参塞进 Path
+                        // 形参；重建型是实参推导 join[String] 的唯一可靠依据。
+                        let mutable expected_method_type = when declared_method_type in {
+                            .FunctionType(decl_params, _, _)
+                            or .ForeignFunctionType(decl_params, _) then {
+                                if decl_params.is_empty() then {
+                                    declared_method_type
+                                } else {
+                                    let mutable rebuilt_params = List[FunctionParamEntry].new();
+                                    rebuilt_params.push(decl_params[0]);
+                                    let mutable arg_index = 0;
+                                    while arg_index < new_args.count() then {
+                                        let arg_type = resolve_parameterized_type(
+                                            mono,
+                                            new_args[arg_index].expr_type,
+                                        );
+                                        let arg_kind = if arg_index + 1 < decl_params.count() then decl_params[arg_index + 1].pass_kind
+                                        else pass_kind_from_type(arg_type);
+                                        rebuilt_params.push(
+                                            FunctionParamEntry(arg_type, arg_kind),
+                                        );
+                                        arg_index += 1;
+                                    };
+                                    Type.FunctionType(
+                                        rebuilt_params,
+                                        substituted_expr_type,
+                                        false,
+                                    )
+                                }
+                            },
+                            _ then declared_method_type,
+                        };
                         let mutable expected_call_param_types = List[Type].new();
                         expected_call_param_types.push(base_type);
                         for arg in new_args then {
@@ -1632,6 +1674,14 @@ private let substitute_expr_kind(
                 new_args.push(substitute_types_in_expression(mono, arg, substitution));
             };
             let mutable has_unresolved_type_arg = false;
+            // 代换前就带泛型的槽位（sema 推断 miss 的残留、或显式透传）在同名
+            // 外层参数面前分不清彼此，代换后的"具体值"不可信——一律走实参
+            // 推断重绑（参考编译器 .call 情形用实参重建期望型的同一思路）。
+            for type_arg in type_args then {
+                if has_generic_parameter(type_arg) then {
+                    has_unresolved_type_arg = true;
+                };
+            };
             for type_arg in new_type_args then {
                 if has_generic_parameter(type_arg) then {
                     has_unresolved_type_arg = true;
@@ -1663,16 +1713,24 @@ private let substitute_expr_kind(
 
                         let mutable boxed_type_args = List[Type].new();
                         let mutable has_unresolved_param = false;
+                        let mutable param_index = 0;
                         for type_param in found_template.type_parameters then {
+                            // 实参推断优先（它只看代换后的实参类型，不受名字碰撞
+                            // 影响）；推断不出的参数退回**记录的槽位**（显式透传
+                            // 外层参数时槽位就是外层绑定），两者皆无才留泛型。
                             let bound = when inferred.get(type_param.name) in {
                                 .Some(t) then resolve_parameterized_type(mono, t),
-                                .None() then Type.GenericParameter(type_param.name),
+                                .None() then when new_type_args.get(param_index) in {
+                                    .Some(slot) then slot,
+                                    .None() then Type.GenericParameter(type_param.name),
+                                },
                             };
                             if has_generic_parameter(bound) then {
                                 has_unresolved_param = true;
                                 break;
                             };
                             boxed_type_args.push(bound);
+                            param_index += 1;
                         };
                         if has_unresolved_param then {
                             return TypedExprKind.GenericCall(
@@ -1823,7 +1881,7 @@ private let substitute_expr_kind(
                 method.def_id,
                 normalize_method_symbol_type_for_base(
                     mono,
-                    mono.substitute_type_impl(method.symbol_type, substitution),
+                    substitute_declared_callee_type(mono, method.symbol_type, substitution),
                     binding_receiver_type,
                 ),
                 method.kind,
@@ -1849,11 +1907,18 @@ private let substitute_expr_kind(
                 );
             };
             if not has_generic_parameter(binding_receiver_type) and not shared_trait_receiver then {
+                // 匹配期望型用**作用域安全**的声明型（lookup_seed_method 的
+                // 类型），不能用 substitute_types_in_expression 顶层按名代换的
+                // substituted_expr_type：被调自己的泛型槽被外层同名参数污染成
+                // 具体值后（join 的 T ← absolute_path 的 Path），这里会顺着
+                // 污染型匹配/铸出错误实例（join[Path]），后面的 Call 情形再被
+                // L0 短路信以为真。泛型声明型匹配不上具体实例时查而不中，交给
+                // Call 情形按实参重建的期望型去绑定——参考编译器正是这样做的。
                 when substitution_lookup_receiver_method_symbol(
                     mono,
                     binding_receiver_type,
                     lookup_seed_method,
-                    Option[Type].Some(substituted_expr_type),
+                    Option[Type].Some(lookup_seed_method.symbol_type),
                 ) in {
                     .Some(bound_method) then {
                         new_method = bound_method;
@@ -2039,7 +2104,11 @@ private let substitute_expr_kind(
             let substituted_method = substitute_symbol(mono, method, substitution);
             let new_method = Symbol(
                 substituted_method.def_id,
-                mono.substitute_type_impl(substituted_method.symbol_type, substitution),
+                substitute_declared_callee_type(
+                    mono,
+                    substituted_method.symbol_type,
+                    substitution,
+                ),
                 substituted_method.kind,
             );
             let mutable new_method_type_args = List[Type].new();
@@ -2049,9 +2118,11 @@ private let substitute_expr_kind(
                 );
             };
             let lookup_base_type = substitution_method_lookup_base_type(mono, new_base);
+            // 同 MethodReference 情形：期望型走作用域安全代换，别让外层同名
+            // 参数把被调自己的泛型槽污染成具体值。
             let normalized_expected_method_type = normalize_trait_placeholder_expected_method_type(
                 mono,
-                substituted_expr_type,
+                substitute_declared_callee_type(mono, method.symbol_type, substitution),
                 lookup_base_type,
             );
 
@@ -2321,6 +2392,33 @@ private let substitute_expr_kind(
 
 // ── substitute_symbol ─────────────────────────────────────────────────────────
 
+// A callee's DECLARED type names only its own scope: the method's type
+// parameters, its owner's type parameters, and Self. The substitution map is
+// keyed by NAME, so an outer type parameter with the same spelling must not
+// decide those slots — `absolute_path[T: ToPath]` 体内 `join` 的 T 被外层
+// `{T: Path}` 改写成 `(Path, Path) -> Path`，String 实参就这么塞进了
+// `join[Path]`（clang: incompatible type）。这里把被调自身的名字自绑定成
+// 自己，让代换对内层作用域不透明（参考编译器的 Call 情形则干脆用实参重建
+// 期望型，见 substitute_expr_kind 的 Call/MethodReference 块）。
+private let substitute_declared_callee_type(
+    mono: Monomorphizer,
+    symbol_type: Type,
+    substitution: Dict[String, Type],
+): Type = {
+    if substitution.is_empty() then {
+        return mono.substitute_type_impl(symbol_type, substitution);
+    };
+    let own_names = collect_generic_parameter_names_from_type(symbol_type);
+    let mutable scoped = Dict[String, Type].new();
+    scoped.insert_dict(substitution);
+    for name in own_names then {
+        if not (name == "Self") then {
+            scoped.insert(name, Type.GenericParameter(name));
+        };
+    };
+    return mono.substitute_type_impl(symbol_type, scoped);
+};
+
 // Substitute the type in a Symbol and remap its DefId if it was a generic
 // function that has been instantiated.
 private let substitute_symbol(
@@ -2328,10 +2426,14 @@ private let substitute_symbol(
     symbol: Symbol,
     substitution: Dict[String, Type],
 ): Symbol = {
-    let mutable substituted_type = mono.substitute_type_impl(
+    // Function symbols carry a DECLARED type (their own generic scope);
+    // value symbols legitimately carry the OUTER scope's names and must be
+    // substituted by name as before.
+    let mutable substituted_type = if symbol.kind is .Function() then substitute_declared_callee_type(
+        mono,
         symbol.symbol_type,
         substitution,
-    );
+    ) else mono.substitute_type_impl(symbol.symbol_type, substitution);
     let mutable new_type = resolve_parameterized_type(mono, substituted_type);
     // Identity lookup first (Swift's `resolveStandaloneMethodFunctionReference`):
     // a method reference resolves to the instance of the SAME method the

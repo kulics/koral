@@ -612,14 +612,68 @@ private let select_conformance_extension_template(
     return final_pick;
 };
 
+/// Whether `donor`'s checked body can answer for `template`'s method.
+///
+/// A body donor must be the SAME logical method: the same declaration, a
+/// recorded materialization original/copy of it, or a duplicate registration
+/// of the same slot (same name + shape + trait + target). A same-named method
+/// of ANOTHER declaration (`given A { m }` vs `given B { m }`, ListIterator's
+/// `next` vs SetIterator's `next`) donates nothing -- patching its body in
+/// mints the wrong implementation under this receiver (value-level
+/// corruption: the second iterator spits None).
+private let donor_body_fits_template(
+    mono: Monomorphizer,
+    template: GenericExtensionMethodTemplate,
+    donor: GenericExtensionMethodTemplate,
+): Bool = {
+    if donor.method.def_id == template.method.def_id then {
+        return true;
+    };
+    // A materialized tool copy and its source declaration are one method.
+    when mono.storage.context.get_original_def_id(donor.method.def_id) in {
+        .Some(original) then {
+            if original == template.method.def_id then {
+                return true;
+            };
+        },
+        .None() then {},
+    };
+    when mono.storage.context.get_original_def_id(template.method.def_id) in {
+        .Some(original) then {
+            if original == donor.method.def_id then {
+                return true;
+            };
+        },
+        .None() then {},
+    };
+    // Duplicate registrations of one member share the slot identity (the
+    // same rule `same_extension_template_slot` applies at upsert).
+    return donor.method.name == template.method.name
+        and donor.method.type_params.count() == template.method.type_params.count()
+        and donor.type_params.count() == template.type_params.count()
+        and donor.conformance_trait_def_id == template.conformance_trait_def_id
+        and donor.conformance_target_type == template.conformance_target_type
+        and donor.conformance_trait_args == template.conformance_trait_args;
+};
+
+/// Borrow `donor`'s checked body/params/return for `template`'s method. The
+/// DECLARATION identity stays `template`'s: call sites bind by it, and the
+/// mangled name is minted from it -- a donor re-key would mint one method
+/// under another's name. Refuses cross-declaration donors outright (see
+/// `donor_body_fits_template`): the request's own template is returned
+/// unchanged, body-less if it always was.
 private let patched_extension_template_with_body(
+    mono: Monomorphizer,
     template: GenericExtensionMethodTemplate,
     donor: GenericExtensionMethodTemplate,
 ): GenericExtensionMethodTemplate = {
+    if not donor_body_fits_template(mono, template, donor) then {
+        return template;
+    };
     return GenericExtensionMethodTemplate(
         template.type_params,
         template.owner_args,
-        donor.method,
+        template.method,
         template.conformance_trait_name,
         template.conformance_trait_def_id,
         template.trait_method_def_id,
@@ -1476,6 +1530,75 @@ public let instantiate_conformance_trait_methods_for_type(
     );
 };
 
+/// The `type_args` an extension instantiation wants, chosen by what the
+/// template's parameters STAND FOR. A trait TOOL's parameters are the
+/// trait's own (`given[T, R] Iterable[T, R] { … }` binds T/R to the
+/// conformance's TRAIT arguments); a conformance MEMBER's parameters are the
+/// target's (`given[K, V] Dict[K, V]: Iterable[…] { iterator }` binds K/V to
+/// the receiver's OWN instantiation arguments). Passing trait arguments for
+/// a conformance member binds `K`/`V` to `Pair[K,V]`/`DictIterator[K,V]` --
+/// phantom instantiations minted under the receiver's name, whose signature
+/// then disagrees with every caller.
+private let placeholder_instantiation_type_args(
+    mono: Monomorphizer,
+    base_type: Type,
+    template: GenericExtensionMethodTemplate,
+    trait_args: List[Type],
+): List[Type] = {
+    when template.conformance_target_type in {
+        .Some(target) then {
+            let is_trait_target = when target in {
+                .TraitObject(...) then true,
+                .ReferenceType(inner) or .MutableReferenceType(inner)
+                or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner) then {
+                    when inner in {
+                        .TraitObject(...) then true,
+                        _ then false,
+                    }
+                },
+                _ then false,
+            };
+            if not is_trait_target then {
+                // The receiver's own instantiation arguments. A MODIFIER
+                // receiver (`?Box`) contributes its inner type -- the
+                // template's parameter is the weak handle's referent (`given[T]
+                // ?T` binds T to `Box`, never to `?Box`, or the wrap becomes
+                // double-weak and the handle construction misfires).
+                let mutable instance_args = List[Type].new();
+                when resolve_parameterized_type(mono, base_type) in {
+                    .GenericStruct(_, args) or .GenericEnum(_, args) then {
+                        for a in args then {
+                            instance_args.push(a);
+                        };
+                    },
+                    .StructureType(did) or .EnumType(did) then {
+                        when mono.storage.context.get_type_arguments(did) in {
+                            .Some(args) then {
+                                for a in args then {
+                                    instance_args.push(a);
+                                };
+                            },
+                            .None() then {},
+                        };
+                    },
+                    .ReferenceType(inner) or .MutableReferenceType(inner)
+                    or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner)
+                    or .PointerType(inner) or .MutablePointerType(inner)
+                    or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
+                        instance_args.push(inner);
+                    },
+                    _ then {},
+                };
+                if instance_args.count() == template.type_params.count() then {
+                    return instance_args;
+                };
+            };
+        },
+        .None() then {},
+    };
+    return trait_args;
+};
+
 /// Instantiate the conformance method `method_name` for `base_type`, under the
 /// trait DECLARATION `trait_def_id`. The `given`s that can provide the method
 /// are selected by identity -- two same-named traits do not answer for each
@@ -1543,7 +1666,12 @@ public let instantiate_conformance_trait_method_for_type(
                             parameterized_base_type,
                             MethodOwner.Decl(given_trait_def_id),
                             tool_template_ref,
-                            effective_trait_args,
+                            placeholder_instantiation_type_args(
+                                mono,
+                                parameterized_base_type,
+                                tool_template_ref,
+                                effective_trait_args,
+                            ),
                             method_type_args,
                         );
                         return;
@@ -1585,7 +1713,12 @@ public let instantiate_conformance_trait_method_for_type(
                 parameterized_base_type,
                 ext_entry.first,
                 template_ref,
-                effective_trait_args,
+                placeholder_instantiation_type_args(
+                    mono,
+                    parameterized_base_type,
+                    template_ref,
+                    effective_trait_args,
+                ),
                 method_type_args,
             );
             return;
@@ -1784,7 +1917,7 @@ private let exact_template_owner_for_method_def_id(
 };
 
 // Generic parameter names in a type, in order of first appearance.
-private let collect_generic_parameter_names_from_type(t: Type): List[String] = {
+public let collect_generic_parameter_names_from_type(t: Type): List[String] = {
     let mutable names = List[String].new();
     let mutable seen = Set[String].new();
     let mutable stack = List[Type].new();
@@ -2833,6 +2966,31 @@ public let resolve_standalone_method_function_reference(
             .KeepDefinitionTime(_) then {},
         };
     };
+    // 自由泛型函数没有接收者候选可走：按**实参推导的期望型**在重映射表里取
+    // 唯一精确匹配（参考编译器 `resolveStandaloneMethodFunctionReference` 的
+    // exactRemaps 尾部）。同一泛型函数有多个实例化（eprintln[String]/[Rune]/…）
+    // 时，这是唯一的消歧手段——缺了它，多实例化编译里 Call 带着未实例化的
+    // `(T) -> Void` 模板符号直达 MIR，被校验器拒掉。
+    when mono.storage.remapped_function_def_ids.get(definition_method.def_id.id) in {
+        .Some(remaps) then {
+            let mutable exact_remaps = List[Pair[DefId, Type]].new();
+            for entry in remaps then {
+                if resolve_parameterized_type(mono, entry.second) == resolved_function_type then {
+                    exact_remaps.push(entry);
+                };
+            };
+            if exact_remaps.count() == 1 then {
+                return Option[Symbol].Some(
+                    Symbol(
+                        exact_remaps[0].first,
+                        resolved_function_type,
+                        definition_method.kind,
+                    ),
+                );
+            };
+        },
+        .None() then {},
+    };
     return Option[Symbol].None();
 };
 
@@ -2975,7 +3133,7 @@ public let instantiate_extension_method_from_entry(
             // 对方的 checked body 铸给本符号——值层错乱（zip 的第二个
             // 迭代器吐 None）。不同声明各有各的体，无需也绝不互补。
             if conformance_ref.method.def_id == template.method.def_id then {
-                patched_extension_template_with_body(template, conformance_ref)
+                patched_extension_template_with_body(mono, template, conformance_ref)
             } else {
                 template
             }
@@ -2997,6 +3155,7 @@ public let instantiate_extension_method_from_entry(
                     Option[List[Type]].None(),
                 ) in {
                     .Some(tool_template_ref) then patched_extension_template_with_body(
+                        mono,
                         template,
                         tool_template_ref,
                     ),
@@ -3006,7 +3165,6 @@ public let instantiate_extension_method_from_entry(
             }
         },
     };
-
     let owner_constraints_satisfied = extension_type_args_satisfy_constraints(
         mono,
         resolved_template,
@@ -3111,14 +3269,9 @@ public let instantiate_extension_method_from_entry(
     // 声明身份入名（`_d<DefId>` 惯例，同 vtable 的 C 名规则）：同名工具
     // 来自不同声明时（`given A { m }` 与 `given B { m }`）必须各有其符号——
     // 只按 (类型, 参数, 名字) 铸名会让第二把工具复用第一把的实现
-    // （「限定调用调到错误 trait」的根）。物化副本的新铸 id 归一到原始
-    // 声明，同源多路到达仍共用一个符号。
-    let mangle_method_source = mono.storage.context.get_original_def_id(
-        resolved_template.method.def_id,
-    ) or else resolved_template.method.def_id;
-    // 声明身份入名（`_d<DefId>` 惯例）：同名工具来自不同声明时各有符号。
-    // 用**模板方法自身**的 DefId（注册表条目，唯一且稳定）——不走
-    // original 归一（那在迁移中途会给出不稳定的键，同方法铸出两个符号）。
+    // （「限定调用调到错误 trait」的根）。用**模板方法自身**的 DefId
+    // （注册表条目，唯一且稳定）——不走 original 归一（那在迁移中途会给出
+    // 不稳定的键，同方法铸出两个符号）。
     let mangled_name = make_extension_method_layout_name(
         mono,
         mangle_template_name,
@@ -3126,6 +3279,7 @@ public let instantiate_extension_method_from_entry(
         instance_type_args,
         resolved_template.method.name,
         method_type_args,
+        resolved_template.method.def_id,
     );
     // Keyed by the INSTANTIATION: the owner plus the type arguments this method
     // was instantiated with. `List[String]` and `List[Rune]` are two entries.
@@ -4754,6 +4908,7 @@ private let instantiate_trait_vtable_methods_core(
                                         trait_type_args,
                                     ) then {
                                         effective_template_ref = patched_extension_template_with_body(
+                                            mono,
                                             template_ref,
                                             tool_template_ref,
                                         );
@@ -5208,7 +5363,12 @@ public let instantiate_trait_placeholder_method(
                                 resolved_base_type,
                                 MethodOwner.Decl(given_trait_def_id),
                                 tool_template_ref,
-                                inferred_trait_args,
+                                placeholder_instantiation_type_args(
+                                    mono,
+                                    resolved_base_type,
+                                    tool_template_ref,
+                                    inferred_trait_args,
+                                ),
                                 method_type_args,
                             );
                             mono.storage.resolved_trait_placeholder_keys.insert(
@@ -5293,7 +5453,12 @@ public let instantiate_trait_placeholder_method(
                                             resolved_base_type,
                                         ),
                                         tool_template_ref,
-                                        inferred_trait_args,
+                                        placeholder_instantiation_type_args(
+                                            mono,
+                                            resolved_base_type,
+                                            tool_template_ref,
+                                            inferred_trait_args,
+                                        ),
                                         method_type_args,
                                     );
                                     mono.storage.resolved_trait_placeholder_keys.insert(
@@ -5361,7 +5526,12 @@ public let instantiate_trait_placeholder_method(
                             resolved_base_type,
                             mono.storage.context.method_owner_of(resolved_base_type),
                             tool_template_ref,
-                            conformance_binding_type_args,
+                            placeholder_instantiation_type_args(
+                                mono,
+                                resolved_base_type,
+                                tool_template_ref,
+                                conformance_binding_type_args,
+                            ),
                             method_type_args,
                         );
                         mono.storage.resolved_trait_placeholder_keys.insert(
@@ -5473,7 +5643,12 @@ public let instantiate_trait_placeholder_method(
                                     resolved_base_type,
                                 ),
                                 tool_template_ref,
-                                effective_trait_args,
+                                placeholder_instantiation_type_args(
+                                    mono,
+                                    resolved_base_type,
+                                    tool_template_ref,
+                                    effective_trait_args,
+                                ),
                                 method_type_args,
                             );
                             mono.storage.resolved_trait_placeholder_keys.insert(
@@ -5529,6 +5704,7 @@ public let instantiate_trait_placeholder_method(
                 ) in {
                     .Some(tool_template_ref) then {
                         let patched_template = patched_extension_template_with_body(
+                            mono,
                             matched_template,
                             tool_template_ref,
                         );
@@ -5536,7 +5712,12 @@ public let instantiate_trait_placeholder_method(
                             resolved_base_type,
                             mono.storage.context.method_owner_of(resolved_base_type),
                             patched_template,
-                            effective_trait_args,
+                            placeholder_instantiation_type_args(
+                                mono,
+                                resolved_base_type,
+                                patched_template,
+                                effective_trait_args,
+                            ),
                             method_type_args,
                         );
                         mono.storage.resolved_trait_placeholder_keys.insert(
@@ -5607,6 +5788,7 @@ public let instantiate_trait_placeholder_method(
                     ) in {
                         .Some(tool_template_ref) then {
                             let patched_template = patched_extension_template_with_body(
+                                mono,
                                 matched_template,
                                 tool_template_ref,
                             );
@@ -5614,7 +5796,12 @@ public let instantiate_trait_placeholder_method(
                                 resolved_base_type,
                                 mono.storage.context.method_owner_of(base_type),
                                 patched_template,
-                                effective_trait_args,
+                                placeholder_instantiation_type_args(
+                                    mono,
+                                    resolved_base_type,
+                                    patched_template,
+                                    effective_trait_args,
+                                ),
                                 method_type_args,
                             );
                             mono.storage.resolved_trait_placeholder_keys.insert(

@@ -734,6 +734,11 @@ given MIRFunctionBuilder {
                                     or .MutableBorrowedReferenceType(expected_inner) then not self.is_ref_like_type(
                                         expected_inner,
                                     ),
+                                    // 弱句柄是值：RefExpr-over-weak 不能按借用发射
+                                    // （`.ptr = &` 的 Ref 惯例会写进没有 ptr 字段的
+                                    // __koral_WeakRef）——落到「声明即句柄」的值拷贝
+                                    // 路径（copy + weak_retain）。
+                                    .WeakReferenceType(_) or .MutableWeakReferenceType(_) then false,
                                     _ then true,
                                 };
                                 if allow_unwrap_ref_expr_receiver then {
@@ -909,6 +914,11 @@ given MIRFunctionBuilder {
                                     or .MutableBorrowedReferenceType(expected_inner) then not self.is_ref_like_type(
                                         expected_inner,
                                     ),
+                                    // 弱句柄是值：RefExpr-over-weak 不能按借用发射
+                                    // （`.ptr = &` 的 Ref 惯例会写进没有 ptr 字段的
+                                    // __koral_WeakRef）——落到「声明即句柄」的值拷贝
+                                    // 路径（copy + weak_retain）。
+                                    .WeakReferenceType(_) or .MutableWeakReferenceType(_) then false,
                                     _ then true,
                                 };
                                 if allow_unwrap_ref_expr_receiver then {
@@ -1285,7 +1295,15 @@ given MIRFunctionBuilder {
                     .RefExpr(ref_inner) then {
                         when self.expected_ref_argument_plan(t) in {
                             .Some(plan) then {
-                                if not self.is_ref_like_type(plan.second) then {
+                                // 弱句柄不是借用：弱计划走 StackBorrow 会按 Ref
+                                // 惯例发射（`.ptr = &x`），而 __koral_WeakRef 根本
+                                // 没有 ptr 字段。弱句柄按值传——交给下面「声明即
+                                // 句柄」的值拷贝路径（copy + weak_retain）。
+                                let plan_is_weak = when plan.first in {
+                                    .Weak() or .MutableWeak() then true,
+                                    _ then false,
+                                };
+                                if not plan_is_weak and not self.is_ref_like_type(plan.second) then {
                                     when self.lower_place(ref_inner) in {
                                         .Some(place) then {
                                             return Option[MIRValue].Some(
@@ -1456,6 +1474,19 @@ given MIRFunctionBuilder {
                         ) else Option[MIRValue].None()
                     },
                     .WeakReferenceType(inner) then {
+                        // 弱句柄值的适配节点（RefExpr-over-weak）按值拷贝 + retain：
+                        // 弱栈借用没有发射形态（WeakRef 无 ptr 字段，栈值也没有
+                        // control 块可弱化）。
+                        when arg.expr_kind in {
+                            .RefExpr(ref_inner) then {
+                                if self.is_ref_like_type(ref_inner.expr_type) then {
+                                    return Option[MIRValue].Some(
+                                        self.lower_borrowed_source_value(ref_inner),
+                                    );
+                                };
+                            },
+                            _ then {},
+                        };
                         if arg.expr_type == inner then {
                             when self.lower_place(arg) in {
                                 .Some(place) then {
@@ -1475,6 +1506,17 @@ given MIRFunctionBuilder {
                         ) else Option[MIRValue].None()
                     },
                     .MutableWeakReferenceType(inner) then {
+                        // 同弱句柄值适配：按值拷贝 + retain，不发弱栈借用。
+                        when arg.expr_kind in {
+                            .RefExpr(ref_inner) then {
+                                if self.is_ref_like_type(ref_inner.expr_type) then {
+                                    return Option[MIRValue].Some(
+                                        self.lower_borrowed_source_value(ref_inner),
+                                    );
+                                };
+                            },
+                            _ then {},
+                        };
                         if arg.expr_type == inner then {
                             when self.lower_place(arg) in {
                                 .Some(place) then {
@@ -1583,10 +1625,6 @@ given MIRFunctionBuilder {
         ownerships: List[MIROwnershipUse],
         result_type: Type,
     ): Option[MIRExprResult] = {
-        when callee in {
-            .Function(sym) then {},
-            _ then {},
-        };
         let value = MIRValue.Call(MIRCall(callee, values, ownerships, result_type));
         if self.type_is_never(result_type) then {
             self.append_statement(MIRStatement.Evaluate(value));
@@ -1734,6 +1772,26 @@ given MIRFunctionBuilder {
         };
         return when self.lower_place(inner) in {
             .Some(place) then {
+                // 弱句柄值到弱型的适配（`?WeakRef ≡ WeakRef`——弱的弱还是弱）
+                // 按值拷贝 + retain：弱栈借用没有发射形态（__koral_WeakRef 无
+                // ptr 字段，栈值也没有 control 块可弱化）。泛型适配节点的两侧
+                // 布局键可以不等（?T 形对 ?Box 实），不能因此落进借用发射。
+                let weak_result = when self.reference_kind(result_type) in {
+                    .Weak() or .MutableWeak() then true,
+                    _ then false,
+                };
+                if weak_result and self.is_ref_like_type(inner.expr_type) then {
+                    let value = self.lower_borrowed_source_value(inner);
+                    let result = self.materialize(value, result_type);
+                    return Option[MIRExprResult].Some(
+                        MIRExprResult(
+                            result_type,
+                            ValueCategory.RValue(),
+                            Option[MIROperand].Some(result),
+                            Option[MIRPlace].None(),
+                        ),
+                    );
+                };
                 let result = self.materialize(
                     MIRValue.Ref(
                         place,

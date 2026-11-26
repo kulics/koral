@@ -182,14 +182,20 @@ public let type_instantiation_cache_key(
 //   "<template_name>_<type_arg1_key>_..._<method_name>_<method_arg1_key>_..."
 //
 // Examples:
-//   make_extension_method_layout_name("List",  [Int],         "push",  [])       → "List_Int_push"
-//   make_extension_method_layout_name("Dict",   [String, Int], "get",   [])       → "Dict_String_Int_get"
-//   make_extension_method_layout_name("List",  [Int],         "map",   [String]) → "List_Int_map_String"
-//   make_extension_method_layout_name(..., "List", [Int], "push", [])        → "List_Int_push_d103"
+//   make_extension_method_layout_name("List",  [Int],         "push",  [], def)       → "List_Int_push"
+//   make_extension_method_layout_name("Dict",   [String, Int], "get",   [], def)       → "Dict_String_Int_get"
+//   make_extension_method_layout_name("List",  [Int],         "map",   [String], def) → "List_Int_map_String"
+//   make_extension_method_layout_name(..., "List", [Int], "push", [], def)        → "List_Int_push_d103"
 //
 // The owner's DECLARATION joins the name, exactly as a type's own C name does
 // (`Box_I_d184`). Two modules may each declare `Box`, so `Box_I_stamp` alone
 // names two different methods and one C definition answers for both.
+//
+// The METHOD's declaration identity joins it too (`_d<DefId>`, the vtable
+// C-name convention -- mirrors the reference compiler's `methodDefSuffix`):
+// same-named tools from two traits (`given A { m }` / `given B { m }`) must not
+// collapse into one C symbol -- the second would reuse the first's body and a
+// qualified call would reach the wrong trait.
 public let make_extension_method_layout_name(
     mono: Monomorphizer,
     template_name: String,
@@ -197,6 +203,7 @@ public let make_extension_method_layout_name(
     type_args: List[Type],
     method_name: String,
     method_type_args: List[Type],
+    method_def_id: DefId,
 ): String = {
     let mutable out = StringBuilder.new();
     out.push_string(template_name);
@@ -215,6 +222,9 @@ public let make_extension_method_layout_name(
     // names two different methods and one C definition answers for both.
     if template_def_id.is_valid() then {
         out.push_string("_d\(template_def_id.id)");
+    };
+    if method_def_id.is_valid() then {
+        out.push_string("_d\(method_def_id.id)");
     };
     return out.to_string();
 };

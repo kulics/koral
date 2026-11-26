@@ -1,0 +1,22 @@
+// EXPECT: join_scope_ok
+// 泛型名字作用域碰撞回归（Windows 自举曾炸在 C 层）：
+// `absolute_path[T: ToPath]` 的体里调用 `cwd.join(p.to_string())`，而
+// `Path.join[T2: ToPath]` 的方法泛型与外层泛型**同名 T**。代换层把内层
+// 调用的类型槽/被调符号类型按名字过外层代入表（T → Path），join 的 T 被
+// 错绑成 Path，生成 C 把 String 实参传给 `join[Path]` 的 Path 形参。
+// 修复后代换对被调自身作用域的参数名不透明，join[String] 实例被正确绑定。
+using "std/os" { ... };
+
+let main(): Int = {
+    let p = ".".to_path();
+    let n = when absolute_path(p) in {
+        .Ok(v) then v.to_string().count(),
+        .Error(_) then 1,
+    };
+    if n >= 0 then {
+        println("join_scope_ok");
+    } else {
+        println("join_scope_bad");
+    };
+    return 0;
+};
