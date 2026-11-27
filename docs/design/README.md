@@ -38,6 +38,7 @@
 | `design-axioms.md` | 复杂度预算与拒绝清单；设计公理本身；提案过闸顺序 | 技术前提（身份）→ 本 README「共同前提」；子系统取舍 → 各子系统文档 |
 | `module-design.md` | 模块与导入的命名、语法、manifest | 导入写法 → `guide/document.md` |
 | `thin-pointer-design.md` | 对象/头布局、借用表示、trait object 布局、niche | 语言可见的内存语义 → `type-semantics.md` |
+| `slice-design.md` | **切片与统一存储块**：`[]T`/`[]mutable T` 规则、统一块布局与析构、借出/逃逸与转换矩阵、修改版本号、BufReader 帧、io 切片化、性能开销账 | 值/内存语义契约 → `type-semantics.md`；RcBox 头与协议 → `thin-pointer-design.md`；命名契约 → `std-api-design.md`；用户向写法 → `guide/`（落地时） |
 | `numeric-families-design.md` | 整数家族（常规/回绕/预留饱和）如何划分、为何是内建类型而非包装；转换为何由目标类型决定；字面量为何一律编译期受检；浮点为何不设家族 | 具体写法与规则表 → `guide/document.md` §Numeric Casting；被替换的 `wrapping_*` 方法族 → `git log`；sealed trait → 另行独立交付 |
 | `cffi-design.md` | **CFFI 全集**：过界封闭集合、`type foreign` / `[N]T` / 函数指针、`let foreign` 引用/定义、C 名槽位、`#if`、原生构建集成——规则与取舍 | 用户向镜像 → `guide/document.md` §6（中英两份，改规则三处同批改）；manifest 通用 schema 与模块身份 → `module-design.md`；C mangling 前提 → `name-resolution.md` |
 | `concurrency-design.md` | **并发安全全集**：`sendable` 族声明形态与派生规则、跨界检查、对象锁语义、`unsafe` 契约、RC 分流、Drop 线程亲和、推荐并发模式 | 内存语义契约（`type`/`type mutable`/`Clone`/`Drop`）→ `type-semantics.md`；RC 头与对象布局 → `thin-pointer-design.md`；std 具体 API → `../api/std/`；用户向写法 → `guide/document.md` |
@@ -78,6 +79,7 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 | [`stdio-design.md`](stdio-design.md) —— 标准流句柄 Stdin / Stdout / Stderr | Implemented | 无单独记录（随 `std/io` 落地） | 2026-10-31 |
 | [`cffi-design.md`](cffi-design.md) —— CFFI（外部互操作与构建集成） | Implemented（2026-11-06：P1 声明语法、P2 原生构建、P3 条件编译全部落地） | [`cffi-design-implementation.md`](../implementation/cffi-design-implementation.md) | 2026-11-05 |
 | [`concurrency-design.md`](concurrency-design.md) —— 并发安全（sendable 族与对象锁） | Implemented（2026-11-10：P1–P6 全部落地，含对象锁重设计与 ARC 优化） | 文内 `## 实施` 一节（未单独拆出） | 2026-11-10 |
+| [`slice-design.md`](slice-design.md) —— 切片与统一存储块 | Accepted | [`../implementation/slice-design-implementation.md`](../implementation/slice-design-implementation.md)（分期规划，未开工） | 2026-11-27 |
 
 新的设计落地后，把状态从 Draft 改成 Implemented，并在「对应实现记录」一栏补上链接。
 
