@@ -947,20 +947,23 @@ given Lexer {
                     .Some('"'),
                     true,
                 ) or return;
-                // A single literal part is a plain string literal; anything
-                // else -- more than one part, or one interpolation -- is an
-                // interpolated string carrying the parts as they were scanned.
-                when parts in {
-                    [.Literal(text)] then self.add(
-                        TokenKind.StringLiteral(text.to_string()),
-                        start_line,
-                        start_col,
-                    ),
-                    _ then self.add(
-                        TokenKind.InterpolatedString(parts),
-                        start_line,
-                        start_col,
-                    ),
+                // 与种子同规则：没有插值就是普通字符串字面量——空串是零段，
+                // 也是字面量；只有带插值的才是插值串（携带扫描出的分段）。
+                if parts.is_empty() then {
+                    self.add(TokenKind.StringLiteral(""), start_line, start_col);
+                } else {
+                    when parts in {
+                        [.Literal(text)] then self.add(
+                            TokenKind.StringLiteral(text.to_string()),
+                            start_line,
+                            start_col,
+                        ),
+                        _ then self.add(
+                            TokenKind.InterpolatedString(parts),
+                            start_line,
+                            start_col,
+                        ),
+                    };
                 };
                 return .Ok({});
             };
@@ -1789,15 +1792,19 @@ given Lexer {
             .None(),
             true,
         ) or return;
-        // Same rule as the single-line form: one literal part is a plain
-        // string literal, everything else is an interpolated string.
-        when parts in {
-            [.Literal(text)] then self.add(
-                TokenKind.StringLiteral(text.to_string()),
-                start_line,
-                start_col,
-            ),
-            _ then self.add(TokenKind.InterpolatedString(parts), start_line, start_col),
+        // Same rule as the single-line form (seed parity): no interpolation
+        // means a plain string literal -- an empty one is zero parts too.
+        if parts.is_empty() then {
+            self.add(TokenKind.StringLiteral(""), start_line, start_col);
+        } else {
+            when parts in {
+                [.Literal(text)] then self.add(
+                    TokenKind.StringLiteral(text.to_string()),
+                    start_line,
+                    start_col,
+                ),
+                _ then self.add(TokenKind.InterpolatedString(parts), start_line, start_col),
+            };
         };
         return .Ok({});
     };

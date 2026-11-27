@@ -1,0 +1,38 @@
+// EXPECT: ci_range_ok
+// 忽略大小写的折叠在建区/建表时补全另一案：字符区间双向折叠（[a-z] 捞
+// 大写、[K-P] 捞 k-p），起点表也是双案（大写模式按小写起配），取反发生在
+// 折叠之后（[^a-z] 连大写一起排掉）。
+
+using "std/text" { Regex, RegexFlag };
+
+let ci(pattern: String): Regex =
+    Regex.compile_with_flags(pattern, RegexFlag.ignore_case()).expect("compile");
+
+let main(): Int = {
+    // 区间双向折叠。
+    let r1 = ci("[a-z]+");
+    when r1.find("xAYb") in {
+        .Some(m) then assert(m.text() == "xAYb", "[a-z] folds to A-Z"),
+        .None() then assert(false, "range fold must match"),
+    };
+    let r2 = ci("[K-P]");
+    when r2.find("-m-") in {
+        .Some(m) then assert(m.start() == 1, "[K-P] folds to k-p"),
+        .None() then assert(false, "upper range fold must match"),
+    };
+
+    // 起点表双案：交替分支里的大写按小写也能起配。
+    let r3 = ci("A|b");
+    when r3.find("xa") in {
+        .Some(m) then assert(m.start() == 1, "start table folded"),
+        .None() then assert(false, "ci start table must match"),
+    };
+
+    // 取反在折叠之后。
+    let r4 = ci("[^a-z]");
+    assert(r4.matches("A") == false, "negated class folds both cases");
+    assert(r4.matches("!") == true, "negated class keeps others");
+
+    println("ci_range_ok");
+    return 0;
+};

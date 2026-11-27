@@ -166,6 +166,11 @@ public class Monomorphizer {
     
     /// Processed request keys to avoid duplicate processing
     internal var processedRequestKeys: Set<InstantiationKey> = []
+
+    /// Per-template instantiation counts (the unified instantiation limit's
+    /// chain-length face: polymorphic recursion instantiates one template
+    /// over and over with ever-growing arguments).
+    private var instantiationCountsByTemplate: [DefId: Int] = [:]
     
     // MARK: - Recursion Detection
     
@@ -1105,7 +1110,59 @@ public class Monomorphizer {
 
     
     // MARK: - Request Processing
-    
+
+    /// 单态化统一上限（koralc mono.koral 的 `mono_instantiation_limit` 同值同
+    /// 文案）：三个度量一把尺——泛型嵌套深度 > 128、实例化身份（修饰名）长过
+    /// 4096 字符、或**同一模板**被实例化超过 256 次。多态递归的链（
+    /// `f[Wrap[T]]` 自递归）在实例化里被解析成一串具体结构体，前两个度量看
+    /// 增长，第三个计数直接钉住链长；合法的深组合（迭代器链）名字长但模板
+    /// 各不相同、次数极小。引用包装不计入嵌套。
+    private static let maxInstantiationTypeDepth: Int = 128
+    private static let maxInstantiationKeyLength: Int = 4096
+    private static let maxInstantiationsPerTemplate: Int = 256
+
+    /// 一次类型实参的泛型嵌套深度（`Wrap[Wrap[Int]]` = 2）。
+    private static func instantiationTypeDepth(_ t: Type) -> Int {
+        switch t {
+        case .genericStruct(_, let args), .genericEnum(_, let args),
+             .traitObject(_, let args, _):
+            return 1 + (args.map { instantiationTypeDepth($0) }.max() ?? 0)
+        case .function(let parameters, let returns, _):
+            var maxChild = instantiationTypeDepth(returns)
+            for p in parameters {
+                maxChild = Swift.max(maxChild, instantiationTypeDepth(p.type))
+            }
+            return 1 + maxChild
+        case .foreignFunction(let parameters, let returns):
+            var maxChild = instantiationTypeDepth(returns)
+            for p in parameters {
+                maxChild = Swift.max(maxChild, instantiationTypeDepth(p.type))
+            }
+            return 1 + maxChild
+        case .fixedArray(_, let element):
+            return 1 + instantiationTypeDepth(element)
+        case .reference(let inner), .mutableReference(let inner),
+             .borrowedReference(let inner), .mutableBorrowedReference(let inner),
+             .weakReference(let inner), .mutableWeakReference(let inner),
+             .pointer(let inner), .mutablePointer(let inner):
+            return instantiationTypeDepth(inner)
+        default:
+            return 0
+        }
+    }
+
+    /// A request's whole type-argument surface (the unified limit's check face).
+    private static func requestTypeArguments(_ request: InstantiationRequest) -> [Type] {
+        switch request.kind {
+        case .structType(_, let args), .enumType(_, let args), .function(_, let args):
+            return args
+        case .extensionMethod(_, let baseType, _, let typeArgs, let methodTypeArgs):
+            return [baseType] + typeArgs + methodTypeArgs
+        case .traitMethod(let baseType, _, let methodTypeArgs):
+            return [baseType] + methodTypeArgs
+        }
+    }
+
     /// Processes a single instantiation request.
     private func processRequest(_ request: InstantiationRequest) throws {
         currentLine = request.sourceLine
@@ -1113,12 +1170,36 @@ public class Monomorphizer {
         SemanticErrorContext.currentFileName = currentFileName
 
         guard currentRecursionDepth < maxRecursionDepth else {
+            // 锚点刻意取 unknown span：渲染成 `file: error:`（koralc 的
+            // report_monomorphization_internal_error 同格式），两侧诊断逐行一致。
             throw SemanticError(
                 .generic("Maximum instantiation depth exceeded (possible infinite recursion)"),
-                span: SourceSpan(location: SourceLocation(line: currentLine, column: 1))
+                span: .unknown
             )
         }
-        
+
+        // 单态化统一上限：实参嵌套过深/实例化身份过长/同模板实例化次数过多
+        // 判为无穷实例化，干净报错收工。
+        if Monomorphizer.requestTypeArguments(request).contains(where: {
+            Monomorphizer.instantiationTypeDepth($0) > Monomorphizer.maxInstantiationTypeDepth
+                || context.getLayoutKey($0).count > Monomorphizer.maxInstantiationKeyLength
+        }) {
+            throw SemanticError(
+                .generic("Maximum instantiation depth exceeded (possible infinite recursion)"),
+                span: .unknown
+            )
+        }
+        if let templateId = request.deduplicationKey.templateDefId {
+            let count = (instantiationCountsByTemplate[templateId] ?? 0) + 1
+            instantiationCountsByTemplate[templateId] = count
+            if count > Monomorphizer.maxInstantiationsPerTemplate {
+                throw SemanticError(
+                    .generic("Maximum instantiation depth exceeded (possible infinite recursion)"),
+                    span: .unknown
+                )
+            }
+        }
+
         let key = request.deduplicationKey
         guard !processedRequestKeys.contains(key) else {
             return

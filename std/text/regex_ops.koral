@@ -45,7 +45,9 @@ given Regex {
     /// Returns `None` when the pattern does not match.
     public find(self, text: String): Option[Match] = Regex.find_at(self, 0, text);
 
-    /// Return the first match in `text` starting at byte `offset`.
+    /// Return the first match in `text` starting at byte `offset`. Returns
+    /// `None` when `offset` falls inside a multi-byte character (starts must
+    /// land on rune boundaries).
     public find_at(self, offset: Int, text: String): Option[Match] = {
         return when re_run(self.prog, text, offset, false) in {
             .Some(m) then {
@@ -75,7 +77,7 @@ given Regex {
         Regex.captures_at(self, 0, text);
 
     /// Return the first match in `text` starting at byte `offset`, with
-    /// all of its capture groups.
+    /// all of its capture groups. Starts must land on rune boundaries.
     public captures_at(self, offset: Int, text: String): Option[Captures] = {
         return when re_run(self.prog, text, offset, true) in {
             .Some(m) then {
@@ -123,23 +125,20 @@ given Regex {
     };
 
     /// Replace every match in `text` with `with`, expanding `$0`..`$9` and `$$` as in `replace`.
+    /// 紧接上一匹配结束位置的零宽匹配跳过（Go 规则），该处字符原样并入。
     public replace_all(self, text: String, with: String =): String = {
         let mutable result = StringBuilder.new();
         let mutable offset = 0;
         let text_len = text.count();
         let mutable had_match = false;
+        let mutable prev_end = -1;
 
         while offset <= text_len then {
             when Regex.captures_at(self, offset, text) in {
                 .Some(c) then {
-                    had_match = true;
-                    if c.start() > offset then {
-                        result.push_string(text.substring(offset..<c.start()));
-                    };
-                    result.push_string(Regex.expand_replacement(with, c));
-                    if c.end() == offset then {
+                    if c.start() == c.end() and c.start() == prev_end then {
+                        // 跳过：只把该处的一个字符并进结果，不出替换。
                         if offset < text_len then {
-                            // 零宽匹配的步进按码点走（整符并入，不错切多字节）。
                             let next = regex_next_offset(text, offset);
                             result.push_string(text.substring(offset..<next));
                             offset = next;
@@ -147,7 +146,24 @@ given Regex {
                             offset += 1;
                         };
                     } else {
-                        offset = c.end();
+                        had_match = true;
+                        if c.start() > offset then {
+                            result.push_string(text.substring(offset..<c.start()));
+                        };
+                        result.push_string(Regex.expand_replacement(with, c));
+                        prev_end = c.end();
+                        if c.end() == offset then {
+                            if offset < text_len then {
+                                // 零宽匹配的步进按码点走（整符并入，不错切多字节）。
+                                let next = regex_next_offset(text, offset);
+                                result.push_string(text.substring(offset..<next));
+                                offset = next;
+                            } else {
+                                offset += 1;
+                            };
+                        } else {
+                            offset = c.end();
+                        };
                     };
                 },
                 .None() then {
@@ -218,23 +234,21 @@ given Regex {
     };
 
     /// Replace every match in `text` by the string `f` builds from it.
-    /// Zero-width matches step one rune at a time. The `by` argument leads,
+    /// Zero-width matches step one rune at a time; 紧接上一匹配结束位置的
+    /// 零宽匹配跳过（Go 规则），该处字符原样并入。The `by` argument leads,
     /// `text` trails -- same order as `find_at`'s `offset`.
     public replace_all_by(self, f: (Captures) -> String, text: String): String = {
         let mutable result = StringBuilder.new();
         let mutable offset = 0;
         let text_len = text.count();
         let mutable had_match = false;
+        let mutable prev_end = -1;
 
         while offset <= text_len then {
             when Regex.captures_at(self, offset, text) in {
                 .Some(c) then {
-                    had_match = true;
-                    if c.start() > offset then {
-                        result.push_string(text.substring(offset..<c.start()));
-                    };
-                    result.push_string(f(c));
-                    if c.end() == offset then {
+                    if c.start() == c.end() and c.start() == prev_end then {
+                        // 跳过：只把该处的一个字符并进结果，不出替换。
                         if offset < text_len then {
                             let next = regex_next_offset(text, offset);
                             result.push_string(text.substring(offset..<next));
@@ -243,7 +257,23 @@ given Regex {
                             offset += 1;
                         };
                     } else {
-                        offset = c.end();
+                        had_match = true;
+                        if c.start() > offset then {
+                            result.push_string(text.substring(offset..<c.start()));
+                        };
+                        result.push_string(f(c));
+                        prev_end = c.end();
+                        if c.end() == offset then {
+                            if offset < text_len then {
+                                let next = regex_next_offset(text, offset);
+                                result.push_string(text.substring(offset..<next));
+                                offset = next;
+                            } else {
+                                offset += 1;
+                            };
+                        } else {
+                            offset = c.end();
+                        };
                     };
                 },
                 .None() then {

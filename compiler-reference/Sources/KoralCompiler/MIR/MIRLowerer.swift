@@ -1095,17 +1095,21 @@ private final class MIRFunctionBuilder {
       )
       return MIRExprResult(type: type, category: .rvalue, operand: result, place: nil)
     case .traitMethodCall(let receiver, let traitName, let traitDefId, let methodName, let methodIndex, let arguments, let type):
+      // 视图返回的 trait 方法同 borrowed-self 约定（见 mirResultBorrowsArguments）。
+      let borrowedShape = mirResultBorrowsArguments(type)
       let value = MIRValue.traitMethodCall(
         MIRTraitMethodCall(
           receiver: lowerValue(receiver),
-          receiverOwnership: ownershipUse(for: receiver),
+          receiverOwnership: borrowedShape ? .borrow : ownershipUse(for: receiver),
           traitName: traitName,
           traitDefId: traitDefId,
           traitTypeArguments: traitObjectTypeArguments(from: receiver.type),
           methodName: methodName,
           methodIndex: methodIndex,
           arguments: lowerArgumentValues(arguments),
-          argumentOwnerships: arguments.map(ownershipUse(for:)),
+          argumentOwnerships: borrowedShape
+            ? Array(repeating: .borrow, count: arguments.count)
+            : arguments.map(ownershipUse(for:)),
           type: type
         )
       )
@@ -4116,9 +4120,16 @@ private final class MIRFunctionBuilder {
         guard !currentBlockIsTerminated else { return nil }
       }
       guard !currentBlockIsTerminated else { return nil }
-      var argumentOwnerships: [MIROwnershipUse] = [ownershipUse(for: base)]
-      argumentOwnerships.reserveCapacity(arguments.count + 1)
-      argumentOwnerships.append(contentsOf: arguments.map(ownershipUse(for:)))
+      var argumentOwnerships: [MIROwnershipUse]
+      if mirResultBorrowsArguments(type) {
+        // 视图返回：实参 +0 借入（koralc 的 borrowed-self 约定），被调方不
+        // 释放句柄，调用方的临时活到语句尾——否则返回的视图即刻悬空。
+        argumentOwnerships = Array(repeating: .borrow, count: argumentValues.count)
+      } else {
+        argumentOwnerships = [ownershipUse(for: base)]
+        argumentOwnerships.reserveCapacity(arguments.count + 1)
+        argumentOwnerships.append(contentsOf: arguments.map(ownershipUse(for:)))
+      }
       return finishCall(
         callee: .function(callableMethod),
         arguments: argumentValues,
@@ -4139,7 +4150,10 @@ private final class MIRFunctionBuilder {
     return finishCall(
       callee: calleeOperand,
       arguments: argumentValues,
-      argumentOwnerships: arguments.map(ownershipUse(for:)),
+      // 视图返回的调用同 borrowed 约定（见 mirResultBorrowsArguments）。
+      argumentOwnerships: mirResultBorrowsArguments(type)
+        ? Array(repeating: .borrow, count: argumentValues.count)
+        : arguments.map(ownershipUse(for:)),
       type: type
     )
   }

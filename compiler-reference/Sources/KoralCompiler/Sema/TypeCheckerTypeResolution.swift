@@ -723,12 +723,20 @@ extension TypeChecker {
 
           // If the argument is a generic parameter, the requirement is that its
           // own declaration carries a bound for the SAME trait -- decided by
-          // declaration identity, not by comparing spellings.
+          // declaration identity, not by comparing spellings. A name the
+          // current scope cannot see at all (an un-inferred slot -- the dict
+          // literal echo's residue) is un-checkable here: read it as "might
+          // hold" and let mono re-check at instantiation, the same verdict the
+          // koralc mirror gives it. Blaming the bare parameter reports
+          // "Type K does not implement Hash", a false positive.
           if case .genericParameter(let argName) = args[i] {
             let requiredDefId = resolveBound(constraint).defId ?? .invalid
             let hasRequiredBound =
               (genericTraitBounds[argName] ?? []).contains { boundRequires($0, requiredDefId) }
             if !hasRequiredBound {
+              if !genericTraitBounds.keys.contains(argName) {
+                continue
+              }
               let ctx = "checking constraint \(param.name): \(constraint)"
               throw SemanticError(.generic(
                 "Type \(argName) does not explicitly implement trait \(traitName) (\(ctx))"

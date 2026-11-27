@@ -227,11 +227,15 @@ given StringBuilder {
         self.cap = new_cap;
     };
 
-    /// Append one raw byte to the builder.
-    /// The caller must keep the accumulated bytes valid UTF-8.
+    /// Append one raw byte to the builder. 写入即校验 UTF-8：追加后缓冲
+    /// 必须仍是合法 UTF-8 前缀（尾部允许一个未完字符——`push_rune` 逐字节
+    /// 构造多字节字符），会写坏 UTF-8 的字节立刻 panic。
     /// Every hot field is read before the growth call and re-read only in
     /// the growth path (same shape as `List.push`, std/list.koral).
     public push_byte(self, value: UInt8): Void = unsafe {
+        if not String.utf8_append_ok(self.data, self.len, value) then {
+            panic("StringBuilder.push_byte: invalid UTF-8");
+        };
         let mutable len = self.len;
         if self.cap < len + 2 then {
             self.grow_to(len + 2);
@@ -246,8 +250,9 @@ given StringBuilder {
 
     /// Append `other`, where `span` picks which slice to append, defaulting to
     /// all of it -- the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
-    /// The default span is the whole string and skips range resolution, bounds
-    /// checks and rune-boundary checks entirely.
+    /// 写入即校验 UTF-8：显式 span 必须切在字符边界上，且缓冲尾部不能停在
+    /// 半截字符上——两者任一破坏 UTF-8 都立刻 panic。The default span is
+    /// the whole string and skips range resolution and bounds checks entirely.
     public push_string(self, other: String, span: Range[Int] = ...): Void = unsafe {
         let other_len = Int(other.len);
         let mutable start = 0;
@@ -258,9 +263,15 @@ given StringBuilder {
             let spec = span.resolve_span(other_len);
             start = spec.first;
             copy_len = spec.second;
+            if not (other.is_rune_boundary(start) and other.is_rune_boundary(start + copy_len)) then {
+                panic("StringBuilder.push_string: invalid UTF-8");
+            };
         };
         if copy_len == 0 then {
             return;
+        };
+        if String.utf8_tail_incomplete(self.data, self.len) then {
+            panic("StringBuilder.push_string: invalid UTF-8");
         };
         let mutable len = self.len;
         if self.cap < len + copy_len + 1 then {
@@ -403,6 +414,95 @@ given String {
         copy_memory(result.data, left.bytes.data + Int(left.off), UInt(left_len));
         copy_memory(result.data + left_len, right.bytes.data + Int(right.off), UInt(right_len));
         return String(result, UInt32(0), UInt32(total));
+    };
+
+    // 写入即校验的 UTF-8 前缀检查（`StringBuilder.push_byte` 的契约执行）：
+    // `bytes[0..len]` 是合法 UTF-8 前缀（尾部允许一个未完字符），且再追加
+    // `value` 之后仍是。会把缓冲写坏的字节返回 false。
+    private utf8_append_ok(bytes: *UInt8, len: Int, value: UInt8): Bool = unsafe {
+        // 尾部状态：回看至多 3 个接续字节，定出未完序列（引导字节、已写
+        // 接续数、还差几个）。
+        let mutable lead = UInt8(0);
+        let mutable written = 0;
+        let mutable pending = 0;
+        if len > 0 then {
+            let mutable back = 0;
+            while back < 3 and back < len and (bytes[len - 1 - back] & 192) == 128 then {
+                back += 1;
+            };
+            if back == 0 then {
+                let b = bytes[len - 1];
+                if b >= 194 then {
+                    lead = b;
+                    pending = (if b < 224 then 2 else if b < 240 then 3 else 4) - 1;
+                };
+            } else {
+                let lead_i = len - 1 - back;
+                if lead_i < 0 then {
+                    return false;
+                };
+                let b = bytes[lead_i];
+                if b < 194 then {
+                    return false;
+                };
+                let width = if b < 224 then 2 else if b < 240 then 3 else 4;
+                if width == back + 1 then {
+                    pending = 0;
+                } else if width > back + 1 then {
+                    lead = b;
+                    written = back;
+                    pending = width - back - 1;
+                } else {
+                    return false;
+                };
+            };
+        };
+        if pending == 0 then {
+            // 全新开始：ASCII 或合法引导字节（C2..F4）。
+            return value < 128 or (value >= 194 and value <= 244);
+        };
+        // 未完序列的下一个接续字节。
+        if value < 128 or value > 191 then {
+            return false;
+        };
+        if written == 0 then {
+            // 首个接续字节的收窄约束：排掉过长编码、代理区和越界码点。
+            if lead == 224 and value < 160 then {
+                return false;
+            };
+            if lead == 237 and value > 159 then {
+                return false;
+            };
+            if lead == 240 and value < 144 then {
+                return false;
+            };
+            if lead == 244 and value > 143 then {
+                return false;
+            };
+        };
+        return true;
+    };
+
+    // 尾部是否停在一个未完字符上（`push_string` 的接缝检查：整片追加要求
+    // 起点是完整字符，半截序列的续段只能由 `push_byte` 逐字节补齐）。
+    private utf8_tail_incomplete(bytes: *UInt8, len: Int): Bool = unsafe {
+        if len == 0 then {
+            return false;
+        };
+        let mutable back = 0;
+        while back < 3 and back < len and (bytes[len - 1 - back] & 192) == 128 then {
+            back += 1;
+        };
+        if back == 0 then {
+            return bytes[len - 1] >= 194;
+        };
+        let lead_i = len - 1 - back;
+        if lead_i < 0 then {
+            return true;
+        };
+        let b = bytes[lead_i];
+        let width = if b < 224 then 2 else if b < 240 then 3 else 4;
+        return width > back + 1;
     };
 
     // Validate UTF-8 byte sequence (strict)

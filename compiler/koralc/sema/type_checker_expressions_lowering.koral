@@ -1075,6 +1075,49 @@ given TypeChecker {
     ): Type = {
         when expected in {
             .Some(et) then {
+                // Echo guard（与 infer_collection_literal_result_type 同规则）：
+                // 目标槽位还是泛型参数时不回声成期望类型——那会给实参
+                // `Dict[K, V]` 的类型，调用点绑定自绑成 K := K，insert 的
+                // Hash 约束又对着裸 K 检查（"K 没有实现 Hash"的误报）。键/值
+                // 按条目实型推断并重建家族：`f(["a": 1])` 推成
+                // `Dict[String, Int]`，绑定 K = String。泛型体内的条目自带
+                // 参数（`[x: y]`，x: T）时重建照旧复现期望类型。
+                let kv = self.extract_dict_kv_types(et);
+                if kv.first is .Some(k) and kv.second is .Some(v)
+                    and (self.contains_generic_parameter(k) or self.contains_generic_parameter(v)) then {
+                    let mutable joined_key = Type.Unknown();
+                    let mutable joined_value = Type.Unknown();
+                    for entry in typed_entries then {
+                        let key_candidate = self.concretize_default_literal_type(
+                            entry.first.expr_type,
+                        );
+                        let value_candidate = self.concretize_default_literal_type(
+                            entry.second.expr_type,
+                        );
+                        if self.is_unresolved_expr_type(joined_key) and not self.is_unresolved_expr_type(
+                            key_candidate,
+                        ) then {
+                            joined_key = key_candidate;
+                        };
+                        if self.is_unresolved_expr_type(joined_value) and not self.is_unresolved_expr_type(
+                            value_candidate,
+                        ) then {
+                            joined_value = value_candidate;
+                        };
+                    };
+                    if not self.is_unresolved_expr_type(joined_key) and not self.is_unresolved_expr_type(
+                        joined_value,
+                    ) then {
+                        let mutable bind_args = List[Type].new();
+                        bind_args.push(joined_key);
+                        bind_args.push(joined_value);
+                        return when et in {
+                            .GenericStruct(head, _) then Type.GenericStruct(head, bind_args),
+                            .GenericEnum(head, _) then Type.GenericEnum(head, bind_args),
+                            _ then et,
+                        };
+                    };
+                };
                 return et;
             },
             .None() then {},

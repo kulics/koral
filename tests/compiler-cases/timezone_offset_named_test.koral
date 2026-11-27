@@ -1,0 +1,22 @@
+// EXPECT: tz_offset_ok
+// 命名/本地时区的名字经 `CString.from_string_unchecked(n).borrow_ptr()` 传给
+// C：临时 CString 的寿命必须盖过外层调用（种子侧曾把接收者按 move 消耗、
+// 被调方随即释放，返回的裸指针悬空——已按 borrowed 视图约定两半收口）。
+
+using "std/time" { TimeZone, DateTime };
+
+let main(): Int = {
+    // 2023-11-14 22:13:20 UTC：America/New_York 是 EST（-5h = -18000s）。
+    let tz = TimeZone.from_name("America/New_York").expect("named zone");
+    let dt = DateTime.from_unix_seconds(1_700_000_000);
+    let d = tz.offset_at(dt);
+    assert(d == 1s * (0 - 18000), "named zone offset");
+    // 同一输入两次解析结果稳定（名字的临时块每次都重建）。
+    assert(tz.offset_at(dt) == d, "stable across calls");
+
+    // UTC 分支不动名字。
+    assert(TimeZone.utc().offset_at(dt) == Duration.zero(), "utc");
+
+    println("tz_offset_ok");
+    return 0;
+};

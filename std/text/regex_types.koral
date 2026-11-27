@@ -93,7 +93,7 @@ given Match {
 public type sendable Captures(
     source: String, // 原始文本
     slots: [34]Int32, // 内联捕获槽 [s0, e0, s1, e1, ...]（-1 = 未匹配）
-    spill: String, // 超出内联容量时的小端 Int32 打包块
+    spill: Option[ReSlotRow], // 超出内联容量时的槽行受管块
     groups: Int, // 模式中的捕获组数
     names: FrozenList[String], // 捕获组名表（下标 i = 组 i+1；"" = 未命名）
 );
@@ -110,12 +110,16 @@ given Captures {
     /// family (the local copy is dead-except-one-load, which clang folds
     /// back to the load).
     private slot_at(self, index: Int): Int32 = {
-        if self.spill.count() > 0 then {
-            let p = self.spill.borrow_ptr() as *Int32;
-            return unsafe { p[index] };
+        return when self.spill in {
+            .Some(row) then {
+                let p = row.data;
+                unsafe { p[index] }
+            },
+            .None() then {
+                let s = self.slots;
+                s[index]
+            },
         };
-        let s = self.slots;
-        return s[index];
     };
 
     /// Return the substring matched by the whole pattern.
@@ -163,10 +167,13 @@ given Captures {
 };
 
 /// Iterator over the successive non-overlapping matches of a regex.
-public type mutable MatchIterator(regex: Regex, text: String, mutable offset: Int);
+/// `prev_end` 记住上一匹配的结束位置：紧接其后的零宽匹配跳过（Go 的
+/// `FindAll` 规则），`$` 在 "abc" 上只出一个匹配。
+public type mutable MatchIterator(regex: Regex, text: String, mutable offset: Int, mutable prev_end: Int);
 
 /// Iterator over successive matches, each with its capture groups.
-public type mutable CapturesIterator(regex: Regex, text: String, mutable offset: Int);
+/// `prev_end` 的规则同 `MatchIterator`。
+public type mutable CapturesIterator(regex: Regex, text: String, mutable offset: Int, mutable prev_end: Int);
 
 /// Iterator over the text pieces between a regex's matches.
 public type mutable RegexSplitIterator(
@@ -194,7 +201,7 @@ public type RegexSplitView(regex: Regex, text: String);
 given MatchView: Iterable[Match, MatchIterator] {
 
     /// Build a fresh cursor over the matches; the view itself is untouched.
-    public iterator(self): MatchIterator = MatchIterator(self.regex, self.text, 0);
+    public iterator(self): MatchIterator = MatchIterator(self.regex, self.text, 0, -1);
 };
 
 /// `Iterable` for `CapturesView`: a fresh captures cursor per call.
@@ -202,7 +209,7 @@ given CapturesView: Iterable[Captures, CapturesIterator] {
 
     /// Build a fresh cursor over the capture sets; the view itself is untouched.
     public iterator(self): CapturesIterator =
-        CapturesIterator(self.regex, self.text, 0);
+        CapturesIterator(self.regex, self.text, 0, -1);
 };
 
 /// `Iterable` for `RegexSplitView`: a fresh pieces cursor per call.
@@ -232,23 +239,30 @@ given MatchIterator: Iterator[Match] {
 
     /// Return the next match, resuming after the previous one, or `None` when exhausted.
     public next(self): Option[Match] = {
-        if self.offset > self.text.count() then {
-            return Option[Match].None();
+        while self.offset <= self.text.count() then {
+            when Regex.find_at(self.regex, self.offset, self.text) in {
+                .Some(m) then {
+                    if m.start() == m.end() and m.start() == self.prev_end then {
+                        // 紧接上一匹配结束位置的零宽匹配跳过（Go 规则）：
+                        // 步进一个字符后继续找。
+                        self.offset = regex_next_offset(self.text, self.offset);
+                    } else {
+                        if m.end() == self.offset then {
+                            self.offset = regex_next_offset(self.text, self.offset);
+                        } else {
+                            self.offset = m.end();
+                        };
+                        self.prev_end = m.end();
+                        return Option[Match].Some(m);
+                    };
+                },
+                .None() then {
+                    self.offset = self.text.count() + 1;
+                    return Option[Match].None();
+                },
+            };
         };
-        when Regex.find_at(self.regex, self.offset, self.text) in {
-            .Some(m) then {
-                if m.end() == self.offset then {
-                    self.offset = regex_next_offset(self.text, self.offset);
-                } else {
-                    self.offset = m.end();
-                };
-                return Option[Match].Some(m);
-            },
-            .None() then {
-                self.offset = self.text.count() + 1;
-                return Option[Match].None();
-            },
-        };
+        return Option[Match].None();
     };
 };
 
@@ -261,23 +275,29 @@ given CapturesIterator: Iterator[Captures] {
 
     /// Return the next match's captures, resuming after the previous one, or `None`.
     public next(self): Option[Captures] = {
-        if self.offset > self.text.count() then {
-            return Option[Captures].None();
+        while self.offset <= self.text.count() then {
+            when Regex.captures_at(self.regex, self.offset, self.text) in {
+                .Some(c) then {
+                    if c.start() == c.end() and c.start() == self.prev_end then {
+                        // 紧接上一匹配结束位置的零宽匹配跳过（Go 规则）。
+                        self.offset = regex_next_offset(self.text, self.offset);
+                    } else {
+                        if c.end() == self.offset then {
+                            self.offset = regex_next_offset(self.text, self.offset);
+                        } else {
+                            self.offset = c.end();
+                        };
+                        self.prev_end = c.end();
+                        return Option[Captures].Some(c);
+                    };
+                },
+                .None() then {
+                    self.offset = self.text.count() + 1;
+                    return Option[Captures].None();
+                },
+            };
         };
-        when Regex.captures_at(self.regex, self.offset, self.text) in {
-            .Some(c) then {
-                if c.end() == self.offset then {
-                    self.offset = regex_next_offset(self.text, self.offset);
-                } else {
-                    self.offset = c.end();
-                };
-                return Option[Captures].Some(c);
-            },
-            .None() then {
-                self.offset = self.text.count() + 1;
-                return Option[Captures].None();
-            },
-        };
+        return Option[Captures].None();
     };
 };
 

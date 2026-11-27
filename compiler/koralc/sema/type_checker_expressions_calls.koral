@@ -660,11 +660,17 @@ given TypeChecker {
                     ) else Option[Dict[String, Type]].Some(inferred_bindings);
                     when bindings in {
                         .Some(resolved_bindings) then {
-                            let _ = self.report_unbound_generic_params(
+                            // 推断 miss（含自绑 K := K）就到此为止：槽位还没
+                            // 解出来就不再跑约束检查——未代换的裸参数对着约束
+                            // 检查只会产出误报（"K 没有实现 Hash"），真正的
+                            // 病因是推断，上面已经报了。
+                            if not self.report_unbound_generic_params(
                                 template,
                                 resolved_bindings,
                                 callee,
-                            );
+                            ) then {
+                                return;
+                            };
                             for tp in template.type_parameters then {
                                 if resolved_bindings.get(tp.name) is .Some(bound_type) then {
                                     for constraint in tp.constraints then {

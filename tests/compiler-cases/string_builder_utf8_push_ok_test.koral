@@ -1,0 +1,36 @@
+// EXPECT: sb_utf8_push_ok
+// 写入校验的正向面：逐字节构造合法多字节字符（push_rune 的内部形态）不被
+// 误伤；边界 span 与整串追加照常；结果字节精确。
+
+let main(): Int = {
+    // 逐字节构造 2/3/4 字节字符：合法 UTF-8 前缀逐拍成立。
+    let mutable sb = StringBuilder.new();
+    sb.push_byte(195); // é 的引导字节（U+00E9 = C3 A9）
+    sb.push_byte(169);
+    sb.push_byte(228); // 中（U+4E2D = E4 B8 AD）
+    sb.push_byte(184);
+    sb.push_byte(173);
+    sb.push_byte(240); // 🌍（U+1F30D = F0 9F 8C 8D）
+    sb.push_byte(159);
+    sb.push_byte(140);
+    sb.push_byte(141);
+    assert(sb.to_string() == "é中🌍", "byte-by-byte multi-byte build");
+
+    // push_rune 与非法 rune 的替换字符照常。
+    let mutable sb2 = StringBuilder.new();
+    sb2.push_rune('é');
+    sb2.push_rune('中');
+    assert(sb2.to_string() == "é中", "push_rune multi-byte");
+
+    // 整串与边界 span 追加多字节字符串（`0..<n` 半开区间；é 占 0..<2，
+    // 中 占 2..<5，b 占 5..<6）。
+    let mutable sb3 = StringBuilder.new();
+    sb3.push_string("aé中");
+    sb3.push_string("é中b", span = 0..<2); // "é"
+    sb3.push_string("é中b", span = 2..<5); // "中"
+    sb3.push_string("中", span = 0..<0); // 空 span
+    assert(sb3.to_string() == "aé中é中", "spans on rune boundaries");
+
+    println("sb_utf8_push_ok");
+    return 0;
+};

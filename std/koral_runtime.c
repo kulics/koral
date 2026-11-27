@@ -476,25 +476,33 @@ CFile* __koral_stderr(void) {
 
 KORAL_NORETURN void __koral_abort_quiet(void);
 
-// The checked array allocator every `alloc_memory` emits: a size that
-// overflows the address space or cannot be served ends the process cleanly
-// (Rust's `handle_alloc_error`) instead of handing back NULL -- a null or
-// wrapped buffer is memory corruption the moment anything writes through it.
+// The checked allocator every allocation goes through: `alloc_memory`'s
+// emission and every managed reference object (control block + payload) alike.
+// Two failure surfaces, kept distinct the way Rust splits them: capacity
+// arithmetic that overflows -- or asks past Int.max (2^63-1) bytes, the
+// indexing cap -- is a caller bug and panics `capacity overflow`; a size
+// inside the cap that the machine cannot serve panics `oom`. Either way the
+// process ends cleanly instead of handing back NULL -- a null or wrapped
+// buffer is memory corruption the moment anything writes through it.
 void* __koral_alloc_array(uint64_t count, uint64_t elem_size) {
-    uint64_t bytes = 0;
     if (elem_size != 0 && count > (uint64_t)-1 / elem_size) {
-        bytes = (uint64_t)-1; // overflow: force the OOM path below
-    } else {
-        bytes = count * elem_size;
+        __koral_panic_print("capacity overflow", NULL);
+    }
+    uint64_t bytes = count * elem_size;
+    if (bytes > (uint64_t)INT64_MAX) {
+        __koral_panic_print("capacity overflow", NULL);
+    }
+    if (bytes > (uint64_t)SIZE_MAX) {
+        // Inside the cap but past the addressable byte count (32-bit
+        // `size_t`): no allocation this large can ever be served.
+        __koral_panic_print("oom", NULL);
     }
     if (bytes == 0) {
         bytes = 1; // malloc(0) may legally return NULL
     }
     void* p = malloc((size_t)bytes);
     if (p == NULL) {
-        static const char msg[] = "Panic: out of memory\n";
-        fwrite(msg, 1, sizeof(msg) - 1, stderr);
-        __koral_abort_quiet();
+        __koral_panic_print("oom", NULL);
     }
     return p;
 }

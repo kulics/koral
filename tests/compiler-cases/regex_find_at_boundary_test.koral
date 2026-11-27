@@ -1,0 +1,46 @@
+// EXPECT: find_at_boundary_ok
+// find_at/captures_at 的起点必须落在字符边界：起点落在多字节字符中间回
+// None（解不出真码点），边界与越界行为各自明确。
+
+using "std/text" { Regex };
+
+let main(): Int = {
+    // "aé中"：a 占 0..1，é 占 1..3，中 占 3..6。
+    let text = "aé中";
+    let re = Regex.compile("é").expect("compile é");
+    when re.find_at(1, text) in {
+        .Some(m) then assert(m.start() == 1 and m.end() == 3, "boundary start matches"),
+        .None() then assert(false, "boundary start must match"),
+    };
+    when re.find_at(2, text) in {
+        .Some(_) then assert(false, "mid-rune start must be None"),
+        .None() then {},
+    };
+
+    let re2 = Regex.compile("中").expect("compile 中");
+    when re2.find_at(3, text) in {
+        .Some(m) then assert(m.start() == 3 and m.end() == 6, "3-byte boundary matches"),
+        .None() then assert(false, "3-byte boundary must match"),
+    };
+    when re2.find_at(4, text) in {
+        .Some(_) then assert(false, "mid 3-byte must be None"),
+        .None() then {},
+    };
+    when re2.find_at(5, text) in {
+        .Some(_) then assert(false, "mid 3-byte tail must be None"),
+        .None() then {},
+    };
+    when re2.find_at(7, text) in {
+        .Some(_) then assert(false, "past end must be None"),
+        .None() then {},
+    };
+
+    // captures_at 同一条边界规则。
+    when re.captures_at(2, text) in {
+        .Some(_) then assert(false, "captures mid-rune must be None"),
+        .None() then {},
+    };
+
+    println("find_at_boundary_ok");
+    return 0;
+};

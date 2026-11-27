@@ -3927,15 +3927,17 @@ given StringBuilder {
     public count(self): Int;
     /// Whether nothing has been pushed yet.
     public is_empty(self): Bool;
-    /// Append one raw byte to the builder.
-    /// The caller must keep the accumulated bytes valid UTF-8.
+    /// Append one raw byte to the builder. 写入即校验 UTF-8：追加后缓冲
+    /// 必须仍是合法 UTF-8 前缀（尾部允许一个未完字符——`push_rune` 逐字节
+    /// 构造多字节字符），会写坏 UTF-8 的字节立刻 panic。
     /// Every hot field is read before the growth call and re-read only in
     /// the growth path (same shape as `List.push`, std/list.koral).
     public push_byte(self, value: UInt8): Void;
     /// Append `other`, where `span` picks which slice to append, defaulting to
     /// all of it -- the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
-    /// The default span is the whole string and skips range resolution, bounds
-    /// checks and rune-boundary checks entirely.
+    /// 写入即校验 UTF-8：显式 span 必须切在字符边界上，且缓冲尾部不能停在
+    /// 半截字符上——两者任一破坏 UTF-8 都立刻 panic。The default span is
+    /// the whole string and skips range resolution and bounds checks entirely.
     public push_string(self, other: String, span: Range[Int] = ...): Void;
     /// Encode `rune` in UTF-8 and append it, substituting the replacement
     /// character for an invalid rune.

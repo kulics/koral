@@ -3537,6 +3537,32 @@ extension TypeChecker {
     return false
   }
 
+  /// Echo guard for dict targets (mirrors koralc's
+  /// `infer_dict_literal_result_type`): key/value slots that are still generic
+  /// parameters carry no element information -- keeping the echo would
+  /// self-bind the call's `K := K` and make `insert`'s Hash constraint complain
+  /// about the bare parameter ("K does not implement Hash", a false positive).
+  /// Derive both slots from the entries (checked against each other) and keep
+  /// the family; inside a generic body the entries carry the parameter and the
+  /// derivation reproduces the target unchanged.
+  private func dictSlotsFromEntries(
+    _ entries: [(key: ExpressionNode, value: ExpressionNode)],
+    keyType k: Type,
+    valueType v: Type,
+    span: SourceSpan
+  ) throws -> (Type, Type) {
+    guard (context.containsGenericParameter(k) || context.containsGenericParameter(v)),
+          !entries.isEmpty else {
+      return (k, v)
+    }
+    let derivedKey = try inferCommonElementType(elements: entries.map { $0.key }, span: span)
+    let derivedValue = try inferCommonElementType(elements: entries.map { $0.value }, span: span)
+    if !isGenericParameterType(derivedKey), !isGenericParameterType(derivedValue) {
+      return (derivedKey, derivedValue)
+    }
+    return (k, v)
+  }
+
   private func inferCollectionLiteral(
     elements: [ExpressionNode],
     span: SourceSpan,
@@ -3670,14 +3696,15 @@ extension TypeChecker {
     span: SourceSpan,
     expectedType: Type?
   ) throws -> TypedExpressionNode {
-    let keyType: Type
-    let valueType: Type
+    var keyType: Type
+    var valueType: Type
 
     if let expectedType, let target = try classifyCollectionTarget(expectedType, span: span) {
       switch target {
       case .map(let k, let v):
-        keyType = k
-        valueType = v
+        let slots = try dictSlotsFromEntries(entries, keyType: k, valueType: v, span: span)
+        keyType = slots.0
+        valueType = slots.1
         let dictType = genericStructType(template: "Dict", args: [keyType, valueType])
         return try lowerDictLiteral(
           targetType: dictType,
@@ -3687,8 +3714,9 @@ extension TypeChecker {
           span: span
         )
       case .frozenDict(let k, let v):
-        keyType = k
-        valueType = v
+        let slots = try dictSlotsFromEntries(entries, keyType: k, valueType: v, span: span)
+        keyType = slots.0
+        valueType = slots.1
         // Frozen targets build their storage directly from the literal (see
         // `lowerCollectionLiteral`): last-wins duplicate keys fall out of the
         // mutable `Dict` buffer that then freezes.

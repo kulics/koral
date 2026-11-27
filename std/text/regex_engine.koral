@@ -458,6 +458,14 @@ given ReParser {
             if self.ngroups >= 65535 then {
                 return self.fail("Too many capture groups (at most 65535)");
             };
+            // 命名组重名按编译错误收口（否则按名取组拿到哪个是悬案）。
+            if not name.is_empty() then {
+                for existing in self.names then {
+                    if existing == name then {
+                        return self.fail("Duplicate capture group name");
+                    };
+                };
+            };
             self.ngroups += 1;
             self.names.push(name);
             let g = self.ngroups;
@@ -674,13 +682,25 @@ given ReParser {
                     hi = if e == 'n' then 10
                     else if e == 't' then 9 else if e == 'r' then 13 else e.to_uint32();
                 };
-                if self.ignore_case and lo >= 65 and lo <= 90 and hi >= 65 and hi <= 90 then {
-                    b.set_range(lo + 32, hi + 32);
-                };
                 if lo > hi then {
                     return self.fail("Invalid character range");
                 };
                 b.set_range(lo, hi);
+                if self.ignore_case then {
+                    // 大小写折叠在建区时补另一案：区间内大写段镜像出小写段、
+                    // 小写段镜像出大写段（部分重叠的区间各取交集），取反发生
+                    // 在这之后，`[^a-z]` 连同大写一起排掉才是对的。
+                    let u_lo = if lo < 65 then 65 else lo;
+                    let u_hi = if hi > 90 then 90 else hi;
+                    if u_lo <= u_hi then {
+                        b.set_range(u_lo + 32, u_hi + 32);
+                    };
+                    let l_lo = if lo < 97 then 97 else lo;
+                    let l_hi = if hi > 122 then 122 else hi;
+                    if l_lo <= l_hi then {
+                        b.set_range(l_lo - 32, l_hi - 32);
+                    };
+                };
             } else {
                 if self.ignore_case and lo >= 65 and lo <= 90 then {
                     b.set_rune(lo + 32);
@@ -772,15 +792,18 @@ given ReRowPool {
                 slots[k] = src[k];
                 k += 1;
             };
-            return ReSlots(slots, "");
+            return ReSlots(slots, Option[ReSlotRow].None());
         };
-        // 豁免登记（String 恒 UTF-8 的例外）：这里把槽位行（裸 `Int32[]`）
-        // 故意存在 `String` 的字节块里——引擎内部的回收暂存，只为借它的
-        // 单块 RC 存储，从不作为文本暴露（匹配文本一律从 source 切片）。
-        // 替代做法是给槽行单独做受管块类型；在那之前此用途只增不扩散。
+        // 溢出槽行走自己的受管块（ReSlotRow）：一行一块，随结果 RC-0 释放。
+        let block = alloc_memory[Int32](UInt(self.width));
+        let mutable k = 0;
+        while k < self.width then {
+            block[k] = src[k];
+            k += 1;
+        };
         return ReSlots(
             re_blank_slots(),
-            String.from_utf8_ptr_unchecked(src as *UInt8, self.width * 4),
+            Option[ReSlotRow].Some(ReSlotRow(block, self.width)),
         );
     };
 
@@ -1295,9 +1318,14 @@ let re_analyze_start(
                 if cp < 128 then {
                     let i = Int(cp);
                     bits[i >> 3] = bits[i >> 3] | (UInt8(1) << UInt8(i & 7));
+                    // ci 的双案都进起点表（与 re_build_code 的匹配表同规则）。
                     if ci and cp >= 97 and cp <= 122 then {
                         let u = Int(cp - 32);
                         bits[u >> 3] = bits[u >> 3] | (UInt8(1) << UInt8(u & 7));
+                    };
+                    if ci and cp >= 65 and cp <= 90 then {
+                        let l = Int(cp + 32);
+                        bits[l >> 3] = bits[l >> 3] | (UInt8(1) << UInt8(l & 7));
                     };
                 } else {
                     start_hi.set_rune(cp);
@@ -1568,6 +1596,43 @@ let re_build_required(
             };
         };
     };
+    // 必要指令不能在一条路径上被再次到达（自环）：`a+b` 的 a+ 回边让同一
+    // 前缀把必要字节吞任意多次，"可行起点随出现次数严格递增"随即失效，
+    // 每个出现点都要重跑一遍起点推导（长输入退化成平方）。自环的候选在这里
+    // 落选；没有候选幸存的模式走线性 VM。
+    {
+        let mutable seen = List[Bool].new();
+        for _ in 0..<n then seen.push(false);
+        let mutable work = List[Int].new();
+        work.push(req_pc + 1);
+        let mutable loops = false;
+        while not work.is_empty() then {
+            let cur = work.take_at(work.count() - 1);
+            if cur >= n or seen[cur] then {
+                continue;
+            };
+            if cur == req_pc then {
+                loops = true;
+                break;
+            };
+            seen[cur] = true;
+            when insts[cur] in {
+                .Jump(x) then work.push(x),
+                .Split(x, y) then {
+                    work.push(y);
+                    work.push(x);
+                },
+                .Save(_) then work.push(cur + 1),
+                .Bol(_) then work.push(cur + 1),
+                .Eol(_) then work.push(cur + 1),
+                .Match() then {},
+                _ then work.push(cur + 1),
+            };
+        };
+        if loops then {
+            return Option[ReReq].None();
+        };
+    };
     return Option[ReReq].Some(ReReq(req_cp, req_ci, req_pc, eps_from, eps_off));
 };
 
@@ -1614,19 +1679,36 @@ type ReSeed(pc: Int, row: Int);
 /// 16 capture groups, the common case), one packed heap block beyond (the
 /// mainstream per-match shape, Go's `[]int`). Either way exactly one
 /// construction step at the winning match.
-type ReSlots(slots: [34]Int32, spill: String);
+/// 槽位行的受管块：捕获槽的溢出存储（超过内联 16 组的模式用）。曾经把裸
+/// `Int32[]` 行塞进 `String` 的字节块借它的 RC 存储（登记过的 String 恒
+/// UTF-8 豁免）；这是槽行自己的受管块类型，豁免随之撤销。块内容是纯槽值
+/// 数据，构造后只读。
+type unsafe sendable mutable ReSlotRow(data: *mutable Int32, len: Int);
+
+given ReSlotRow: Drop {
+    /// RC-0 时释放槽行块。
+    drop(self): Void = unsafe {
+        dealloc_memory(self.data);
+    };
+};
+
+type ReSlots(slots: [34]Int32, spill: Option[ReSlotRow]);
 
 given ReSlots {
     /// One slot from either storage shape. The inline slots land in a local
     /// first -- indexing the member array in place would take `&self.slots`
     /// and disqualify the borrowed-self convention (see `Captures.slot_at`).
     slot(self, index: Int): Int32 = {
-        if self.spill.count() > 0 then {
-            let p = self.spill.borrow_ptr() as *Int32;
-            return unsafe { p[index] };
+        return when self.spill in {
+            .Some(row) then {
+                let p = row.data;
+                unsafe { p[index] }
+            },
+            .None() then {
+                let s = self.slots;
+                s[index]
+            },
         };
-        let s = self.slots;
-        return s[index];
     };
 };
 
@@ -1654,8 +1736,17 @@ let re_run(
 ): Option[ReSlots] = {
     // A negative start lies outside the search domain: no position can
     // match, mirroring the Option accessors' out-of-domain rule.
-    if offset < 0 then {
+    if offset < 0 or offset > text.count() then {
         return Option[ReSlots].None();
+    };
+    // 起点必须落在字符边界上：续字节开头的偏移解不出真码点，直接不匹配
+    // （与 `String.substring` 的字符边界纪律一致，但这里按 API 约定回
+    // `None` 而不是 panic）。
+    if offset > 0 and offset < text.count() then {
+        let b0 = text[offset];
+        if b0 >= 128 and b0 < 192 then {
+            return Option[ReSlots].None();
+        };
     };
     // With a required literal byte the search goes through the prefilter:
     // enumerate feasible starts at the byte's occurrences and run the
@@ -1725,7 +1816,7 @@ let re_run_scan(
     let pool = scratch.pool;
     clist.clear();
     nlist.clear();
-    let mutable best_caps = ReSlots(re_blank_slots(), "");
+    let mutable best_caps = ReSlots(re_blank_slots(), Option[ReSlotRow].None());
     let mutable matched = false;
 
     let mutable anchor_i = 0;
@@ -1745,12 +1836,13 @@ let re_run_scan(
                     if prog.start_any then {
                         inject = true;
                     } else if pos < text_len then {
-                        let cp = re_rune_at(bp, pos, text_len);
-                        if cp < 128 then {
-                            let i = Int(cp);
+                        let b0 = bp[pos];
+                        if b0 < 128 then {
+                            // 单字节快速路径：首字节即整符，直查位图。
+                            let i = Int(b0);
                             inject = ((prog.start_bits[i >> 3] >> UInt8(i & 7)) & 1) == 1;
                         } else {
-                            inject = re_ranges_cover(prog.start_hi, cp);
+                            inject = re_ranges_cover(prog.start_hi, re_rune_at(bp, pos, text_len));
                         };
                     };
                 },
@@ -1793,14 +1885,26 @@ let re_run_scan(
                     matched = true;
                     cut = true;
                 } else if opc == UInt8(0) and pos < text_len then {
-                    if re_cp_match(code, t.pc, re_rune_at(bp, pos, text_len)) then {
+                    let b0 = bp[pos];
+                    let mutable ok = false;
+                    let mutable step = 0;
+                    if b0 < 128 then {
+                        // 单字节快速路径：首字节 < 128 即整符，直查位图，
+                        // 不走码点解码。
+                        ok = re_bits_match(code.match_bits, t.pc, b0);
+                        step = 1;
+                    } else {
+                        ok = re_cp_match(code, t.pc, re_rune_at(bp, pos, text_len));
+                        step = re_rune_width(b0);
+                    };
+                    if ok then {
                         re_add(
                             code,
                             nmp,
                             ng,
                             bp,
                             text_len,
-                            pos + re_rune_width(bp[pos]),
+                            pos + step,
                             nlist,
                             t.pc + 1,
                             t.row,
@@ -1812,14 +1916,24 @@ let re_run_scan(
                 } else if opc == UInt8(7) and pos < text_len then {
                     // The run consumes one rune and stays; its closure
                     // re-forks the exit at the next boundary.
-                    if re_cp_match(code, Int(code.aux2[t.pc]), re_rune_at(bp, pos, text_len)) then {
+                    let b0 = bp[pos];
+                    let mutable ok = false;
+                    let mutable step = 0;
+                    if b0 < 128 then {
+                        ok = re_bits_match(code.match_bits, Int(code.aux2[t.pc]), b0);
+                        step = 1;
+                    } else {
+                        ok = re_cp_match(code, Int(code.aux2[t.pc]), re_rune_at(bp, pos, text_len));
+                        step = re_rune_width(b0);
+                    };
+                    if ok then {
                         re_add(
                             code,
                             nmp,
                             ng,
                             bp,
                             text_len,
-                            pos + re_rune_width(bp[pos]),
+                            pos + step,
                             nlist,
                             t.pc,
                             t.row,
@@ -1929,9 +2043,24 @@ let re_backtrack(
         let mutable failed = false;
         let opc = code.op[pc];
         if opc == UInt8(0) then {
-            if pos < text_len and re_cp_match(code, pc, re_rune_at(bp, pos, text_len)) then {
-                pos = pos + re_rune_width(bp[pos]);
-                pc = pc + 1;
+            if pos < text_len then {
+                let b0 = bp[pos];
+                let mutable ok = false;
+                let mutable step = 0;
+                if b0 < 128 then {
+                    // 单字节快速路径（同 re_run_scan 的 consume 步）。
+                    ok = re_bits_match(code.match_bits, pc, b0);
+                    step = 1;
+                } else {
+                    ok = re_cp_match(code, pc, re_rune_at(bp, pos, text_len));
+                    step = re_rune_width(b0);
+                };
+                if ok then {
+                    pos = pos + step;
+                    pc = pc + 1;
+                } else {
+                    failed = true;
+                };
             } else {
                 failed = true;
             };
@@ -1964,8 +2093,20 @@ let re_backtrack(
             let exit_pc = Int(code.aux1[pc]);
             let bits_pc = Int(code.aux2[pc]);
             let start = pos;
-            while pos < text_len and re_cp_match(code, bits_pc, re_rune_at(bp, pos, text_len)) then {
-                pos = pos + re_rune_width(bp[pos]);
+            while pos < text_len then {
+                let b0 = bp[pos];
+                if b0 < 128 then {
+                    // 单字节快速路径。
+                    if not re_bits_match(code.match_bits, bits_pc, b0) then {
+                        break;
+                    };
+                    pos = pos + 1;
+                } else {
+                    if not re_cp_match(code, bits_pc, re_rune_at(bp, pos, text_len)) then {
+                        break;
+                    };
+                    pos = pos + re_rune_width(b0);
+                };
             };
             let limit = start;
             if alt_len + (pos - limit) > re_bt_budget() then {
@@ -2081,7 +2222,14 @@ let re_backward_starts(
                 ci += 1;
                 if pc > 0 then {
                     let u = pc - 1;
-                    if re_cp_match(prog.code, u, re_rune_at(bp, i, text_len)) then {
+                    let b0 = bp[i];
+                    let mutable ok = false;
+                    if b0 < 128 then {
+                        ok = re_bits_match(prog.code.match_bits, u, b0);
+                    } else {
+                        ok = re_cp_match(prog.code, u, re_rune_at(bp, i, text_len));
+                    };
+                    if ok then {
                         let t = scratch.bstack_len;
                         bstack[t] = u;
                         scratch.bstack_len = t + 1;
@@ -2150,10 +2298,26 @@ let re_backward_starts(
 /// instruction would consume. Kept as a tight loop so the C compiler can
 /// vectorize the scan -- the per-occurrence work lives in the caller.
 let re_find_occurrence(req: ReReq, bp: *UInt8, text_len: Int, from: Int): Int = unsafe {
+    if req.cp < 128 then {
+        // 单字节快速路径：必要字节是 ASCII 时裸字节扫描即字符扫描（UTF-8
+        // 自同步，ASCII 字节绝不在多字节序列内部），不逐位解码点。ci 的双
+        // 案按折叠等价比较（`h`/`H` 折到同一案，方向无关）。
+        let target = req.cp;
+        let folded = re_fold_cp(req.cp);
+        let mutable q = from;
+        while q < text_len then {
+            let b = UInt32(bp[q]);
+            if b == target or (req.ci and re_fold_cp(b) == folded) then {
+                return q;
+            };
+            q += 1;
+        };
+        return text_len;
+    };
     let mutable q = from;
     while q < text_len then {
         let cp = re_rune_at(bp, q, text_len);
-        if cp == req.cp or (req.ci and re_fold_cp(cp) == re_fold_cp(req.cp)) then {
+        if cp == req.cp then {
             return q;
         };
         q += re_rune_width(bp[q]);

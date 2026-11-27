@@ -1,0 +1,40 @@
+// EXPECT: json_nonascii_ok
+// 非 ASCII 的意外字符走 push_error_char（整符进消息），不再把多字节字符的
+// 碎片字节塞进消息让 to_string 判非法 UTF-8 而 panic。四条报错路径（值起始
+// 处意外字符、串起始处非引号、非法转义、expect_char 的 found）全部整符输出。
+
+using "std/json" { JsonValue };
+
+let main(): Int = {
+    // 2 字节字符：意外字符路径。
+    when JsonValue.parse("é") in {
+        .Ok(_) then assert(false, "é should not parse"),
+        .Error(e) then {
+            assert(e.message().contains("unexpected character 'é'"), "2-byte char in value");
+        },
+    };
+    // 3 字节字符：同一路径，宽度取对。
+    when JsonValue.parse("中") in {
+        .Ok(_) then assert(false, "中 should not parse"),
+        .Error(e) then {
+            assert(e.message().contains("unexpected character '中'"), "3-byte char in value");
+        },
+    };
+    // 对象键起始处非引号：expected '"' 路径。
+    when JsonValue.parse("{é:1}") in {
+        .Ok(_) then assert(false, "bad key should not parse"),
+        .Error(e) then {
+            assert(e.message().contains("expected '\"', found 'é'"), "non-quote key");
+        },
+    };
+    // 非法转义后跟非 ASCII 字符：invalid escape 路径。
+    when JsonValue.parse("\"\\é\"") in {
+        .Ok(_) then assert(false, "bad escape should not parse"),
+        .Error(e) then {
+            assert(e.message().contains("invalid escape sequence '\\é'"), "non-ascii escape");
+        },
+    };
+
+    println("json_nonascii_ok");
+    return 0;
+};

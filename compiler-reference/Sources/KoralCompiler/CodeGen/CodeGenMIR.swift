@@ -433,6 +433,14 @@ final class MIRFunctionCodeEmitter {
         continue
       }
 
+      // 视图返回的函数（结果是裸指针/借用引用）形参按 +0 借入：句柄不归它
+      // 释放，调用方的临时活到语句尾（koralc 的 borrowed-self 约定两半之
+      // 一；另一半在 MIRLowerer 的实参 ownership 选择）。
+      if local.storage == .parameter, mirResultBorrowsArguments(function.returnType) {
+        nonOwning.insert(local.id)
+        continue
+      }
+
       guard let assignedValues = assignedValuesByLocal[local.id], !assignedValues.isEmpty else {
         continue
       }
@@ -1343,7 +1351,7 @@ final class MIRFunctionCodeEmitter {
 
     let envVar = codeGen.nextTempWithInit(
       cType: "struct \(envStructName)*",
-      initExpr: "(struct \(envStructName)*)malloc(sizeof(struct \(envStructName)))"
+      initExpr: "(struct \(envStructName)*)__koral_alloc_array(1, sizeof(struct \(envStructName)))"
     )
     codeGen.addIndent()
     codeGen.appendToBuffer("\(envVar)->__refcount = 1;\n")
@@ -1878,7 +1886,7 @@ final class MIRFunctionCodeEmitter {
       let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(aggregate.type))
       let payloadType = codeGen.managedPayloadTypeName(for: aggregate.type)
       codeGen.addIndent()
-      codeGen.appendToBuffer("\(expression).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(struct \(payloadType))));\n")
+      codeGen.appendToBuffer("\(expression).ptr = __koral_payload_of(__koral_alloc_array(1, sizeof(struct __koral_Control) + sizeof(struct \(payloadType))));\n")
       codeGen.addIndent()
       codeGen.appendToBuffer("__koral_control_of(\(expression).ptr)->strong_count = 1;\n")
       codeGen.addIndent()
@@ -1976,7 +1984,7 @@ final class MIRFunctionCodeEmitter {
         }
       }
       codeGen.addIndent()
-      codeGen.appendToBuffer("\(expression).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(struct \(payloadType))));\n")
+      codeGen.appendToBuffer("\(expression).ptr = __koral_payload_of(__koral_alloc_array(1, sizeof(struct __koral_Control) + sizeof(struct \(payloadType))));\n")
       codeGen.addIndent()
       codeGen.appendToBuffer("__koral_control_of(\(expression).ptr)->strong_count = 1;\n")
       codeGen.addIndent()
@@ -2186,7 +2194,7 @@ final class MIRFunctionCodeEmitter {
     let result = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resultType))
     // Merged layout: allocate control block + payload in one malloc
     codeGen.addIndent()
-    codeGen.appendToBuffer("\(result).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(\(pointeeCType))));\n")
+    codeGen.appendToBuffer("\(result).ptr = __koral_payload_of(__koral_alloc_array(1, sizeof(struct __koral_Control) + sizeof(\(pointeeCType))));\n")
     codeGen.addIndent()
     codeGen.appendToBuffer("__koral_control_of(\(result).ptr)->strong_count = 1;\n")
     codeGen.addIndent()

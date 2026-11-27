@@ -124,7 +124,20 @@ public enum InstantiationKey: Hashable {
 
     /// Key for trait placeholder method instantiation
     case traitMethod(baseType: Type, methodName: String, methodTypeArgs: [Type])
-    
+
+    /// The template identity behind this key (the unified instantiation
+    /// limit's per-template count face); nil where no single template owns it.
+    public var templateDefId: DefId? {
+        switch self {
+        case .structType(let templateDefId, _),
+             .enumType(let templateDefId, _),
+             .function(let templateDefId, _):
+            return templateDefId
+        default:
+            return nil
+        }
+    }
+
     // MARK: - Hashable conformance
     
     public func hash(into hasher: inout Hasher) {

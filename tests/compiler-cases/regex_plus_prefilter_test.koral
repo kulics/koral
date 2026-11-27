@@ -1,0 +1,39 @@
+// EXPECT: plus_prefilter_ok
+// `a+b` 的必要字节是 b：a+ 的回边让 a 不再是安全必要字节（同一前缀可把 a
+// 吞任意多次，「可行起点随出现次数严格递增」失效），候选在这里落选，剩下
+// 的 b 让长的无匹配输入一次线性扫描收工（旧病：每个 a 的出现点都重跑起点
+// 推导，平方级）。没有候选幸存的模式走线性 VM，结果照旧。
+
+using "std/text" { Regex };
+
+let main(): Int = {
+    let mutable s = "a";
+    while s.count() < 100000 then {
+        s = s + s;
+    };
+    let re = Regex.compile("a+b").expect("compile a+b");
+    // 长的无匹配输入：找不到必要字节 b 直接收工（本用例同时是性能钉）。
+    assert(re.matches(s) == false, "long non-matching scan");
+    assert(re.matches("aaab") == true, "still matches");
+    when re.find("q aaab") in {
+        .Some(m) then assert(m.start() == 2 and m.end() == 6, "spans exact"),
+        .None() then assert(false, "must match"),
+    };
+
+    // 带自环的组 + 尾字面量：同样走必要字节。
+    let re2 = Regex.compile("(a*)*b").expect("compile (a*)*b");
+    assert(re2.matches(s) == false, "nested star scan");
+    assert(re2.matches("aaab") == true, "nested star matches");
+
+    // 无安全必要字节的模式走线性 VM，结果照旧。
+    let re3 = Regex.compile("(ab)+").expect("compile (ab)+");
+    assert(re3.matches("abab") == true, "loop group matches");
+    assert(re3.matches("x") == false, "loop group rejects");
+    when re3.find("zababz") in {
+        .Some(m) then assert(m.start() == 1 and m.end() == 5, "loop group spans"),
+        .None() then assert(false, "loop group must match"),
+    };
+
+    println("plus_prefilter_ok");
+    return 0;
+};

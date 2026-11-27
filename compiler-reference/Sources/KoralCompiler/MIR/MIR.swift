@@ -113,6 +113,22 @@ enum MIRFunctionKind {
   case given(type: Type, trait: TypedTraitConformance?)
 }
 
+/// A function whose result is a raw pointer / borrowed reference RETURNS A
+/// VIEW INTO ITS ARGUMENTS' MEMORY. Such a call must pass +0 (borrowed)
+/// handles and the callee must not release them -- koralc's borrowed-self
+/// convention (`codegen_borrowed_self.koral`). Both halves matter: with only
+/// one, the callee releases a consumed handle (or the caller releases a +0
+/// one) and the returned view dangles -- the `TimeZone.offset_at` →
+/// `CString.from_string_unchecked(n).borrow_ptr()` shape.
+func mirResultBorrowsArguments(_ t: Type) -> Bool {
+  switch t {
+  case .pointer, .mutablePointer, .borrowedReference, .mutableBorrowedReference:
+    return true
+  default:
+    return false
+  }
+}
+
 struct MIRFunction {
   let identifier: Symbol
   let parameters: [Symbol]

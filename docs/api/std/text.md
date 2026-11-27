@@ -63,9 +63,12 @@ public type sendable Match;
 public type sendable Captures;
 
 /// Iterator over the successive non-overlapping matches of a regex.
+/// `prev_end` 记住上一匹配的结束位置：紧接其后的零宽匹配跳过（Go 的
+/// `FindAll` 规则），`$` 在 "abc" 上只出一个匹配。
 public type mutable MatchIterator;
 
 /// Iterator over successive matches, each with its capture groups.
+/// `prev_end` 的规则同 `MatchIterator`。
 public type mutable CapturesIterator;
 
 /// Iterator over the text pieces between a regex's matches.
@@ -327,7 +330,9 @@ given Regex {
     /// Return the first match in `text`, recording only the whole match's span.
     /// Returns `None` when the pattern does not match.
     public find(self, text: String): Option[Match];
-    /// Return the first match in `text` starting at byte `offset`.
+    /// Return the first match in `text` starting at byte `offset`. Returns
+    /// `None` when `offset` falls inside a multi-byte character (starts must
+    /// land on rune boundaries).
     public find_at(self, offset: Int, text: String): Option[Match];
 };
 
@@ -342,7 +347,7 @@ given Regex {
     /// Returns `None` when the pattern does not match.
     public captures(self, text: String): Option[Captures];
     /// Return the first match in `text` starting at byte `offset`, with
-    /// all of its capture groups.
+    /// all of its capture groups. Starts must land on rune boundaries.
     public captures_at(self, offset: Int, text: String): Option[Captures];
     /// Return a view over every non-overlapping match in `text`, each with its
     /// capture groups. The view is `Iterable` (`for`, and `lazy()` for
@@ -357,6 +362,7 @@ given Regex {
     /// In `with`, `$0`..`$9` expand to capture groups and `$$` produces a literal `$`.
     public replace(self, text: String, with: String =): String;
     /// Replace every match in `text` with `with`, expanding `$0`..`$9` and `$$` as in `replace`.
+    /// 紧接上一匹配结束位置的零宽匹配跳过（Go 规则），该处字符原样并入。
     public replace_all(self, text: String, with: String =): String;
     /// Replace the first match in `text` by the string `f` builds from it
     /// (the closure sees every capture group). Returns `text` unchanged when
@@ -364,7 +370,8 @@ given Regex {
     /// order as `find_at`'s `offset`.
     public replace_by(self, f: (Captures) -> String, text: String): String;
     /// Replace every match in `text` by the string `f` builds from it.
-    /// Zero-width matches step one rune at a time. The `by` argument leads,
+    /// Zero-width matches step one rune at a time; 紧接上一匹配结束位置的
+    /// 零宽匹配跳过（Go 规则），该处字符原样并入。The `by` argument leads,
     /// `text` trails -- same order as `find_at`'s `offset`.
     public replace_all_by(self, f: (Captures) -> String, text: String): String;
     /// Escape every regex metacharacter in `text`, so it matches literally.

@@ -85,6 +85,124 @@ let merge_concrete_callable_info(
     );
 };
 
+// ── 单态化统一上限 ────────────────────────────────────────────────────────────
+// 泛型多态递归（f 在 `Wrap[Wrap[T]]` 上递归自己）会生成无穷实例化链：
+// f[Int]、f[Wrap[Wrap[Int]]]、…… 编译器必须在统一上限处干净报错，而不是追到
+// 天荒地老。上限取一次实例化的类型实参泛型嵌套深度（引用包装不计入，函数按
+// 参数与返回型取最大）；越过即判为无穷实例化。两个编译器同一阈值、同一文案
+// （种子 Monomorphizer.swift 的 processRequest 同点收口）。
+let mono_instantiation_limit: Int = 128;
+
+/// 一次类型实参的泛型嵌套深度（`Wrap[Wrap[Int]]` = 2）。
+let mono_type_nesting_depth(t: Type): Int = {
+    let mutable max_child = 0;
+    let mutable grows = false;
+    when t in {
+        .GenericStruct(_, args) then {
+            grows = true;
+            for a in args then {
+                let d = mono_type_nesting_depth(a);
+                if d > max_child then {
+                    max_child = d;
+                };
+            };
+        },
+        .GenericEnum(_, args) then {
+            grows = true;
+            for a in args then {
+                let d = mono_type_nesting_depth(a);
+                if d > max_child then {
+                    max_child = d;
+                };
+            };
+        },
+        .TraitObject(_, args, _) then {
+            grows = true;
+            for a in args then {
+                let d = mono_type_nesting_depth(a);
+                if d > max_child then {
+                    max_child = d;
+                };
+            };
+        },
+        .FunctionType(params, ret, _) then {
+            grows = true;
+            max_child = mono_type_nesting_depth(ret);
+            for p in params then {
+                let d = mono_type_nesting_depth(p.param_type);
+                if d > max_child then {
+                    max_child = d;
+                };
+            };
+        },
+        .ForeignFunctionType(params, ret) then {
+            grows = true;
+            max_child = mono_type_nesting_depth(ret);
+            for p in params then {
+                let d = mono_type_nesting_depth(p.param_type);
+                if d > max_child then {
+                    max_child = d;
+                };
+            };
+        },
+        .FixedArrayType(_, inner) then {
+            grows = true;
+            max_child = mono_type_nesting_depth(inner);
+        },
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+        or .MutableBorrowedReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner)
+        or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
+            return mono_type_nesting_depth(inner);
+        },
+        _ then {},
+    };
+    return if grows then 1 + max_child else 0;
+};
+
+/// 一次实例化的实参是否越过统一上限：泛型嵌套深度 > 128，或实例化身份
+/// （修饰名）长过 4096 字符——多态递归的链在实例化里被解析成一串具体
+/// 结构体时，增长都记在修饰名上（种子 Monomorphizer.swift 同尺；种子侧
+/// 另有同模板实例化次数 256 的链长钉，主侧的代换递归兜底先截）。
+let mono_instantiation_key_length_limit: Int = 4096;
+
+let mono_instantiation_growth_exceeded(mono: Monomorphizer, args: List[Type]): Bool = {
+    for a in args then {
+        if mono_type_nesting_depth(a) > mono_instantiation_limit then {
+            return true;
+        };
+        if mono.storage.context.get_layout_key(a).count() > mono_instantiation_key_length_limit then {
+            return true;
+        };
+    };
+    return false;
+};
+
+/// 一个实例化请求携带的全部类型实参（统一上限的检查面）。
+let mono_request_type_args(req: InstantiationRequest): List[Type] = {
+    let mutable out = List[Type].new();
+    when req.kind in {
+        .StructType(_, args) then {
+            for a in args then out.push(a);
+        },
+        .EnumType(_, args) then {
+            for a in args then out.push(a);
+        },
+        .Function(_, args) then {
+            for a in args then out.push(a);
+        },
+        .ExtensionMethod(_, base_type, _, type_args, method_type_args) then {
+            out.push(base_type);
+            for a in type_args then out.push(a);
+            for a in method_type_args then out.push(a);
+        },
+        .TraitMethod(base_type, _, method_type_args) then {
+            out.push(base_type);
+            for a in method_type_args then out.push(a);
+        },
+    };
+    return out;
+};
+
 public let mono_receiver_lookup_type(context: CompilerContext, t: Type): Type = {
     return when t in {
         .OpaqueType(def_id) then {
@@ -1477,6 +1595,13 @@ given Monomorphizer {
             let req = req_opt or else {
                 continue;
             };
+            // 单态化统一上限：实参嵌套过深判为无穷实例化，干净报错收工。
+            if mono_instantiation_growth_exceeded(self, mono_request_type_args(req)) then {
+                self.report_monomorphization_internal_error(
+                    "Maximum instantiation depth exceeded (possible infinite recursion)",
+                );
+                break;
+            };
             let key = req.deduplication_key();
             // removed noisy phase logging
 
@@ -1558,6 +1683,13 @@ given Monomorphizer {
                 };
                 let req = req_opt or else {
                     continue;
+                };
+                // 单态化统一上限（同主循环）。
+                if mono_instantiation_growth_exceeded(self, mono_request_type_args(req)) then {
+                    self.report_monomorphization_internal_error(
+                        "Maximum instantiation depth exceeded (possible infinite recursion)",
+                    );
+                    break;
                 };
                 let key = req.deduplication_key();
                 if self.storage.processed_request_keys.contains(key) then {
@@ -1719,6 +1851,13 @@ given Monomorphizer {
                 };
                 let req = req_opt or else {
                     continue;
+                };
+                // 单态化统一上限（同主循环）。
+                if mono_instantiation_growth_exceeded(self, mono_request_type_args(req)) then {
+                    self.report_monomorphization_internal_error(
+                        "Maximum instantiation depth exceeded (possible infinite recursion)",
+                    );
+                    break;
                 };
                 let key = req.deduplication_key();
                 // removed noisy phase logging

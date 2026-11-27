@@ -1,0 +1,40 @@
+// EXPECT: empty_match_skip_ok
+// 迭代记住上一匹配的结束位置，紧接其后的零宽匹配跳过（Go FindAll 规则）：
+// `$` 在 "abc" 上只出一个匹配；别处的零宽匹配照常。
+
+using "std/text" { Regex };
+
+let main(): Int = {
+    // `$` 在 "abc" 上匹配两次是旧病：结尾零宽之后紧接着的零宽必须跳过。
+    let re = Regex.compile("$").expect("compile $");
+    let mutable count = 0;
+    for m in re.find_all("abc") then {
+        assert(m.start() == 3 and m.end() == 3, "anchor span");
+        count += 1;
+    };
+    assert(count == 1, "find_all once");
+
+    // replace_all 同规则：只替换一次。
+    assert(re.replace_all("abc", with = "X") == "abcX", "replace_all once");
+
+    // 上一匹配结束处的零宽跳过，别处零宽照常：[0:2] 之后 2:2 跳过，3:3 保留。
+    let re2 = Regex.compile("a*").expect("compile a*");
+    let mutable spans = List[String].new();
+    for m in re2.find_all("aab") then {
+        spans.push(m.start().to_string() + ":" + m.end().to_string());
+    };
+    assert(spans.count() == 2, "skip zero-width at prev end");
+    assert(spans[0] == "0:2" and spans[1] == "3:3", "spans");
+
+    // 捕获流同规则："" 处首尾各一，中间的 b 照常，b 后的零宽跳过。
+    let re3 = Regex.compile("(b*)").expect("compile b*");
+    let mutable got = List[String].new();
+    for c in re3.captures_all("abc") then {
+        got.push(c.text());
+    };
+    assert(got.count() == 3, "captures_all skip count");
+    assert(got[0] == "" and got[1] == "b" and got[2] == "", "captures_all values");
+
+    println("empty_match_skip_ok");
+    return 0;
+};
