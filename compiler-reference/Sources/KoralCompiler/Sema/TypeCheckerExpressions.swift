@@ -6174,6 +6174,40 @@ extension TypeChecker {
         // Actually, `ptrExpr.type` should match `[T]Ptr`.
         return .intrinsicCall(.deallocMemory(ptr: ptrExpr))
       }
+      if base == "alloc_block" {
+        // Unified storage block allocation (slice-design): `alloc_block[T](cap)`.
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        let T = resolvedArgs[0]
+
+        guard arguments.count == 1 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 1, got: arguments.count)
+        }
+        let capExpr = try inferTypedExpression(arguments[0])
+        return .intrinsicCall(
+          .allocBlock(cap: capExpr, elemType: T,
+                      resultType: try blockStorageInstance(elemType: T)))
+      }
+      if base == "empty_block" {
+        // Immortal empty block (slice-design): `empty_block[T]()`.
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        guard resolvedArgs.count == 1 else {
+          throw SemanticError.typeMismatch(
+            expected: "1 generic arg", got: "\(resolvedArgs.count)")
+        }
+        let T = resolvedArgs[0]
+
+        guard arguments.count == 0 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 0, got: arguments.count)
+        }
+        return .intrinsicCall(
+          .emptyBlock(resultType: try blockStorageInstance(elemType: T)))
+      }
       if base == "init_memory" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         guard resolvedArgs.count == 1 else {
@@ -9725,13 +9759,13 @@ extension TypeChecker {
           switch resolveBuiltinSubscriptKind(baseType: typedOuterBase.type) {
           case .string:
             throw SemanticError(.generic("String subscript is not addressable"), span: outerBaseExpr.span)
-          case .frozenList, .frozenDict:
+          case .frozenList, .frozenDict, .slice(_, false):
             // Nested write through a frozen subscript is a compile error, same
             // family as the direct case.
             throw SemanticError(.generic(
               "Cannot assign to immutable subscript of type '\(builtinSubscriptBaseType(typedOuterBase.type).description)'"
             ), span: outerBaseExpr.span)
-          case .dict, .list, .deque:
+          case .dict, .list, .deque, .slice(_, true):
             let subscriptValue = try resolveSubscript(base: typedOuterBase, args: typedOuterArgs, span: outerBaseExpr.span)
             if isMutableNominalReceiverType(subscriptValue.type) {
               return subscriptValue
@@ -10206,7 +10240,7 @@ extension TypeChecker {
     // koralc's lower_interpolated_string).
     let bytesType = builtinBytesType()
     guard let wrapMethod = try lookupDeclaredMethod(on: bytesType, name: "wrap") else {
-      throw SemanticError(.generic("Missing method 'wrap' for type 'Bytes'"), span: span)
+      throw SemanticError(.generic("Missing method 'wrap' for type '\(bytesType.description)'"), span: span)
     }
     let bytesAlloc = TypedExpressionNode.intrinsicCall(
       .allocString(len: totalVar, resultType: bytesType)

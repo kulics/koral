@@ -1,0 +1,42 @@
+// EXPECT: PASS
+// retain-first（slice-design §跨用户代码的元素保留）：切片 `contains` 的
+// `equals` 是用户代码——equals 里窗写释放被查元素（槽 0）后，保留形绑定让
+// 被查对象活过整个比较调用。回收探针：无保留形时被释放槽被同尺寸分配复用，
+// `id` 读到回收值（111/222）而比较失真，contains 漏报。
+type mutable Probe(id: Int, view: []mutable Probe);
+
+let empty_window(): []mutable Probe = {
+    return List[Probe].new().into_slice();
+};
+
+given Probe: Eq {
+    equals(self, other: Probe): Bool = {
+        // 任一侧带窗即写槽 0（两侧都持窗时都可作释放通道）。
+        let view = if self.view.count() > 0 then self.view else other.view;
+        if view.count() > 0 then {
+            view[0] = Probe(111, empty_window());
+        };
+        // 同尺寸回收：让被释放槽立刻复用。
+        let junk = Probe(222, empty_window());
+        let result = self.id == other.id;
+        let _ = junk.id;
+        return result;
+    };
+};
+
+let main(): Int = {
+    let xs = List[Probe].new();
+    xs.push(Probe(5, empty_window()));
+    xs.push(Probe(7, empty_window()));
+    let s = xs.into_slice();
+    let probe = Probe(5, s[0..<1]);
+    let found = s.contains(probe);
+    assert(found, "contains must see the element through user equals (retain-first)");
+
+    // 未命中面同样安全（遍历全程保留形）。
+    let other = Probe(9, s[1..<2]);
+    assert(not s.contains(other), "contains miss stays safe");
+
+    println("PASS");
+    return 0;
+};

@@ -483,6 +483,12 @@ final class MIRLowerer {
         return nil
       }
       return mutable ? .mutablePointer(element: resolved) : .pointer(element: resolved)
+    case .slice(let inner, let mutable, let span):
+      // `[]T`/`[]mutable T` (slice-design): synthesize a generic node and
+      // reuse the template-registry path (visibility was gated at sema).
+      return resolveVTableTypeNode(
+        .generic(base: mutable ? "MutSlice" : "Slice", args: [inner], span: span),
+        traitTypeParamSubstitution: traitTypeParamSubstitution)
     case .generic(let base, let args, _):
       let resolvedArgs = args.compactMap {
         resolveVTableTypeNode($0, traitTypeParamSubstitution: traitTypeParamSubstitution)
@@ -2483,6 +2489,10 @@ private final class MIRFunctionBuilder {
         return nil
       }
       return mutable ? .mutablePointer(element: resolved) : .pointer(element: resolved)
+    case .slice(let inner, let mutable, let span):
+      return resolvePatternTypeNode(
+        .generic(base: mutable ? "MutSlice" : "Slice", args: [inner], span: span),
+        substitution: substitution, modulePath: modulePath)
     case .generic(let base, let args, _):
       let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution, modulePath: modulePath) }
       guard resolvedArgs.count == args.count else { return nil }
@@ -4452,6 +4462,10 @@ private final class MIRFunctionBuilder {
       return .allocMemory(count: lowerValue(count), resultType: resultType)
     case .allocString(let len, let resultType):
       return .allocString(len: lowerValue(len), resultType: resultType)
+    case .allocBlock(let cap, let elemType, let resultType):
+      return .allocBlock(cap: lowerValue(cap), elemType: elemType, resultType: resultType)
+    case .emptyBlock(let resultType):
+      return .emptyBlock(resultType: resultType)
     case .deallocMemory(let ptr):
       return .deallocMemory(ptr: lowerValue(ptr))
     case .copyMemory(let dest, let source, let count):

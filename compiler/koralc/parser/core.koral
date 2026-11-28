@@ -1545,7 +1545,21 @@ given Parser {
             .LBracket() then {
                 // 定长数组：`[N]Element`。N 是正整数字面量；元素是其后的完整
                 // 类型，所以 `[2]*Int` 是两个 `*Int`，`*[2]Int` 是数组指针。
+                // 切片窗口（slice-design）：`[]Element` / `[]mutable Element`——
+                // `]` 紧随 `[` 即是切片；`mutable` 在符尾（同 `*mutable` 形）。
                 self.advance();
+                if self.current().kind is .RBracket() then {
+                    self.advance();
+                    let mutable is_mutable = false;
+                    if self.current().kind is .KwMut() then {
+                        self.advance();
+                        is_mutable = true;
+                    };
+                    let inner = self.parse_type() or return;
+                    return .Ok(
+                        TypeNode.Slice(inner, is_mutable, self.span_from_start(start)),
+                    );
+                };
                 let size_token = self.current();
                 if size_token.kind is not .IntegerLiteral(_) then {
                     return .Error(

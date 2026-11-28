@@ -1,0 +1,285 @@
+// ============================================================================
+// 切片与统一存储块（docs/design/slice-design.md）
+// ============================================================================
+// `Block[T]` 是统一存储块的受管名义：`[Control | len | cap | 元素区]`，24B 头、
+// 元素区内联在 payload+16（Koral 类型最大对齐 8；布局契约见 std/koral_runtime.h）。
+// `[]T` / `[]mutable T` 是内建拼写，解析锚定本文件的 `Slice` / `MutSlice` 模板
+// （protected，用户不可名状——拼写本身就是可见性）。
+// ============================================================================
+
+/// 统一存储块（slice-design）。句柄是 payload 地址（&len）；元素区在
+/// `payload + 16`。RC 归零跑元素析构（见 `Drop`）。空块不分配：空 owner/空窗
+/// 持 immortal 空块（strong = weak = -1）。**实现细节**：块是存储表示，
+/// 不是用户面类型（protected，同 `Bytes` 惯例）。
+protected type unsafe sendable mutable Block[T: Any](
+    protected mutable len: Int,
+    protected mutable cap: Int,
+);
+
+/// 块分配（运行时 `__koral_block_alloc`）与 immortal 空块（`__koral_empty_block`）。
+/// 非公开 intrinsic，仅 std 可派发（`let unsafe intrinsic` 契约同 `alloc_bytes`）。
+protected let intrinsic alloc_block[T: Any](cap: Int): Block[T];
+protected let intrinsic empty_block[T: Any](): Block[T];
+
+/// 强引用计数只读观测（运行时 `__koral_strong_count`）：`borrow_slice` 逃逸
+/// 检查用。入参是块 payload（&len）。
+private let unsafe foreign __koral_strong_count(payload: *UInt8): Int32;
+
+/// 块的强引用计数（slice-design §借出的逃逸检查口径）。
+protected let block_strong_count[T: Any](block: Block[T]): Int = unsafe {
+    return Int(__koral_strong_count(&block.len as *UInt8));
+};
+
+given[T: Any] Block[T] {
+    /// 元素区基址：payload + 16（布局契约的 Koral 侧公式，与运行时
+    /// `__koral_block_alloc` 的元素区偏移一致——对齐上限 8）。
+    public elements(self): *mutable T = unsafe {
+        return ((&self.len as *mutable UInt8) + 16) as *mutable T;
+    };
+};
+
+/// `Drop` for `Block[T]`: frees every element when the last handle dies.
+/// 元素释放走「腾位先于释放」的块级形状——len 是可达性边界，RC-0 时块已无他主。
+given[T: Any] Block[T]: Drop {
+    drop(self): Void = unsafe {
+        let base = self.elements();
+        for i in 0..<self.len then {
+            deinit_memory(base + i);
+        };
+    };
+};
+
+/// Adoption of a `Bytes` block as a `String`（slice-design：`Bytes` 是
+/// `Block[UInt8]` 别名，方法挂在泛型模板上——别名到泛型实例不是合法的
+/// `given` 目标）。
+given Block[UInt8] {
+    /// Interpret this block as a `String` holding `len` content bytes: the
+    /// value takes the block over without a copy, as a whole-block window
+    /// (`off` 0). The compiler's interpolation lowering wraps its
+    /// `alloc_bytes` result through here. 挂在具体实例上（`given Block[UInt8]`）：
+    /// String 的字节块就是它，泛型形无法把 Block[T] 交给 Block[UInt8] 形参。
+    public wrap(self, len: Int): String = String(self, UInt32(0), UInt32(len));
+};
+
+/// 只读切片窗口：`[]T`（内建拼写锚定本模板）。24B 值 `{块句柄, off, len}`，
+/// 拷贝 retain 块、drop release（合成字段释放，String 同形）。零拷贝只进不出：
+/// 可逃逸的零拷贝窗只来自写死块 owner 的 `as_slice`；可变 owner 走 `with_slice`
+/// 借出（禁逃逸）或 `into_slice` 消费转移。
+protected type Slice[T: Any](
+    protected block: Block[T],
+    protected off: Int,
+    protected len: Int,
+);
+
+/// 可写切片窗口：`[]mutable T`。与 `Slice[T]` 同表示；单向隐式收窄为 `[]T`
+/// （公理 3 登记例外）。元素写经 `__index_slot` 槽位（存新→释旧）。
+protected type MutSlice[T: Any](
+    protected block: Block[T],
+    protected off: Int,
+    protected len: Int,
+);
+
+/// `[]T` 窗口的一次性游标（slice-design：`iterator` 进迭代管道）。游标持窗口
+/// 副本（拷贝 retain 块）——游标期间块不死；窗口短命政策只约束借出窗。
+protected type mutable SliceIterator[T: Any](source: Slice[T], mutable index: Int);
+
+/// 修改违规 panic（slice-design §修改锁）：自由函数形——内联检查 + 自由 panic
+/// 不带 self 流，borrowed-self/槽装载消去的形状判定不受污染。
+protected let panic_modified_during(operation: String): Never = {
+    panic("List modified during iteration or borrow: \(operation)");
+};
+
+private let panic_slice_index(index: Int, len: Int): Never = {
+    panic("slice index \(index) out of bounds (len \(len))");
+};
+
+private let panic_slice_range(first: Int, second: Int, len: Int): Never = {
+    panic("slice range (\(first), \(second)) out of bounds (len \(len))");
+};
+
+given[T: Any] Slice[T] {
+    /// 窗口基址（std 内部管道用：io 的 syscall 要裸指针）。
+    protected elements(self): *T = unsafe {
+        return self.block.elements() + self.off;
+    };
+
+    public count(self): Int = {
+        return self.len;
+    };
+
+    public is_empty(self): Bool = {
+        return self.len == 0;
+    };
+
+    /// The element at `index`, or `None` when out of bounds.
+    public get(self, index: Int): Option[T] = {
+        if index < 0 or index >= self.len then {
+            return Option[T].None();
+        };
+        return Option[T].Some(unsafe { self.block.elements()[self.off + index] });
+    };
+
+    /// The first element, or `None` when the window is empty.
+    public first(self): Option[T] = self.get(0);
+
+    /// The last element, or `None` when the window is empty.
+    public last(self): Option[T] = {
+        if self.len == 0 then {
+            return Option[T].None();
+        };
+        return self.get(self.len - 1);
+    };
+
+    /// Copy the window out as a fresh mutable `List[T]`（`to_` = 拷贝出口）。
+    public to_list(self): List[T] = {
+        let mutable out = List[T].with_capacity(self.len);
+        for e in self then {
+            out.push(e);
+        };
+        return out;
+    };
+
+    /// Copy the window out as an immutable `FrozenList[T]` snapshot.
+    public to_frozen_list(self): FrozenList[T] = unsafe {
+        let len = self.len;
+        let block = alloc_block[T](len);
+        for i in 0..<len then {
+            init_memory(block.elements() + i, self.block.elements()[self.off + i]);
+        };
+        block.len = len;
+        return FrozenList[T](block);
+    };
+
+    /// 内置下标 `s[i]` 的读侧：值拷贝（保留形）。越界 panic。
+    private __index_get(self, key: Int): T = {
+        if key < 0 or key >= self.len then {
+            panic_slice_index(key, self.len);
+        };
+        return unsafe { self.block.elements()[self.off + key] };
+    };
+
+    /// 内置区间下标 `s[a..<b]`（slice-design 的继续切片）：O(1) 折叠到根块。
+    private __index_range(self, key: Range[Int]): Slice[T] = {
+        let spec = key.resolve_span(self.len);
+        return Slice[T](self.block, self.off + spec.first, spec.second);
+    };
+};
+
+/// Membership on a `Slice[T]` of `Eq` elements.
+given[T: Eq] Slice[T] {
+
+    /// Whether any element equals `value`. O(n).
+    /// retain-first（slice-design §跨用户代码的元素保留）：`equals` 是用户代码，
+    /// 元素先拷成保留形绑定再比较——切片无锁，`s[i] = v` 会释放旧元素，裸别名
+    /// 跨调用即悬垂。绑定只进纯被调才被槽装载消去，用户 `equals` 不纯、副本必留。
+    public contains(self, value: T): Bool = unsafe {
+        let base = self.block.elements();
+        for i in 0..<self.len then {
+            let elem = base[self.off + i];
+            if elem == value then {
+                return true;
+            };
+        };
+        return false;
+    };
+};
+
+given[T: Any] MutSlice[T] {
+    /// 窗口基址（std 内部管道用：io 的 syscall 要裸指针）。
+    protected elements(self): *mutable T = unsafe {
+        return self.block.elements() + self.off;
+    };
+
+    public count(self): Int = {
+        return self.len;
+    };
+
+    public is_empty(self): Bool = {
+        return self.len == 0;
+    };
+
+    /// The element at `index`, or `None` when out of bounds.
+    public get(self, index: Int): Option[T] = {
+        if index < 0 or index >= self.len then {
+            return Option[T].None();
+        };
+        return Option[T].Some(unsafe { self.block.elements()[self.off + index] });
+    };
+
+    /// The first element, or `None` when the window is empty.
+    public first(self): Option[T] = self.get(0);
+
+    /// The last element, or `None` when the window is empty.
+    public last(self): Option[T] = {
+        if self.len == 0 then {
+            return Option[T].None();
+        };
+        return self.get(self.len - 1);
+    };
+
+    /// 内置下标 `s[i]` 的读侧：值拷贝（保留形）。越界 panic。
+    private __index_get(self, key: Int): T = {
+        if key < 0 or key >= self.len then {
+            panic_slice_index(key, self.len);
+        };
+        return unsafe { self.block.elements()[self.off + key] };
+    };
+
+    /// 内置下标 `s[i] = v` 的槽位：元素写走存新→释旧（修改纪律）。
+    private __index_slot(self, key: Int): *mutable T = {
+        if key < 0 or key >= self.len then {
+            panic_slice_index(key, self.len);
+        };
+        return unsafe { self.block.elements() + (self.off + key) };
+    };
+
+    /// 内置区间下标 `s[a..<b]`：O(1) 折叠，保持可写形态。
+    private __index_range(self, key: Range[Int]): MutSlice[T] = {
+        let spec = key.resolve_span(self.len);
+        return MutSlice[T](self.block, self.off + spec.first, spec.second);
+    };
+
+    /// 只读视图（内部委托面：读侧方法体单一真相，`[]mutable T → []T` 同义）。
+    private view(self): Slice[T] = Slice[T](self.block, self.off, self.len);
+
+    /// Copy the window out as a fresh mutable `List[T]`（`to_` = 拷贝出口）。
+    public to_list(self): List[T] = self.view().to_list();
+
+    /// Copy the window out as an immutable `FrozenList[T]` snapshot.
+    public to_frozen_list(self): FrozenList[T] = self.view().to_frozen_list();
+};
+
+/// Membership on a `MutSlice[T]` of `Eq` elements.
+given[T: Eq] MutSlice[T] {
+
+    /// Whether any element equals `value`. O(n). retain-first 同 `Slice.contains`。
+    public contains(self, value: T): Bool = self.view().contains(value);
+};
+
+/// `Iterator` for `SliceIterator[T]`: yields window elements from index 0 upward.
+given[T: Any] SliceIterator[T]: Iterator[T] {
+
+    /// Return the next element, or `None` once the cursor has walked the window.
+    public next(self): Option[T] = {
+        if self.index >= self.source.len then {
+            return Option[T].None();
+        };
+        let value = unsafe { self.source.block.elements()[self.source.off + self.index] };
+        self.index = self.index + 1;
+        return Option[T].Some(value);
+    };
+};
+
+/// `Iterable` for `Slice[T]`: a fresh read cursor over the window.
+given[T: Any] Slice[T]: Iterable[T, SliceIterator[T]] {
+
+    /// A fresh cursor from index 0; the window itself is left untouched.
+    public iterator(self): SliceIterator[T] = SliceIterator[T](self, 0);
+};
+
+/// `Iterable` for `MutSlice[T]`: 游标持只读窗口副本（收窄视图）。
+given[T: Any] MutSlice[T]: Iterable[T, SliceIterator[T]] {
+
+    /// A fresh cursor from index 0; the window itself is left untouched.
+    public iterator(self): SliceIterator[T] = SliceIterator[T](self.view(), 0);
+};

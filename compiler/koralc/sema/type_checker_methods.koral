@@ -9,6 +9,8 @@ private type BuiltinSubscriptKind {
     FrozenDict(key: Type, value: Type),
     Pointer(element: Type, is_mutable: Bool),
     FixedArray(len: Int, inner: Type),
+    /// 切片窗口（slice-design）：`[]T` / `[]mutable T`，std 的 Slice/MutSlice。
+    Slice(element: Type, is_mutable: Bool),
 };
 
 given TypeChecker {
@@ -243,6 +245,22 @@ given TypeChecker {
             if args is [key, value] then {
                 return Option[BuiltinSubscriptKind].Some(
                     BuiltinSubscriptKind.FrozenDict(key, value),
+                );
+            };
+        };
+        if self.is_std_type(unwrapped, "Slice") then {
+            let args = self.std_type_arguments(unwrapped);
+            if args is [element] then {
+                return Option[BuiltinSubscriptKind].Some(
+                    BuiltinSubscriptKind.Slice(element, false),
+                );
+            };
+        };
+        if self.is_std_type(unwrapped, "MutSlice") then {
+            let args = self.std_type_arguments(unwrapped);
+            if args is [element] then {
+                return Option[BuiltinSubscriptKind].Some(
+                    BuiltinSubscriptKind.Slice(element, true),
                 );
             };
         };
@@ -659,7 +677,7 @@ given TypeChecker {
                         Option[Type].Some(Type.ReferenceType(Type.UInt8Type())),
                     )
                 },
-                .Dict(_, _) or .List(_) or .Deque(_) then {
+                .Dict(_, _) or .List(_) or .Deque(_) or .Slice(_, true) then {
                     // The element slot is addressable storage (the container's
                     // own), so a reference to it is fine -- unlike a get result
                     // copy.
@@ -673,6 +691,21 @@ given TypeChecker {
                         Type.ReferenceType(slot_place.expr_type),
                     );
                     self.adapt_expr_to_expected_type(slot_place, expected_ref_type)
+                },
+                .Slice(_, false) then {
+                    // 只读切片的下标是值拷贝（`__index_get` 路径），不是可寻址位点
+                    // ——与 Frozen 同待遇（slice-design）。
+                    self.push_diagnostic_at_span(
+                        "Slice subscript is not addressable",
+                        self.typed_expr_span(base),
+                    );
+                    make_typed_expr(
+                        TypedExprKind.Block(
+                            List[TypedStatement].new(),
+                            Option[TypedExpr].None(),
+                        ),
+                        Type.Unknown(),
+                    )
                 },
                 .FrozenList(_) or .FrozenDict(_, _) then {
                     // A frozen subscript yields a value copy (the read-only

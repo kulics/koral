@@ -1375,6 +1375,20 @@ given MIRLowerer {
                 if is_mutable then Type.MutablePointerType(resolved_inner)
                 else Type.PointerType(resolved_inner)
             },
+            .Slice(inner, is_mutable, span) then {
+                // `[]T`/`[]mutable T`：合成 Generic 节点复用模板解析路径
+                // （可见性已由 sema 上游把关，MIR 层只求身份正确）。
+                let mutable slice_args = List[TypeNode].new();
+                slice_args.push(inner);
+                self.resolve_trait_type_node_with_bindings(
+                    TypeNode.Generic(
+                        if is_mutable then "MutSlice" else "Slice",
+                        slice_args,
+                        span,
+                    ),
+                    bindings,
+                )
+            },
             .WeakReference(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_trait_type_node_with_bindings(
                     inner,

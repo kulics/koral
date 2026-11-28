@@ -198,7 +198,7 @@ given StdinPipe {
 /// Writer conformance: sends bytes to the child process's stdin.
 given StdinPipe: Writer {
     /// Write data to the child process stdin.
-    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public write(self, from: []UInt8 =): Result[Int];
     /// Flush is a no-op for pipes (data is already in kernel buffer).
     public flush(self): Result[Void];
 };
@@ -212,7 +212,7 @@ given StdoutPipe {
 /// Reader conformance: reads bytes from the child process's stdout.
 given StdoutPipe: Reader {
     /// Read data from the child process stdout.
-    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public read(self, into: []mutable UInt8 =): Result[Int];
 };
 
 /// Access the pipe's underlying file descriptor.
@@ -224,7 +224,7 @@ given StderrPipe {
 /// Reader conformance: reads bytes from the child process's stderr.
 given StderrPipe: Reader {
     /// Read data from the child process stderr.
-    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public read(self, into: []mutable UInt8 =): Result[Int];
 };
 
 /// Wait for the child to exit, capture its output, and take ownership of its pipes.

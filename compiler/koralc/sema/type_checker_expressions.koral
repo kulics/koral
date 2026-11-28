@@ -2708,6 +2708,23 @@ given TypeChecker {
                         _ then {},
                     };
                 },
+                .GenericStruct(_, _) then {
+                    // `[]mutable T` → `[]T` 单向能力收窄（slice-design，公理 3
+                    // 登记例外）：与 `*mutable` → `*` 同形。落 CastExpr——codegen
+                    // 发「位拷 + 目标拷贝语义（retain 块字段）」：C 不允许结构体
+                    // 值转换，两同布局 struct 借目标拷贝函数的指针强转（见
+                    // emit_cast_operand 的结构体族分支）。
+                    if self.slice_window_narrowing_match(
+                        expected_type,
+                        expr.expr_type,
+                    ) then {
+                        adapted = make_typed_expr(
+                            TypedExprKind.CastExpr(expected_type, expr),
+                            expected_type,
+                        );
+                        return adapted;
+                    };
+                },
                 _ then {
                     // Swift-aligned rule: implicit auto-deref from ref/pointer to value
                     // is not allowed in general expression adaptation. Method receivers

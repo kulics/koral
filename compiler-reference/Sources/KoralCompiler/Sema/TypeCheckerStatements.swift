@@ -5,6 +5,15 @@ import Foundation
 
 extension TypeChecker {
 
+  private func isValueNominalSubscriptBase(_ type: Type) -> Bool {
+    switch type {
+    case .structure, .genericStruct:
+      return context.nominalLayoutKind(for: type) == .value
+    default:
+      return false
+    }
+  }
+
   private func sourceOptionalExpressionIsPureStatement(_ expr: ExpressionNode?) -> Bool {
     guard let expr else { return true }
     return sourceExpressionIsObviouslyPureStatement(expr)
@@ -342,13 +351,13 @@ extension TypeChecker {
       switch resolveBuiltinSubscriptKind(baseType: typedOuterBase.type) {
       case .string:
         throw SemanticError(.generic("String subscript is not addressable"), span: outerBaseExpr.span)
-      case .frozenList, .frozenDict:
+      case .frozenList, .frozenDict, .slice(_, false):
         // Nested write through a frozen subscript is a compile error, same
         // family as the direct case.
         throw SemanticError(.generic(
           "Cannot assign to immutable subscript of type '\(builtinSubscriptBaseType(typedOuterBase.type).description)'"
         ), span: outerBaseExpr.span)
-      case .dict, .list, .deque:
+      case .dict, .list, .deque, .slice(_, true):
         let subscriptValue = try resolveSubscript(base: typedOuterBase, args: typedOuterArgs, span: outerBaseExpr.span)
         if isMutableNominalReceiverType(subscriptValue.type) {
           return subscriptValue
@@ -664,6 +673,12 @@ extension TypeChecker {
             if isMutableNominalReceiverType(typedBase.type) {
               baseStoredExpr = typedBase
               baseStoredType = typedBase.type
+            } else if isValueNominalSubscriptBase(typedBase.type) {
+              // 值型名义接收者（slice-design 的 MutSlice 等）：槽位写走
+              // `__index_slot`，接收者按值暂存即可——包成引用会把值型误作
+              // 受管句柄（C 层 `__koral_Ref` 赋值错型）。
+              baseStoredExpr = typedBase
+              baseStoredType = typedBase.type
             } else if !isAddressableForReference(typedBase) {
               throw SemanticError.invalidOperation(
                 op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
@@ -837,14 +852,14 @@ extension TypeChecker {
         switch resolveBuiltinSubscriptKind(baseType: typedBase.type) {
         case .string:
           throw SemanticError(.generic("String subscript returns a UInt8 value and cannot be assigned"), span: span)
-        case .frozenList, .frozenDict:
+        case .frozenList, .frozenDict, .slice(_, false):
           // A frozen subscript is read-only by construction (no
           // `__index_slot`), same diagnostic family as immutable field
           // assignment.
           throw SemanticError(.generic(
             "Cannot assign to immutable subscript of type '\(builtinSubscriptBaseType(typedBase.type).description)'"
           ), span: span)
-        case .list(let element), .deque(let element):
+        case .list(let element), .deque(let element), .slice(let element, true):
           expectedValueType = element
         case .dict(_, let element):
           expectedValueType = element
@@ -887,7 +902,13 @@ extension TypeChecker {
           if isMutableNominalReceiverType(typedBase.type) {
             baseStoredExpr = typedBase
             baseStoredType = typedBase.type
-          } else if !isAddressableForReference(typedBase) {
+          } else if isValueNominalSubscriptBase(typedBase.type) {
+              // 值型名义接收者（slice-design 的 MutSlice 等）：槽位写走
+              // `__index_slot`，接收者按值暂存即可——包成引用会把值型误作
+              // 受管句柄（C 层 `__koral_Ref` 赋值错型）。
+              baseStoredExpr = typedBase
+              baseStoredType = typedBase.type
+            } else if !isAddressableForReference(typedBase) {
             throw SemanticError.invalidOperation(
               op: "implicit ref", type1: typedBase.type.description, type2: "rvalue")
           } else {

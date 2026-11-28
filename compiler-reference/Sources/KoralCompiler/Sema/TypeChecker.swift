@@ -1930,21 +1930,89 @@ public class TypeChecker {
   }
 
   func builtinBytesType() -> Type {
-    // A compiler-synthesized handle: the interpolation lowering names `Bytes`
-    // like the standard library's own code. `Bytes` is `protected`, so the
-    // user file's access filter (§3.3) hides it -- resolve past the filter.
-    if let bytesType = currentScope.lookupTypeIgnoringAccess("Bytes") {
-      return bytesType
+    // `Bytes` is an alias of `Block[UInt8]` (slice-design). An alias lookup
+    // hands back a placeholder rather than the instance (the method-lookup
+    // key then misses), so build the `Block[UInt8]` instance directly.
+    return (try? blockStorageInstance(elemType: .uint8)) ?? .void
+  }
+
+  /// `[]T` / `[]mutable T` (slice-design): the builtin spelling anchors std's
+  /// `Slice` / `MutSlice` templates (`protected`, unnameable -- the spelling
+  /// IS the visibility). Same anchoring shape as `builtinBytesType`; the
+  /// instantiation runs the generic arm's arity/constraint checks but skips
+  /// the visibility gate (syntax authorizes).
+  func sliceWindowInstance(resolvedInner: Type, isMutable: Bool, span: SourceSpan) throws -> Type {
+    let baseName = isMutable ? "MutSlice" : "Slice"
+    guard let templateDefId = stdStructTemplateDefId(baseName),
+          let info = defIdMap.getGenericStructTemplateInfo(templateDefId) else {
+      throw SemanticError(.generic("Undefined type: \(baseName)"), span: span)
     }
-    // Fallback: std should normally define `type mutable Bytes(...)`.
-    let defId = getOrAllocateTypeDefId(
-      name: "Bytes",
-      kind: .structure,
-      access: .internal,
-      modulePath: [],
-      sourceFile: ""
-    )
-    return .structure(defId: defId)
+    let template = GenericStructTemplate(
+      defId: templateDefId, typeParameters: info.typeParameters,
+      parameters: info.parameters, isMutable: info.isMutable)
+    let resolvedArgs = [resolvedInner]
+    guard template.typeParameters.count == resolvedArgs.count else {
+      throw SemanticError.typeMismatch(
+        expected: "\(template.typeParameters.count) generic arguments",
+        got: "\(resolvedArgs.count)"
+      )
+    }
+    if !deferGenericConstraintValidation {
+      try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+    }
+    if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
+      recordInstantiation(InstantiationRequest(
+        kind: .structType(template: template, args: resolvedArgs),
+        sourceLine: currentLine,
+        sourceFileName: currentFileName
+      ))
+    }
+    return .genericStruct(templateDefId: template.defId, args: resolvedArgs)
+  }
+
+  /// Slice-window template identity (slice-design): is `defId` std's
+  /// `Slice` / `MutSlice` template? Identity is the DefId; the name only
+  /// anchors this lookup.
+  func isSliceWindowTemplate(_ defId: DefId, isMutable: Bool) -> Bool {
+    let baseName = isMutable ? "MutSlice" : "Slice"
+    return stdStructTemplateDefId(baseName) == defId
+  }
+
+  /// std 根模块的泛型结构模板 DefId（slice-design 的 Block/Slice/MutSlice 与
+  /// Bytes 别名目标）。裸名查找漏 protected 模板（会静默落到 `.invalid`），
+  /// 故走模块限定查找——与 `stdListTemplateDefId` 同一机制。
+  private func stdStructTemplateDefId(_ name: String) -> DefId? {
+    defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: name)
+  }
+
+  /// `Block[T]` (slice-design unified storage block): std's `Block` template
+  /// instance. Same anchoring shape as `sliceWindowInstance`.
+  func blockStorageInstance(elemType: Type) throws -> Type {
+    guard let templateDefId = stdStructTemplateDefId("Block"),
+          let info = defIdMap.getGenericStructTemplateInfo(templateDefId) else {
+      throw SemanticError(.generic("Undefined type: Block"), span: currentSpan)
+    }
+    let template = GenericStructTemplate(
+      defId: templateDefId, typeParameters: info.typeParameters,
+      parameters: info.parameters, isMutable: info.isMutable)
+    let resolvedArgs = [elemType]
+    guard template.typeParameters.count == resolvedArgs.count else {
+      throw SemanticError.typeMismatch(
+        expected: "\(template.typeParameters.count) generic arguments",
+        got: "\(resolvedArgs.count)"
+      )
+    }
+    if !deferGenericConstraintValidation {
+      try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+    }
+    if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
+      recordInstantiation(InstantiationRequest(
+        kind: .structType(template: template, args: resolvedArgs),
+        sourceLine: currentLine,
+        sourceFileName: currentFileName
+      ))
+    }
+    return .genericStruct(templateDefId: template.defId, args: resolvedArgs)
   }
 
   /// Infer the type of a rune literal. Default is Rune; coercion to UInt8 happens in coerceLiteral.

@@ -496,6 +496,12 @@ extension TypeChecker {
       return nil
 
     case .genericStruct(let tplDefId, let args):
+      // Instance-scoped slots (`given Block[UInt8] { … }`) answer first and for
+      // exactly this instantiation -- the same order the ordinary member
+      // lookup uses (visibleDeclaredMethod).
+      if let sym = try visibleDeclaredMethod(on: selfType, name: name) {
+        return sym
+      }
       if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
          let ext = extensions.first(where: { $0.method.name == name && extensionTemplateFaceAllows($0) })
       {
@@ -1553,6 +1559,8 @@ extension TypeChecker {
     case frozenDict(key: Type, value: Type)
     case pointer(element: Type, mutable: Bool)
     case fixedArray(size: Int64, element: Type)
+    /// Slice windows (slice-design): std's `Slice` / `MutSlice`.
+    case slice(element: Type, mutable: Bool)
   }
 
   func builtinSubscriptBaseType(_ type: Type) -> Type {
@@ -1596,6 +1604,12 @@ extension TypeChecker {
         if context.isStdNominal(defId, context.stdFrozenDictTemplateDefId), typeArgs.count == 2 {
           return .frozenDict(key: typeArgs[0], value: typeArgs[1])
         }
+        if context.isStdNominal(defId, context.stdSliceTemplateDefId), typeArgs.count == 1 {
+          return .slice(element: typeArgs[0], mutable: false)
+        }
+        if context.isStdNominal(defId, context.stdMutSliceTemplateDefId), typeArgs.count == 1 {
+          return .slice(element: typeArgs[0], mutable: true)
+        }
       }
       return nil
     case .genericStruct(let templateDefId, let args):
@@ -1613,6 +1627,12 @@ extension TypeChecker {
       }
       if context.isStdNominal(templateDefId, context.stdFrozenDictTemplateDefId), args.count == 2 {
         return .frozenDict(key: args[0], value: args[1])
+      }
+      if context.isStdNominal(templateDefId, context.stdSliceTemplateDefId), args.count == 1 {
+        return .slice(element: args[0], mutable: false)
+      }
+      if context.isStdNominal(templateDefId, context.stdMutSliceTemplateDefId), args.count == 1 {
+        return .slice(element: args[0], mutable: true)
       }
       return nil
     case .pointer(let element):
@@ -1903,7 +1923,7 @@ extension TypeChecker {
       switch expectedType {
       case .reference, .mutableReference:
         switch builtinKind {
-        case .pointer, .list, .deque, .dict:
+        case .pointer, .list, .deque, .dict, .slice(_, true):
           // The element slot is addressable storage (the container's own), so
           // a reference to it is fine -- unlike a get result copy.
           break
@@ -1913,7 +1933,7 @@ extension TypeChecker {
           break
         case .string:
           throw SemanticError(.generic("Collection subscript results are values, not addressable references"), span: currentSpan)
-        case .frozenList, .frozenDict:
+        case .frozenList, .frozenDict, .slice(_, false):
           // A frozen subscript yields a value copy (the read-only
           // `__index_get` path) and is never an addressable place -- same
           // treatment as `String`, without the borrow.
@@ -1929,6 +1949,15 @@ extension TypeChecker {
       return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
     case .frozenList, .frozenDict:
       // Read-only subscript: the `__index_get` value path, same as `String`.
+      return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
+    case .slice(let element, _):
+      // `s[i]` / `s[a..<b]` (slice-design): the key's type picks the helper.
+      _ = element
+      if args.count == 1,
+         case .genericEnum(let rangeDef, _) = args[0].type,
+         context.isStdNominal(rangeDef, context.stdRangeTemplateDefId) {
+        return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_range")
+      }
       return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
     case .list, .deque, .dict:
       return try buildBuiltinSubscriptSlotPlace(base: base, args: args)
@@ -2017,7 +2046,7 @@ extension TypeChecker {
   // same-named declaration, which the dispatch must not hijack. Mirrored in
   // koralc's `nonpublic_intrinsic_names_contain`.
   private static let nonpublicIntrinsicNames: Set<String> = [
-    "alloc_bytes", "spawn_thread",
+    "alloc_bytes", "spawn_thread", "alloc_block", "empty_block",
   ]
 
   func checkIntrinsicCall(name: String, arguments: [ExpressionNode]) throws

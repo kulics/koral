@@ -191,18 +191,16 @@ given[W: Writer] BufWriter[W] {
 given[W: Writer] BufWriter[W]: Writer {
 
     /// Writes data from `from[span]` into the internal buffer, auto-flushing when full, and returns the count written.
-    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int] = {
-        let span = span.resolve_span(from.count());
-        let start = span.first;
-        let end = span.first + span.second;
-        let available = span.second;
+    public write(self, from: []UInt8 =): Result[Int] = {
+        let start = 0;        let end = from.count();
+        let available = end - start;
         if available == 0 then {
             return Result[Int].Ok(0);
         };
 
         let remaining_cap = self.cap - self.buf.count();
         if available <= remaining_cap then {
-            unsafe { push_byte_slice(self.buf, from.borrow_ptr() + start, available) };
+            unsafe { push_byte_slice(self.buf, from.elements() + start, available) };
             return Result[Int].Ok(available);
         };
 
@@ -217,11 +215,11 @@ given[W: Writer] BufWriter[W]: Writer {
 
         let new_remaining = self.cap - self.buf.count();
         if available <= new_remaining then {
-            unsafe { push_byte_slice(self.buf, from.borrow_ptr() + start, available) };
+            unsafe { push_byte_slice(self.buf, from.elements() + start, available) };
             return Result[Int].Ok(available);
         };
 
-        let direct_result = self.inner.write_all(from = from, span = start..<end);
+        let direct_result = self.inner.write_all(from = from[start..<end]);
         when direct_result in {
             .Ok(_) then {
                 return Result[Int].Ok(available);
@@ -242,7 +240,8 @@ given[W: Writer] BufWriter[W]: Writer {
         let mutable start = 0;
         let mutable outcome: Result[Void] = Result[Void].Ok({});
         while start < total then {
-            when self.inner.write(from = self.buf, span = start..<total) in {
+            let lo = start;
+                when self.buf.borrow_slice((s) => self.inner.write(from = s[lo..<total])) in {
                 .Ok(n) then {
                     if n == 0 then {
                         outcome = Result[Void].Error(IoError.WriteZero());

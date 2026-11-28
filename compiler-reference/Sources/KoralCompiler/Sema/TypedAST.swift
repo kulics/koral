@@ -357,6 +357,10 @@ public indirect enum TypedIntrinsic {
   // Memory Management
   case allocMemory(count: TypedExpressionNode, resultType: Type)
   case allocString(len: TypedExpressionNode, resultType: Type)
+  /// Unified storage block allocation: `alloc_block[T](cap)` (slice-design).
+  case allocBlock(cap: TypedExpressionNode, elemType: Type, resultType: Type)
+  /// Immortal empty block: `empty_block[T]()` (slice-design; no allocation).
+  case emptyBlock(resultType: Type)
   case deallocMemory(ptr: TypedExpressionNode)
   case copyMemory(
     dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
@@ -382,7 +386,8 @@ public indirect enum TypedIntrinsic {
 
   public var type: Type {
     switch self {
-    case .allocMemory(_, let resultType), .allocString(_, let resultType): return resultType
+    case .allocMemory(_, let resultType), .allocString(_, let resultType),
+         .allocBlock(_, _, let resultType), .emptyBlock(let resultType): return resultType
     case .deallocMemory: return .void
     case .copyMemory: return .void
     case .moveMemory: return .void

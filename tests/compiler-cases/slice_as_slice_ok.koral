@@ -1,0 +1,35 @@
+// EXPECT: PASS
+// as_slice（slice-design §来源与转换）：写死块 owner 的零拷贝只读窗口——
+// String / CString / FrozenList 三面；`[]mutable T` 隐式收窄到 `[]T` 可用。
+let read_only(s: []UInt8): Int = {
+    return s.count();
+};
+
+let main(): Int = {
+    let str = "hello";
+    let ws = str.as_slice();
+    if ws.count() != 5 then {
+        println("FAIL string window");
+        return 1;
+    };
+    if ws[1] != 101 then {
+        println("FAIL string byte");
+        return 1;
+    };
+    let mut = List[UInt8].new();
+    mut.push(7);
+    mut.push(8);
+    let fs = mut.to_frozen_list().as_slice();
+    if read_only(fs) != 2 or fs[0] != 7 then {
+        println("FAIL frozen window");
+        return 1;
+    };
+    // 再切片折叠 + 收窄：
+    let sub = ws[1..<3];
+    if sub.count() != 2 or sub[0] != 101 then {
+        println("FAIL subslice");
+        return 1;
+    };
+    println("PASS");
+    return 0;
+};

@@ -606,6 +606,13 @@ public final class CompilerContext: @unchecked Sendable {
     public var stdFrozenDictTemplateDefId: DefId? {
         defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "FrozenDict")
     }
+    /// Slice windows (slice-design): std's `Slice` / `MutSlice` templates.
+    public var stdSliceTemplateDefId: DefId? {
+        defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "Slice")
+    }
+    public var stdMutSliceTemplateDefId: DefId? {
+        defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "MutSlice")
+    }
     /// `Range` is a generic ENUM in std, so it lives in the enum-template table.
     public var stdRangeTemplateDefId: DefId? {
         defIdMap.lookupGenericEnumTemplateDefId(modulePath: ["Std"], name: "Range")

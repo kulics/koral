@@ -1361,6 +1361,21 @@ given CstParser {
         // TOKEN is `Unexpected token: X, expected: an integer array size`.
         if self.check(.LBracket()) then {
             let lb = self.eat();
+            // 切片窗口：`[]T` / `[]mutable T`（slice-design）——`]` 紧随 `[`；
+            // `mutable` 走 `Mutable` 包装（同 `*mutable` 形）。
+            if self.check(.RBracket()) then {
+                let rb = self.eat();
+                let mutable mut_kw = Option[Token].None();
+                if self.check(.KwMut()) then {
+                    mut_kw = .Some(self.eat());
+                };
+                let element = self.parse_type_node() or return;
+                let slice = CstType.Slice(lb, rb, element);
+                if mut_kw is .Some(mk) then {
+                    return .Ok(.Mutable(slice, mk));
+                };
+                return .Ok(slice);
+            };
             let len = self.peek();
             let mutable size_ok = false;
             when len in {
@@ -2875,6 +2890,7 @@ given CstParser {
         .Function(_, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
         .ForeignFunction(_, _, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
         .FixedArray(_, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
+        .Slice(_, _, _) then .Ident(Token.Ident(type_to_string(t))),
     };
 
     private parse_paren_or_lambda(self): Result[CstExpr] = {

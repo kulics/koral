@@ -240,6 +240,15 @@ extension TypeChecker {
           break
         }
       }
+    case .slice(let inner, mutable: let mutable, span: _):
+      // `[]T`/`[]mutable T` (slice-design): the same rule the generic arm
+      // uses -- the spelling resolves to its declaration, identity is DefId.
+      let base = mutable ? "MutSlice" : "Slice"
+      if case .genericStruct(let tplDefId, let typeArgs) = type,
+         currentScope.lookupGenericStructTemplate(base)?.defId == tplDefId,
+         typeArgs.count == 1 {
+        try unify(node: inner, type: typeArgs[0], inferred: &inferred, typeParams: typeParams)
+      }
     case .generic(let base, let args, _):
       // `base` is a SOURCE SPELLING: resolve it to its declaration once here,
       // then the two sides compare as identities.

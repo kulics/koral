@@ -1,0 +1,40 @@
+// EXPECT: PASS
+// BufReader 帧（slice-design §BufReader 帧）：`read_frame` 交出缓冲的零拷贝
+// 窗口（帧 retain 块），Go 静默契约——帧在下一次读取前有效，过期读到陈旧
+// 字节（唯一结局）。回归钉看住"不悬垂、只陈旧"：过期后帧窗只打自身 len，
+// 读到的是块内合法字节。
+using "std/io" { ... };
+
+let main(): Int = {
+    let src = ByteBuffer.from_string("abcdefghij");
+    let r = BufReader[ByteBuffer].with_capacity(4, src);
+
+    let frame = r.read_frame();
+    assert(frame.count() == 4, "frame len");
+    assert(frame[0] == 97, "frame first byte");
+
+    // 消费 + 再读：缓冲压实/翻新，帧过期。
+    let _ = r.read_byte() or else { panic("read_byte") };
+    let _ = r.read_byte() or else { panic("read_byte") };
+    let _ = r.read_byte() or else { panic("read_byte") };
+    let _ = r.read_byte() or else { panic("read_byte") };
+    let _ = r.read_byte() or else { panic("read_byte") };
+
+    // 过期读 = 陈旧字节（内容不承诺），但窗界只打自身 len：全部可读、不悬垂。
+    assert(frame.count() == 4, "stale frame keeps its window len");
+    let mutable i = 0;
+    let mutable acc = 0;
+    while i < frame.count() then {
+        acc += Int(frame[i]);
+        i += 1;
+    };
+    assert(acc > 0, "stale frame bytes readable");
+
+    // 帧钉块不悬垂：新帧与旧帧同块共存（旧帧 retain 着块）。
+    let frame2 = r.read_frame();
+    assert(frame2.count() >= 0, "second frame");
+    assert(frame.count() == 4, "old frame still intact");
+
+    println("PASS");
+    return 0;
+};

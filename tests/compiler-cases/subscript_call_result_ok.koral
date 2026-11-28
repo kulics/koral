@@ -1,0 +1,37 @@
+// EXPECT: holes: 97 255
+// EXPECT: PASS
+// 下标基座寿命钉（view-returning 约定，slice-design 实施途中破案）：结果是裸
+// 指针的访问器（`__index_slot`）返回的是基座内存的视图——实参必须 +0 借入、
+// 基座活过延迟装载。曾因末次使用移动把基座送进被调方释放、装载读到已释放
+// 内存（读 0）：调用结果基座、临死局部基座、同插值双下标三形状全在案。
+let make(): List[UInt8] = {
+    let bl = List[UInt8].new();
+    bl.push(97);
+    bl.push(255);
+    return bl;
+};
+
+let main(): Int = {
+    // 形状 1：调用结果直接当下标基座（临时基座）。
+    let v = make()[1];
+    assert(v == 255, "call-result subscript read");
+    make()[0] = 7;
+
+    // 形状 2：局部基座 + 末次使用（曾整体读 0）。
+    let t = make();
+    let w = t[1];
+    assert(w == 255, "dying-local subscript read");
+    t[1] = 42;
+    assert(t[1] == 42, "dying-local subscript write");
+
+    // 形状 3：同一插值里两个下标洞（第二个曾读 0）。
+    let u = make();
+    println("holes: \(u[0]) \(u[1])");
+
+    // 形状 4：比较位的下标装载（纯被调消去路径）。
+    let r = make();
+    assert(r[0] == 97 and r[1] == 255, "compare-position subscript");
+
+    println("PASS");
+    return 0;
+};

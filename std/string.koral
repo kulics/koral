@@ -29,7 +29,7 @@
 /// carries the construction-then-immutable promise (and the atomic RC) for
 /// the shared block, `off`/`len` are scalars -- so string values cross
 /// threads freely.
-public type sendable String(protected bytes: Bytes, protected off: UInt32, protected len: UInt32);
+public type sendable String(protected bytes: Block[UInt8], protected off: UInt32, protected len: UInt32);
 
 /// The managed byte block behind a `String`. The bytes live in the same heap
 /// block as this object -- one allocation -- and `data` points at the inline
@@ -42,7 +42,10 @@ public type sendable String(protected bytes: Bytes, protected off: UInt32, prote
 /// `sendable` `String` crosses threads by copy -- the block's refcount must be
 /// atomic (this mark supplies it; the `mutable` form adds no lock). Promise:
 /// written only while the block is being filled, read-only after the wrap.
-protected type unsafe sendable mutable Bytes(protected data: *mutable UInt8, protected len: Int);
+/// `Bytes`（字节块）即统一存储块的字节形 `Block[UInt8]`（slice-design）：
+/// `[Control | len | cap | 字节区]`，字节区内联在 payload+16（与
+/// `Block[T].elements()` 同一公式）。名字面仅存于文档——别名会让 codegen
+/// 发出无形的 `struct Bytes`，故声明直书 `Block[UInt8]`。
 
 /// Intrinsic: allocate a single-block `Bytes` of byte length `len` whose
 /// bytes are not yet written (only byte `[len]` is set to 0). The bytes live
@@ -51,23 +54,15 @@ protected type unsafe sendable mutable Bytes(protected data: *mutable UInt8, pro
 /// reading. Internal plumbing for the constructors below and the compiler's
 /// interpolation lowering -- not a user API; the runtime side is
 /// `__koral_string_alloc` (see std/koral_runtime.h for the ABI note).
-let intrinsic alloc_bytes(len: UInt): Bytes;
+let intrinsic alloc_bytes(len: UInt): Block[UInt8];
 
-/// Adoption of a `Bytes` block as a `String`.
-given Bytes {
-    /// Interpret this block as a `String` holding `len` content bytes: the
-    /// value takes the block over without a copy, as a whole-block window
-    /// (`off` 0). The compiler's interpolation lowering wraps its
-    /// `alloc_bytes` result through here.
-    protected wrap(self, len: Int): String = String(self, UInt32(0), UInt32(len));
-};
 
 /// Mutable builder for incremental string construction without relying on
 /// String alias mutation. The bytes accumulate inside a `Bytes` block from
 /// the start, so `into_string` hands the finished string over without a copy.
 /// `data` caches the block's byte pointer for the append hot paths.
 public type mutable StringBuilder(
-    mutable buf: Bytes,
+    mutable buf: Block[UInt8],
     mutable data: *mutable UInt8,
     mutable len: Int,
     mutable cap: Int,
@@ -182,8 +177,8 @@ given StringBuilder {
         // One `Bytes` block of `cap` allocated bytes (content `cap - 1`):
         // the block is what `into_string` hands over.
         let buf = alloc_bytes(UInt(cap - 1));
-        buf.data[0] = 0;
-        return StringBuilder(buf, buf.data, 0, cap);
+        buf.elements()[0] = 0;
+        return StringBuilder(buf, buf.elements(), 0, cap);
     };
 
     /// Grow capacity so the builder can hold `additional` more bytes without
@@ -221,9 +216,9 @@ given StringBuilder {
         // A fresh `Bytes` block; assigning it over `self.buf` releases the
         // old block through the RC.
         let new_buf = alloc_bytes(UInt(new_cap - 1));
-        copy_memory(new_buf.data, self.data, UInt(self.len + 1));
+        copy_memory(new_buf.elements(), self.data, UInt(self.len + 1));
         self.buf = new_buf;
-        self.data = new_buf.data;
+        self.data = new_buf.elements();
         self.cap = new_cap;
     };
 
@@ -359,7 +354,7 @@ given StringBuilder {
         let result = String(self.buf, UInt32(0), UInt32(self.len));
         let empty = alloc_bytes(0);
         self.buf = empty;
-        self.data = empty.data;
+        self.data = empty.elements();
         self.len = 0;
         self.cap = 1;
         return result;
@@ -373,7 +368,7 @@ given StringBuilder {
         let result = String(self.buf, UInt32(0), UInt32(self.len));
         let empty = alloc_bytes(0);
         self.buf = empty;
-        self.data = empty.data;
+        self.data = empty.elements();
         self.len = 0;
         self.cap = 1;
         return result;
@@ -394,7 +389,7 @@ given String {
             panic_string_capacity_exceeded(len);
         };
         let s = alloc_bytes(UInt(len));
-        copy_memory(s.data, bytes, UInt(len));
+        copy_memory(s.elements(), bytes, UInt(len));
         return String(s, UInt32(0), UInt32(len));
     };
 
@@ -411,8 +406,8 @@ given String {
             panic_string_capacity_exceeded(total);
         };
         let result = alloc_bytes(UInt(total));
-        copy_memory(result.data, left.bytes.data + Int(left.off), UInt(left_len));
-        copy_memory(result.data + left_len, right.bytes.data + Int(right.off), UInt(right_len));
+        copy_memory(result.elements(), left.bytes.elements() + Int(left.off), UInt(left_len));
+        copy_memory(result.elements() + left_len, right.bytes.elements() + Int(right.off), UInt(right_len));
         return String(result, UInt32(0), UInt32(total));
     };
 
@@ -607,6 +602,20 @@ given String {
         String.from_utf8_ptr_unchecked(bytes.borrow_ptr(), bytes.count())
     };
 
+    /// Copy the `bytes` window into a string, returning an error when its bytes
+    /// are not valid UTF-8（slice-design：`[]UInt8` → String 的 `from_slice`
+    /// 家族，与 `from_bytes` 成对；拷贝出口，窗口此后与字符串无关）。
+    public from_slice(bytes: []UInt8): Result[String] = unsafe {
+        String.from_utf8_ptr(bytes.elements(), bytes.count())
+    };
+
+    /// Copy the `bytes` window into a string without validating UTF-8.
+    /// Behavior is undefined when those bytes are not valid UTF-8.
+    /// 调用契约（`let unsafe`）：担保 `bytes` 是合法 UTF-8。
+    public unsafe from_slice_unchecked(bytes: []UInt8): String = unsafe {
+        String.from_utf8_ptr_unchecked(bytes.elements(), bytes.count())
+    };
+
     /// Build a string from a null-terminated C string, returning an error when
     /// it is not valid UTF-8.
     /// The caller guarantees `cstr` points at a readable NUL-terminated string.
@@ -772,13 +781,19 @@ given String {
     /// Borrow the window's bytes; `count()` bytes are readable from the
     /// returned pointer. NOT null-terminated -- pass a `CString` when the C
     /// side expects a NUL-terminated `char*`. Valid while the string lives.
-    public borrow_ptr(self): *UInt8 = unsafe { self.bytes.data + Int(self.off) };
+    public borrow_ptr(self): *UInt8 = unsafe { self.bytes.elements() + Int(self.off) };
+
+    /// 只读切片窗口（slice-design）：`[]UInt8`，零拷贝（写死块生而不可变）。
+    /// u32→Int 加宽直通。
+    public as_slice(self): []UInt8 = {
+        return Slice[UInt8](self.bytes, Int(self.off), Int(self.len));
+    };
 
     /// The writable byte tail of a just-`alloc_bytes`-ed value. Only std's
     /// constructors and the compiler's interpolation lowering fill through it
     /// -- writing into a published string breaks the immutability contract.
     protected mutable_bytes(self): *mutable UInt8 =
-        unsafe { self.bytes.data + Int(self.off) };
+        unsafe { self.bytes.elements() + Int(self.off) };
 
     /// Return the UTF-8 bytes as a new list.
     public to_bytes(self): List[UInt8] = unsafe {
@@ -787,7 +802,7 @@ given String {
         if len == 0 then {
             return bytes;
         };
-        copy_memory(bytes.borrow_mut_ptr(), self.bytes.data + Int(self.off), UInt(len));
+        copy_memory(bytes.borrow_mut_ptr(), self.bytes.elements() + Int(self.off), UInt(len));
         return bytes;
     };
 
@@ -797,14 +812,14 @@ given String {
         if index < 0 or index >= Int(self.len) then {
             return Option[UInt8].None();
         };
-        return Option[UInt8].Some(self.bytes.data[Int(self.off) + index]);
+        return Option[UInt8].Some(self.bytes.elements()[Int(self.off) + index]);
     };
 
     private __index_get(self, key: Int): UInt8 = unsafe {
         if key < 0 or key >= Int(self.len) then {
             panic_string_index(key, Int(self.len));
         };
-        return self.bytes.data[Int(self.off) + key];
+        return self.bytes.elements()[Int(self.off) + key];
     };
 
     /// Whether the string begins with `prefix`.
@@ -812,8 +827,8 @@ given String {
         if prefix.len > self.len then {
             return false;
         };
-        let data = self.bytes.data + Int(self.off);
-        let prefix_data = prefix.bytes.data + Int(prefix.off);
+        let data = self.bytes.elements() + Int(self.off);
+        let prefix_data = prefix.bytes.elements() + Int(prefix.off);
         for i in 0..<Int(prefix.len) then {
             if data[i] != prefix_data[i] then {
                 return false;
@@ -828,8 +843,8 @@ given String {
             return false;
         };
         let offset = Int(self.len - suffix.len);
-        let data = self.bytes.data + Int(self.off);
-        let suffix_data = suffix.bytes.data + Int(suffix.off);
+        let data = self.bytes.elements() + Int(self.off);
+        let suffix_data = suffix.bytes.elements() + Int(suffix.off);
         for i in 0..<Int(suffix.len) then {
             if data[offset + i] != suffix_data[i] then {
                 return false;
@@ -880,7 +895,7 @@ given String {
             return true;
         };
         return not String.is_utf8_continuation_byte(
-            self.bytes.data[Int(self.off) + byte_index],
+            self.bytes.elements()[Int(self.off) + byte_index],
         );
     };
 
@@ -907,7 +922,7 @@ given String {
 
     /// Return the string with leading ASCII whitespace removed.
     public trim_ascii_start(self): String = unsafe {
-        let data = self.bytes.data + Int(self.off);
+        let data = self.bytes.elements() + Int(self.off);
         let len = Int(self.len);
         let mutable i = 0;
         while i < len and String.is_ascii_space(data[i]) then {
@@ -918,7 +933,7 @@ given String {
 
     /// Return the string with trailing ASCII whitespace removed.
     public trim_ascii_end(self): String = unsafe {
-        let data = self.bytes.data + Int(self.off);
+        let data = self.bytes.elements() + Int(self.off);
         let mutable end = Int(self.len);
         while end > 0 and String.is_ascii_space(data[end - 1]) then {
             end -= 1;
@@ -934,7 +949,7 @@ given String {
 
     /// Whether every byte is ASCII (below 128).
     public is_ascii(self): Bool = unsafe {
-        let data = self.bytes.data + Int(self.off);
+        let data = self.bytes.elements() + Int(self.off);
         for i in 0..<Int(self.len) then {
             if data[i] >= 128 then {
                 return false;
@@ -945,7 +960,7 @@ given String {
 
     /// Whether the string is empty or holds only ASCII whitespace.
     public is_ascii_whitespace(self): Bool = unsafe {
-        let data = self.bytes.data + Int(self.off);
+        let data = self.bytes.elements() + Int(self.off);
         for i in 0..<Int(self.len) then {
             if not String.is_ascii_space(data[i]) then {
                 return false;
@@ -963,10 +978,10 @@ given String {
     /// Return a copy with ASCII letters lowercased; other bytes are unchanged.
     public to_ascii_lowercase(self): String = unsafe {
         let len = Int(self.len);
-        let data = self.bytes.data + Int(self.off);
+        let data = self.bytes.elements() + Int(self.off);
         let s = alloc_bytes(UInt(len));
         for i in 0..<len then {
-            init_memory(s.data + i, String.to_lower_byte(data[i]));
+            init_memory(s.elements() + i, String.to_lower_byte(data[i]));
         };
         return String(s, UInt32(0), UInt32(len));
     };
@@ -974,10 +989,10 @@ given String {
     /// Return a copy with ASCII letters uppercased; other bytes are unchanged.
     public to_ascii_uppercase(self): String = unsafe {
         let len = Int(self.len);
-        let data = self.bytes.data + Int(self.off);
+        let data = self.bytes.elements() + Int(self.off);
         let s = alloc_bytes(UInt(len));
         for i in 0..<len then {
-            init_memory(s.data + i, String.to_upper_byte(data[i]));
+            init_memory(s.elements() + i, String.to_upper_byte(data[i]));
         };
         return String(s, UInt32(0), UInt32(len));
     };
@@ -986,20 +1001,20 @@ given String {
     /// the rest lower.
     public to_ascii_titlecase(self): String = unsafe {
         let len = Int(self.len);
-        let data = self.bytes.data + Int(self.off);
+        let data = self.bytes.elements() + Int(self.off);
         let s = alloc_bytes(UInt(len));
         let mutable in_word = false;
         for i in 0..<len then {
             let b = data[i];
             if String.is_ascii_space(b) then {
                 in_word = false;
-                init_memory(s.data + i, b);
+                init_memory(s.elements() + i, b);
             } else {
                 if not in_word then {
                     in_word = true;
-                    init_memory(s.data + i, String.to_upper_byte(b));
+                    init_memory(s.elements() + i, String.to_upper_byte(b));
                 } else {
-                    init_memory(s.data + i, String.to_lower_byte(b));
+                    init_memory(s.elements() + i, String.to_lower_byte(b));
                 };
             };
         };
@@ -1020,8 +1035,8 @@ given String {
         if pat_len == 0 then {
             return Option[Int].Some(start);
         };
-        let data = self.bytes.data + Int(self.off);
-        let pat_data = pat.bytes.data + Int(pat.off);
+        let data = self.bytes.elements() + Int(self.off);
+        let pat_data = pat.bytes.elements() + Int(pat.off);
         let mutable i = start;
         let max = len - pat_len;
         while i <= max then {
@@ -1064,7 +1079,7 @@ given String {
         let s = alloc_bytes(UInt(total));
         let mutable offset = 0;
         for _ in 0..<times then {
-            copy_memory(s.data + offset, self.bytes.data + Int(self.off), UInt(len));
+            copy_memory(s.elements() + offset, self.bytes.elements() + Int(self.off), UInt(len));
             offset += len;
         };
         return String(s, UInt32(0), UInt32(total));
@@ -1266,7 +1281,7 @@ given String: Clone {
         let len = Int(self.len);
         let s = alloc_bytes(UInt(len));
         if len > 0 then {
-            copy_memory(s.data, self.bytes.data + Int(self.off), UInt(len));
+            copy_memory(s.elements(), self.bytes.elements() + Int(self.off), UInt(len));
         };
         return String(s, UInt32(0), UInt32(len));
     };
@@ -1302,8 +1317,8 @@ given String: Ord {
         let other_len = Int(other.len);
         let min = if self_len < other_len then self_len else other_len;
         let c = compare_memory(
-            self.bytes.data + Int(self.off),
-            other.bytes.data + Int(other.off),
+            self.bytes.elements() + Int(self.off),
+            other.bytes.elements() + Int(other.off),
             UInt(min),
         );
         if c != 0 then {
@@ -1321,7 +1336,7 @@ given String: Hash {
 
     /// Hash the UTF-8 bytes in order.
     public hash(self): UInt = unsafe {
-        let data = self.bytes.data + Int(self.off);
+        let data = self.bytes.elements() + Int(self.off);
         let mutable h: UInt = 2166136261;
         for i in 0..<Int(self.len) then {
             let b: UInt8 = data[i];
@@ -1383,8 +1398,8 @@ given StringSplitIterator: Iterator[String] {
         if self.index > len then {
             return Option[String].None();
         };
-        let src = self.source.bytes.data + Int(self.source.off);
-        let pat = self.sep.bytes.data + Int(self.sep.off);
+        let src = self.source.bytes.elements() + Int(self.source.off);
+        let pat = self.sep.bytes.elements() + Int(self.sep.off);
         let max = len - sep_len;
         let mutable i = self.index;
         let mutable match_at = 0 - 1;

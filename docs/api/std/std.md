@@ -396,6 +396,18 @@ public type LazyView[T: Any, R: Iterator[T]];
 
 /// A growable ordered sequence of `T` in one contiguous buffer. Elements are
 /// stored by handle, so `type mutable` values stay shared with their source.
+///
+/// 存储是统一存储块（slice-design）：`block` 是 `Block[T]`（`[Control | len |
+/// cap | 元素区]`，元素区内联）；`lock_depth` 是修改锁（借出/回调期间的修改
+/// 入口查锁 panic）。元素释放由块的 RC-0 统一做（Block 的 Drop），List 本体
+/// 无需析构——清理 = 合成字段释放。空列表持 immortal 空块，零分配。
+///
+/// `len` 是热计数（盒侧，grow 不变槽），与块头 len **恒等**：每个修改点
+/// 写两份——先块头镜像（析构契约：Block 的 Drop 按块头 len 走查元素），
+/// 盒 len **最后写**。为什么两份：块头 len 的装载地址经块句柄间接，grow
+/// 换块即循环变址，热循环的 store→load 转发链断掉、每迭代重装（实测
+/// ~2×）；基线平铺布局能携带 len 正因该槽 grow 不碰。镜像与热计数同为
+/// Int 存、may-alias 保序——盒存收口转发链，镜像留在链外。
 public type mutable List[T: Any];
 
 /// A one-shot cursor that walks a `List[T]` from index 0 to the end.
@@ -414,6 +426,8 @@ public type mutable ListIterator[T: Any];
 /// with their source). The `mutable` form is where the owned buffer's
 /// destructor lives (user destructors are `type mutable` only); the snapshot
 /// itself is immutable after construction.
+/// 存储是统一存储块（slice-design）：快照是写死块（构造期写完永不再写），
+/// 元素释放由块的 RC-0 统一做。
 public type unsafe sendable mutable FrozenList[T: Any];
 
 /// A one-shot cursor that walks a `FrozenList[T]` from index 0 to the end.
@@ -2619,6 +2633,8 @@ given CString {
     /// the returned pointer and byte `[count()]` is 0. Valid while the value
     /// lives. This is the pointer to hand to C `char*` parameters.
     public borrow_ptr(self): *UInt8;
+    /// 只读切片窗口（slice-design）：`[]UInt8`，零拷贝（写死块）。
+    public as_slice(self): []UInt8;
     /// The content as a `String`, without a copy -- the result is a window on
     /// this block (the NUL is not part of the content). Use `clone` on the
     /// result to detach it from this block.
@@ -3113,9 +3129,6 @@ given[T: Any, R: Iterator[T]] Iterable[T, R] {
     public lazy(self): LazyView[T, R];
 };
 
-/// `Drop` for `List[T]`: frees every element and the buffer when the last handle dies.
-given[T: Any] List[T]: Drop {};
-
 /// Construction, mutation, and query operations on `List[T]`.
 given[T: Any] List[T] {
     /// 空列表不分配缓冲区，首次 push 时再分配。
@@ -3126,14 +3139,24 @@ given[T: Any] List[T] {
     public with_capacity(capacity: Int): Self;
     /// The number of elements in the list.
     public count(self): Int;
+    /// 借出（slice-design）：把可变窗口借给闭包——作用域内活视图，闭包全程
+    /// 持锁（经 list 的修改入口立刻 panic），闭包结束查逃逸：块 RC 必须回到
+    /// 入口值（**窗口建立后**读的那份，含窗自己的一份）。拷贝、`s[a..<b]`
+    /// 派生窗、存入容器、闭包捕获都 retain 块——打在块上抓全。嵌套借出组合
+    /// 成立。窗写 `s[i] = v` 是借出的授权通道，不经锁（切片无锁，自保靠
+    /// 保留形与修改纪律）。
+    public borrow_slice[U: Any](self, fn: ([]mutable T) -> U): U;
+    /// 消费转移（slice-design）：整块转成可写切片，self 置空（掏空先于转移）。
+    /// owner 消灭后结构修改永不可能，窗口可逃逸、可长持——这是创建可变切片
+    /// 的常规手段。
+    public into_slice(self): []mutable T;
     /// Grow capacity so the list can hold `additional` more elements without reallocating.
     /// Panics when `additional` is negative（容量族负值 panic）。
     public reserve(self, additional: Int): Void;
     /// Append `value` at the end of the list (amortized O(1)), without consuming the caller's value.
-    /// Every hot field is read before the growth call and re-read only in
-    /// the growth path: an opaque call in the loop forces the C backend to
-    /// reload whatever sits after it, per element. `len` flushes before
-    /// `grow_to` because growth moves exactly `len` elements.
+    /// `len` 装载**先于锁检查**：装载落在锁分支之后（非循环头块）时，热循环
+    /// 的 store→load 转发链不成立、每迭代重装（实测 ~2×）；锁门的是修改，
+    /// 读计数不是修改，前置无副作用。热字段读一次，增长路径再重读。
     public push(self, value: T): Void;
     /// Append the slice of `other` picked by `span`, defaulting to the whole list
     /// -- the same span shape as `Reader.read` / `Writer.write` in `std/io/traits.koral`.
@@ -3159,7 +3182,10 @@ given[T: Any] List[T] {
     public last(self): Option[T];
     /// Whether the list has no elements.
     public is_empty(self): Bool;
-    /// Remove every element, keeping the allocated capacity.
+    /// Remove every element. 放块形（slice-design §修改纪律与析构重入）：
+    /// owner 先换 immortal 空块，旧块交 RC-0 统一析构元素——析构重入（自摘
+    /// push/clear）见到的是空 owner，天然安全。在位 drop+清 len 的旧形会让
+    /// 重入 push 长进正在析构的块，扩容搬移把未初始化槽搬成句柄 = 二次析构。
     public clear(self): Void;
     /// Overwrite every element with `value`. All slots hold the one value;
     /// `type mutable` values are shared into every slot, not cloned per element.
@@ -3267,12 +3293,10 @@ given[T: Ord] List[T] {
     public sort_unstable(self): Void;
 };
 
-/// `Drop` for `FrozenList[T]`: frees every element and the buffer when the
-/// last handle dies.
-given[T: Any] FrozenList[T]: Drop {};
-
 /// Read-only access over a `FrozenList[T]`.
 given[T: Any] FrozenList[T] {
+    /// 只读切片窗口（slice-design）：`[]T`，零拷贝（写死块生而不可变）。
+    public as_slice(self): []T;
     /// The number of elements in the snapshot.
     public count(self): Int;
     /// Whether the snapshot has no elements.
@@ -3307,11 +3331,12 @@ given[T: Any] List[T] {
     /// threads. The receiver stays usable; the snapshot owns its own buffer of
     /// shared element handles.
     public to_frozen_list(self): FrozenList[T];
-    /// Transfer the whole buffer into a `FrozenList[T]` in O(1): the elements'
+    /// Transfer the whole block into a `FrozenList[T]` in O(1): the elements'
     /// ownership travels with the block -- nothing is copied, nothing is
     /// retained. The list is left empty and reusable. Where `to_frozen_list`
     /// copies a snapshot out, `into_frozen` hands the storage over; the
     /// elements die when the frozen snapshot dies.
+    /// 掏空先于转移（slice-design §修改纪律）：先换 immortal 空块，再交块。
     public into_frozen_list(self): FrozenList[T];
 };
 
@@ -3984,6 +4009,14 @@ given String {
     /// Behavior is undefined when those bytes are not valid UTF-8.
     /// 调用契约（`let unsafe`）：担保 `bytes` 是合法 UTF-8。
     public unsafe from_bytes_unchecked(bytes: List[UInt8]): String;
+    /// Copy the `bytes` window into a string, returning an error when its bytes
+    /// are not valid UTF-8（slice-design：`[]UInt8` → String 的 `from_slice`
+    /// 家族，与 `from_bytes` 成对；拷贝出口，窗口此后与字符串无关）。
+    public from_slice(bytes: []UInt8): Result[String];
+    /// Copy the `bytes` window into a string without validating UTF-8.
+    /// Behavior is undefined when those bytes are not valid UTF-8.
+    /// 调用契约（`let unsafe`）：担保 `bytes` 是合法 UTF-8。
+    public unsafe from_slice_unchecked(bytes: []UInt8): String;
     /// Build a string from a null-terminated C string, returning an error when
     /// it is not valid UTF-8.
     /// The caller guarantees `cstr` points at a readable NUL-terminated string.
@@ -4014,6 +4047,9 @@ given String {
     /// returned pointer. NOT null-terminated -- pass a `CString` when the C
     /// side expects a NUL-terminated `char*`. Valid while the string lives.
     public borrow_ptr(self): *UInt8;
+    /// 只读切片窗口（slice-design）：`[]UInt8`，零拷贝（写死块生而不可变）。
+    /// u32→Int 加宽直通。
+    public as_slice(self): []UInt8;
     /// Return the UTF-8 bytes as a new list.
     public to_bytes(self): List[UInt8];
     /// Return the byte at `index`, or `None` when it is past the end.

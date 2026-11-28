@@ -158,6 +158,8 @@ struct MIRTypeResolver {
     switch intrinsic {
     case .allocMemory(_, let resultType),
          .allocString(_, let resultType),
+         .allocBlock(_, _, let resultType),
+         .emptyBlock(let resultType),
          .downgradeRef(_, let resultType),
          .upgradeRef(_, let resultType),
          .takeMemory(_, let resultType),

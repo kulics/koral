@@ -157,6 +157,21 @@ extension Parser {
         return scanTypeArgListConsuming()
       }
       return true
+    case .leftBracket:
+      // `[N]T` 定长数组与 `[]T` / `[]mutable T` 切片（slice-design）：表达式首
+      // 的类型形状扫描要认 `[` 头，否则 `List[[]mutable UInt8].new()` 会被误判
+      // 成下标（`[]` 当空表字面量）。
+      advanceShape()
+      if currentToken === .rightBracket {
+        advanceShape()
+        if currentToken === .mutableKeyword { advanceShape() }
+        return scanTypeShapeConsuming()
+      }
+      guard case .integer = currentToken else { return false }
+      advanceShape()
+      guard currentToken === .rightBracket else { return false }
+      advanceShape()
+      return scanTypeShapeConsuming()
     default:
       return false
     }

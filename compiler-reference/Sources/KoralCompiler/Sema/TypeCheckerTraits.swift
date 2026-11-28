@@ -731,6 +731,8 @@ extension TypeChecker {
       return containsSelfType(inner)
     case .pointer(let inner, _, _):
       return containsSelfType(inner)
+    case .slice(let inner, _, _):
+      return containsSelfType(inner)
     case .weakReference(let inner, _, _):
       return containsSelfType(inner)
     case .generic(_, let args, _):

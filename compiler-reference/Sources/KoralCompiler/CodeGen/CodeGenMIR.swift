@@ -206,8 +206,11 @@ final class MIRFunctionCodeEmitter {
 
     func walkIntrinsic(_ intrinsic: MIRIntrinsic) {
       switch intrinsic {
-      case .allocMemory(let count, _), .allocString(let count, _):
+      case .allocMemory(let count, _), .allocString(let count, _),
+           .allocBlock(let count, _, _):
         walkValue(count)
+      case .emptyBlock:
+        break
       case .deallocMemory(let ptr),
            .deinitMemory(let ptr),
            .takeMemory(let ptr, _),
@@ -1138,6 +1141,15 @@ final class MIRFunctionCodeEmitter {
 
   private func emitReturn(_ operand: MIROperand?, preserving preservedLocal: MIRLocalID?) {
     if let operand {
+      // A generic method instantiated at a Void return still carries a Void
+      // value operand (`return result` at R := Void) -- a C void function
+      // must not return a value.
+      if resolver.type(of: operand) == .void {
+        emitReturnCleanup(excluding: nil)
+        codeGen.addIndent()
+        codeGen.appendToBuffer("return;\n")
+        return
+      }
       let emission = emitOperandValue(operand)
       let returnType = resolver.type(of: operand) ?? .void
       let shouldCopy = shouldCopyReturnedOperand(operand, type: returnType)
@@ -2227,6 +2239,22 @@ final class MIRFunctionCodeEmitter {
     let sourceEmission = emitOperandValue(operand)
     let sourceType = resolver.type(of: operand) ?? targetType
 
+    // 同布局名义族强制转（slice-design 的 `[]mutable T` -> `[]T` 收窄）：C 不
+    // 允许结构体值转换；语义 = 位拷 + 目标拷贝语义（retain 托管字段）——借目标
+    // 拷贝函数传指针强转（布局相同）。源照常清理（拷贝形，非所有权转移），
+    // 与 koralc emit_cast_operand 的结构体族分支同形。
+    if isNominalStructType(targetType) && isNominalStructType(sourceType) {
+      let targetCType = codeGen.cTypeName(targetType)
+      let result = codeGen.emitTempCopyOrMove(
+        type: targetType,
+        source: "(*(const \(targetCType)*)&(\(sourceEmission.expression)))",
+        isLvalue: true)
+      emitCleanups(sourceEmission.cleanups)
+      return MIRValueEmission(
+        expression: result,
+        cleanups: cleanupForTemporaryResult(expression: result, type: targetType))
+    }
+
     if isOwnershipPreservingCast(sourceType: sourceType, targetType: targetType) {
       // Same ownership semantics: the retyping is a view change with no
       // copy/drop churn, so the source's cleanups pass through untouched. But
@@ -2247,6 +2275,15 @@ final class MIRFunctionCodeEmitter {
     let expression = emitScalarOrPointerCast(expression: sourceEmission.expression, sourceType: sourceType, targetType: targetType, span: span)
     emitCleanups(sourceEmission.cleanups)
     return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: targetType))
+  }
+
+  private func isNominalStructType(_ t: Type) -> Bool {
+    switch t {
+    case .structure, .genericStruct:
+      return true
+    default:
+      return false
+    }
   }
 
   private func isOwnershipPreservingCast(sourceType: Type, targetType: Type) -> Bool {
@@ -2285,6 +2322,23 @@ final class MIRFunctionCodeEmitter {
       codeGen.addIndent()
       codeGen.appendToBuffer("\(expression).ptr = __koral_string_alloc(\(lenEmission.expression));\n")
       emitCleanups(lenEmission.cleanups)
+      return MIRValueEmission(expression: expression, cleanups: [])
+
+    case .allocBlock(let cap, let elemType, let resultType):
+      sawAllocMemory = true
+      let capEmission = emitValue(cap, sourceMode: true)
+      let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resultType))
+      let elemCType = codeGen.cTypeName(elemType)
+      codeGen.addIndent()
+      codeGen.appendToBuffer(
+        "\(expression).ptr = __koral_block_alloc(\(capEmission.expression), sizeof(\(elemCType)), _Alignof(\(elemCType)));\n")
+      emitCleanups(capEmission.cleanups)
+      return MIRValueEmission(expression: expression, cleanups: [])
+
+    case .emptyBlock(let resultType):
+      let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resultType))
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(expression).ptr = __koral_empty_block();\n")
       return MIRValueEmission(expression: expression, cleanups: [])
 
     case .deallocMemory(let ptr):
@@ -3184,9 +3238,16 @@ extension CodeGen {
     buffer = ""
     let rendered = renderMIRFunctionBody(mirFunction)
     let noinline = rendered.allocates ? "KORAL_NOINLINE " : ""
+    // 定义与声明同缀（声明侧 generateFunctionDeclaration 按 .never 发
+    // `_Noreturn`）：属性失配会让 clang 丢掉 noreturn，调用点退化成全量
+    // clobber 的 MemoryDef，打断热循环里句柄/len 的 store→load 转发链。
+    var noreturn = ""
+    if case .function(_, let ret, _) = identifier.type, ret == .never {
+      noreturn = "_Noreturn "
+    }
     let functionCode = [
       rendered.definitions,
-      "\(noinline)\(returnType) \(cName)(\(paramList)) {\n",
+      "\(noreturn)\(noinline)\(returnType) \(cName)(\(paramList)) {\n",
       rendered.body,
       "}\n"
     ].joined()

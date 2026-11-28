@@ -9,22 +9,23 @@
 // ============================================================================
 /// A growable ordered sequence of `T` in one contiguous buffer. Elements are
 /// stored by handle, so `type mutable` values stay shared with their source.
+///
+/// 存储是统一存储块（slice-design）：`block` 是 `Block[T]`（`[Control | len |
+/// cap | 元素区]`，元素区内联）；`lock_depth` 是修改锁（借出/回调期间的修改
+/// 入口查锁 panic）。元素释放由块的 RC-0 统一做（Block 的 Drop），List 本体
+/// 无需析构——清理 = 合成字段释放。空列表持 immortal 空块，零分配。
+///
+/// `len` 是热计数（盒侧，grow 不变槽），与块头 len **恒等**：每个修改点
+/// 写两份——先块头镜像（析构契约：Block 的 Drop 按块头 len 走查元素），
+/// 盒 len **最后写**。为什么两份：块头 len 的装载地址经块句柄间接，grow
+/// 换块即循环变址，热循环的 store→load 转发链断掉、每迭代重装（实测
+/// ~2×）；基线平铺布局能携带 len 正因该槽 grow 不碰。镜像与热计数同为
+/// Int 存、may-alias 保序——盒存收口转发链，镜像留在链外。
 public type mutable List[T: Any](
-    mutable source: *mutable T,
-    mutable len: Int,
-    mutable cap: Int,
+    protected mutable block: Block[T],
+    protected mutable lock_depth: Int,
+    protected mutable len: Int,
 );
-
-/// `Drop` for `List[T]`: frees every element and the buffer when the last handle dies.
-given[T: Any] List[T]: Drop {
-
-    drop(self): Void = unsafe {
-        for i in 0..<self.len then {
-            deinit_memory(self.source + i);
-        };
-        dealloc_memory(self.source);
-    };
-};
 
 /// A one-shot cursor that walks a `List[T]` from index 0 to the end.
 public type mutable ListIterator[T: Any](source: List[T], mutable index: Int);
@@ -62,7 +63,7 @@ given[T: Any] List[T] {
     /// 编译器里有大量建完就丢（或一直为空）的临时列表，例如每个 `Scope` 的
     /// `entry_list` / `local_entry_list`，为它们每次都付一次 alloc 不值得。
     public new(): Self = {
-        return List[T](null, 0, 0);
+        return List[T](empty_block[T](), 0, 0);
     };
 
     /// Create an empty list with room for at least `capacity` elements before the next reallocation.
@@ -71,12 +72,88 @@ given[T: Any] List[T] {
             panic("List with_capacity negative capacity");
         };
         let cap = if capacity < 1 then 1 else capacity;
-        let source = unsafe { alloc_memory[T](UInt(cap)) };
-        return List[T](source, 0, cap);
+        let block = alloc_block[T](cap);
+        return List[T](block, 0, 0);
     };
 
     /// The number of elements in the list.
     public count(self): Int = self.len;
+
+    // ==================================================================
+    // 修改锁与借出（slice-design §修改锁 / §借出）
+    // ==================================================================
+
+    /// 修改锁：借出闭包与带用户代码的方法执行期间锁住，一切修改入口查锁
+    /// panic（预防式，panic 直接终止——无展开、无复位义务）。深度计数（嵌套
+    /// 合法）；非并发锁（List 非 sendable，线程内独占）。
+    private lock(self): Void = {
+        self.lock_depth = self.lock_depth + 1;
+    };
+
+    private unlock(self): Void = {
+        self.lock_depth = self.lock_depth - 1;
+    };
+
+    /// 修改入口的锁检查。锁着时任何经 list（含别名）的修改都拒绝——含
+    /// 下标写与 `into_*` 消费转移。panic 锚点 = 肇事修改调用点。
+
+    /// 持锁执行一段用户代码（lambda 的 `return` 是 lambda 局部——体平移后
+    /// 解锁必达，无漏解风险）。带用户代码的 List 方法全程用它包体。
+    private with_locked[R: Any](self, body: () -> R): R = {
+        self.lock();
+        let result = body();
+        self.unlock();
+        return result;
+    };
+
+    /// Void 版：`let` 不能绑定 Void 调用结果，故不接值只放行体。
+    private with_locked_void(self, body: () -> Void): Void = {
+        self.lock();
+        body();
+        self.unlock();
+    };
+
+    /// 借出（slice-design）：把可变窗口借给闭包——作用域内活视图，闭包全程
+    /// 持锁（经 list 的修改入口立刻 panic），闭包结束查逃逸：块 RC 必须回到
+    /// 入口值（**窗口建立后**读的那份，含窗自己的一份）。拷贝、`s[a..<b]`
+    /// 派生窗、存入容器、闭包捕获都 retain 块——打在块上抓全。嵌套借出组合
+    /// 成立。窗写 `s[i] = v` 是借出的授权通道，不经锁（切片无锁，自保靠
+    /// 保留形与修改纪律）。
+    public borrow_slice[U: Any](self, fn: ([]mutable T) -> U): U = {
+        // self 保留跨调用：锁释放与逃逸检查要读 owner，闭包放走外部引用
+        // 不得带走它（borrowed-self 不覆盖此方法）。
+        let keep = self;
+        self.lock();
+        // 入口读在建窗**前**、窗口死于内层块尾、检查在块后——RC 账目按词法
+        // 闭合（窗口自身的 +1 与调用期瞬态都已清场，只剩逃逸物计数）。
+        let entry_rc = block_strong_count(self.block);
+        let result = {
+            let window = MutSlice[T](self.block, 0, self.len);
+            fn(window)
+        };
+        self.unlock();
+        let now_rc = block_strong_count(self.block);
+        if now_rc != entry_rc then {
+            panic("borrow_slice: slice escaped its borrow");
+        };
+        let _ = keep;
+        return result;
+    };
+
+    /// 消费转移（slice-design）：整块转成可写切片，self 置空（掏空先于转移）。
+    /// owner 消灭后结构修改永不可能，窗口可逃逸、可长持——这是创建可变切片
+    /// 的常规手段。
+    public into_slice(self): []mutable T = unsafe {
+        if self.lock_depth != 0 then {
+            panic_modified_during("into_slice");
+        };
+        // 移出式交接（同 into_frozen_list）：零 retain。
+        let block = take_memory[Block[T]](&self.block as *mutable Block[T]);
+        let len = block.len;
+        init_memory[Block[T]](&self.block as *mutable Block[T], empty_block[T]());
+        self.len = 0;
+        return MutSlice[T](block, 0, len);
+    };
 
     /// Grow capacity so the list can hold `additional` more elements without reallocating.
     /// Panics when `additional` is negative（容量族负值 panic）。
@@ -88,7 +165,7 @@ given[T: Any] List[T] {
     };
 
     private ensure_capacity(self, min_capacity: Int): Void = {
-        if min_capacity > self.cap then {
+        if min_capacity > self.block.cap then {
             self.grow_to(min_capacity);
         };
     };
@@ -98,45 +175,66 @@ given[T: Any] List[T] {
     /// element then pays a call (measured 11ms vs 2ms on 5M pushes).
     private grow_to(self, min_capacity: Int): Void = unsafe {
         // 从 0 起步时先要一块够用的容量，避免 1,2,3… 逐个翻倍。
-        let mutable new_cap = if self.cap == 0 then 8
-        else self.cap * 2;
+        let mutable new_cap = if self.block.cap == 0 then 8
+        else self.block.cap * 2;
         if new_cap < min_capacity then {
             new_cap = min_capacity;
         };
-        let new_source = alloc_memory[T](UInt(new_cap));
+        let new_block = alloc_block[T](new_cap);
+        let old = self.block;
+        // 热计数（盒 len）是权威——块头是镜像，恒等同步。
         let old_len = self.len;
-        // 空列表的 source 是 null，不要交给 memmove。
+        // 换块账目（slice-design §修改纪律）：元素句柄按位搬移（不动 RC），
+        // 旧块 len 归零防其 RC-0 再析构搬走的元素。`old_len != 0` 即哨兵跳写
+        // ——immortal 空块 len 本来就是 0，不写（常量可落只读段）。
         if old_len > 0 then {
-            move_memory(new_source, self.source, UInt(old_len));
+            move_memory(new_block.elements(), old.elements(), UInt(old_len));
         };
-        dealloc_memory(self.source);
-        self.source = new_source;
-        self.cap = new_cap;
+        new_block.len = old_len;
+        if old_len != 0 then {
+            old.len = 0;
+        };
+        self.block = new_block;
     };
 
     /// Append `value` at the end of the list (amortized O(1)), without consuming the caller's value.
-    /// Every hot field is read before the growth call and re-read only in
-    /// the growth path: an opaque call in the loop forces the C backend to
-    /// reload whatever sits after it, per element. `len` flushes before
-    /// `grow_to` because growth moves exactly `len` elements.
+    /// `len` 装载**先于锁检查**：装载落在锁分支之后（非循环头块）时，热循环
+    /// 的 store→load 转发链不成立、每迭代重装（实测 ~2×）；锁门的是修改，
+    /// 读计数不是修改，前置无副作用。热字段读一次，增长路径再重读。
     public push(self, value: T): Void = {
-        let mutable source = self.source;
-        let mutable cap = self.cap;
         let len = self.len;
+        if self.lock_depth != 0 then {
+            panic_modified_during("push");
+        };
+        let mutable source = self.block.elements();
+        let mutable cap = self.block.cap;
         let next = len + 1;
         if next > cap then {
-            self.len = len;
             self.grow_to(next);
-            source = self.source;
-            cap = self.cap;
+            source = self.block.elements();
+            cap = self.block.cap;
         };
         unsafe { init_memory(source + len, value) };
+        // 块头先镜像（析构契约）、盒 len 后写（收口转发链，顺序不可换）。
+        // 写回走元素基址反推的块头指针（payload = elements() - 16）：字段赋值
+        // 形会把块句柄物化成保留副本（每 push 一对 retain/release，且不透明的
+        // copy 调用会打断后续装载的别名分析），Ref 形零 RC 流量。
+        // 布局契约见 Block.elements()。
+        unsafe {
+            init_memory(
+                ((source as *mutable UInt8) - 16) as *mutable Int,
+                next,
+            );
+        };
         self.len = next;
     };
 
     /// Append the slice of `other` picked by `span`, defaulting to the whole list
     /// -- the same span shape as `Reader.read` / `Writer.write` in `std/io/traits.koral`.
     public push_list(self, other: List[T], span: Range[Int] = ...): Void = unsafe {
+        if self.lock_depth != 0 then {
+            panic_modified_during("push_list");
+        };
         let spec = span.resolve_span(other.len);
         let start = spec.first;
         let end = spec.first + spec.second;
@@ -146,31 +244,43 @@ given[T: Any] List[T] {
         self.ensure_capacity(self.len + (end - start));
         // The same pre-load shape as `push`: the element store may alias
         // the list box, so `len` is carried locally and written back once.
-        let source = self.source;
+        let source = self.block.elements();
         let mutable len = self.len;
         for i in start..<end then {
-            let v = other.source[i];
+            let v = other.block.elements()[i];
             init_memory(source + len, v);
             len = len + 1;
         };
+        // 镜像先、盒计数后写（转发链收口，见 payload 注）。
+        init_memory(&self.block.len as *mutable Int, len);
         self.len = len;
     };
 
     // Using if is pattern matching
     /// Remove and return the last element, or `None` when the list is empty.
     public pop(self): Option[T] = {
+        if self.lock_depth != 0 then {
+            panic_modified_during("pop");
+        };
         if self.len == 0 then {
             return Option[T].None();
         };
         let len = self.len - 1;
+        // 镜像先、盒计数后写（转发链收口，见 payload 注）。
+        unsafe {
+            init_memory(&self.block.len as *mutable Int, len);
+        };
         self.len = len;
-        let value = unsafe { take_memory(self.source + len) };
+        let value = unsafe { take_memory(self.block.elements() + len) };
         return Option[T].Some(value);
     };
 
     /// Insert the slice of `other` picked by `span` (default: the whole list) at
     /// `index`, shifting later elements right. O(n). Panics when `index > count`; `other` may be `self`.
     public insert_list_at(self, index: Int, other: List[T], span: Range[Int] = ...): Void = unsafe {
+        if self.lock_depth != 0 then {
+            panic_modified_during("insert_list_at");
+        };
         if index < 0 or index > self.len then {
             panic_list_at_index("insert_list_at", index, self.len);
         };
@@ -186,14 +296,14 @@ given[T: Any] List[T] {
         // so the snapshot is unconditional.
         let mutable snap: List[T] = List[T].with_capacity(other_len);
         for j in start..<end then {
-            snap.push(other.source[j]);
+            snap.push(other.block.elements()[j]);
         };
         self.ensure_capacity(self.len + other_len);
         // Shift elements to the right by other_len
         let mutable i = self.len;
         while i > index then {
-            let src = self.source + (i - 1);
-            let dst = self.source + (i - 1 + other_len);
+            let src = self.block.elements() + (i - 1);
+            let dst = self.block.elements() + (i - 1 + other_len);
             let moved = take_memory(src);
             init_memory(dst, moved);
             i = i - 1;
@@ -203,14 +313,20 @@ given[T: Any] List[T] {
         while w > index then {
             w = w - 1;
             let popped = snap.pop().unwrap();
-            init_memory(self.source + w, popped);
+            init_memory(self.block.elements() + w, popped);
         };
-        self.len = self.len + other_len;
+        let next = self.len + other_len;
+        // 镜像先、盒计数后写（转发链收口，见 payload 注）。
+        init_memory(&self.block.len as *mutable Int, next);
+        self.len = next;
     };
 
     /// Insert `value` at `index` and shift later elements right. O(n).
     /// Panics when `index > count`; `index == count` appends.
     public insert_at(self, index: Int, value: T): Void = unsafe {
+        if self.lock_depth != 0 then {
+            panic_modified_during("insert_at");
+        };
         if index < 0 or index > self.len then {
             panic_list_at_index("insert_at", index, self.len);
         };
@@ -218,18 +334,24 @@ given[T: Any] List[T] {
         // Shift elements to the right
         let mutable i = self.len;
         while i > index then {
-            let src = self.source + (i - 1);
-            let dst = self.source + i;
+            let src = self.block.elements() + (i - 1);
+            let dst = self.block.elements() + i;
             let moved = take_memory(src);
             init_memory(dst, moved);
             i = i - 1;
         };
-        init_memory(self.source + index, value);
-        self.len = self.len + 1;
+        init_memory(self.block.elements() + index, value);
+        let next = self.len + 1;
+        // 镜像先、盒计数后写（转发链收口，见 payload 注）。
+        init_memory(&self.block.len as *mutable Int, next);
+        self.len = next;
     };
 
     /// Remove and discard the element at `index`, shifting later elements left. O(n). Panics when out of range.
     public remove_at(self, index: Int): Void = {
+        if self.lock_depth != 0 then {
+            panic_modified_during("remove_at");
+        };
         if index < 0 or index >= self.len then {
             panic_list_at_index("remove_at", index, self.len);
         };
@@ -238,20 +360,26 @@ given[T: Any] List[T] {
 
     /// Remove the element at `index` and return it, shifting later elements left. O(n). Panics when out of range.
     public take_at(self, index: Int): T = unsafe {
+        if self.lock_depth != 0 then {
+            panic_modified_during("take_at");
+        };
         if index < 0 or index >= self.len then {
             panic_list_at_index("take_at", index, self.len);
         };
-        let value = take_memory(self.source + index);
+        let value = take_memory(self.block.elements() + index);
         // Shift elements to the left
         let mutable i = index;
         while i < self.len - 1 then {
-            let src = self.source + (i + 1);
-            let dst = self.source + i;
+            let src = self.block.elements() + (i + 1);
+            let dst = self.block.elements() + i;
             let moved = take_memory(src);
             init_memory(dst, moved);
             i = i + 1;
         };
-        self.len = self.len - 1;
+        let next = self.len - 1;
+        // 镜像先、盒计数后写（转发链收口，见 payload 注）。
+        init_memory(&self.block.len as *mutable Int, next);
+        self.len = next;
         return value;
     };
 
@@ -261,31 +389,39 @@ given[T: Any] List[T] {
         if index < 0 or index >= self.len then {
             return Option[T].None();
         };
-        return Option[T].Some(unsafe { self.source[index] });
+        return Option[T].Some(unsafe { self.block.elements()[index] });
     };
 
     private __index_get(self, key: Int): T = {
         if key < 0 or key >= self.len then {
             panic_list_index(key, self.len);
         };
-        return unsafe { self.source[key] };
+        return unsafe { self.block.elements()[key] };
     };
 
     private __index_set(self, key: Int, value: T): Void = {
+        if self.lock_depth != 0 then {
+            panic_modified_during("__index_set");
+        };
         if key < 0 or key >= self.len then {
             panic_list_index(key, self.len);
         };
-        unsafe { self.source[key] = value; };
+        unsafe { self.block.elements()[key] = value; };
     };
 
     /// 内置下标 `xs[i]` 的内部操作：返回元素槽位指针。读写直接作用于槽位
     /// （成员访问语义），不再把元素按值拷进拷出；retain/release 由槽位的
     /// 读写按既有规则处理。越界 panic 与 `__index_get` 一致。
     private __index_slot(self, key: Int): *mutable T = {
+        if self.lock_depth != 0 then {
+            panic_modified_during("__index_slot");
+        };
         if key < 0 or key >= self.len then {
             panic_list_index(key, self.len);
         };
-        return unsafe { self.source + key };
+        // 地址算术内联（不调 elements()）：槽装载消去的纯度判定要看见
+        // 纯指针形，方法调用会拒掉消去（w11 rc pin 守此）。
+        return unsafe { ((&self.block.len as *mutable UInt8 + 16) as *mutable T) + key };
     };
 
     /// The first element without removing it, or `None` when the list is empty.
@@ -302,44 +438,59 @@ given[T: Any] List[T] {
     /// Whether the list has no elements.
     public is_empty(self): Bool = self.len == 0;
 
-    /// Remove every element, keeping the allocated capacity.
+    /// Remove every element. 放块形（slice-design §修改纪律与析构重入）：
+    /// owner 先换 immortal 空块，旧块交 RC-0 统一析构元素——析构重入（自摘
+    /// push/clear）见到的是空 owner，天然安全。在位 drop+清 len 的旧形会让
+    /// 重入 push 长进正在析构的块，扩容搬移把未初始化槽搬成句柄 = 二次析构。
     public clear(self): Void = unsafe {
-        for i in 0..<self.len then {
-            deinit_memory(self.source + i);
+        if self.lock_depth != 0 then {
+            panic_modified_during("clear");
         };
+        let old = take_memory[Block[T]](&self.block as *mutable Block[T]);
+        init_memory[Block[T]](&self.block as *mutable Block[T], empty_block[T]());
         self.len = 0;
+        // 旧块句柄在作用域尾释放：RC-0 跑元素析构（Block[T] 的 Drop）。
+        let _ = old;
     };
 
     /// Overwrite every element with `value`. All slots hold the one value;
     /// `type mutable` values are shared into every slot, not cloned per element.
     public fill(self, value: T): Void = {
+        if self.lock_depth != 0 then {
+            panic_modified_during("fill");
+        };
         if self.len == 0 then {
             return;
         };
         for i in 0..<self.len then {
-            unsafe { self.source[i] = value; };
+            unsafe { self.block.elements()[i] = value; };
         };
     };
 
     /// Build a new list by applying `fn` to every element, in order.
     public map[U: Any](self, fn: (T) -> U): List[U] = {
-        let mutable result = List[U].with_capacity(self.len);
-        for i in 0..<self.len then {
-            result.push(fn(unsafe { self.source[i] }));
-        };
-        return result;
+        return self.with_locked((): List[U] => {
+                let mutable result = List[U].with_capacity(self.len);
+                for i in 0..<self.len then {
+                    result.push(fn(unsafe { self.block.elements()[i] }));
+                };
+                return result;
+        });
     };
 
     /// Reverse the element order in place. O(n).
     public reverse(self): Void = unsafe {
+        if self.lock_depth != 0 then {
+            panic_modified_during("reverse");
+        };
         if self.len <= 1 then {
             return;
         };
         let mutable left = 0;
         let mutable right = self.len - 1;
         while left < right then {
-            let l = self.source + left;
-            let r = self.source + right;
+            let l = self.block.elements() + left;
+            let r = self.block.elements() + right;
             let tmp = *l;
             l[0] = r[0];
             r[0] = tmp;
@@ -354,7 +505,7 @@ given[T: Any] List[T] {
         };
         let mutable result = List[T].with_capacity(len);
         for i in 0..<len then {
-            result.push(unsafe { self.source[start + i] });
+            result.push(unsafe { self.block.elements()[start + i] });
         };
         return result;
     };
@@ -382,62 +533,70 @@ given[T: Any] List[T] {
 
     /// Retains only elements satisfying the predicate, preserving order. O(n).
     public retain(self, predicate: (T) -> Bool): Void = unsafe {
-        if self.len == 0 then {
-            return;
-        };
-        let mutable write = 0;
-        let mutable read = 0;
-        while read < self.len then {
-            let v = self.source[read];
-            if predicate(v) then {
-                if write != read then {
-                        let moved = take_memory(self.source + read);
-                init_memory(self.source + write, moved);
+        self.with_locked_void((): Void => {
+                if self.len == 0 then {
+                    return;
                 };
-                write += 1;
-            } else {
-                deinit_memory(self.source + read);
-            };
-            read += 1;
-        };
-        self.len = write;
+                let mutable write = 0;
+                let mutable read = 0;
+                while read < self.len then {
+                    let v = self.block.elements()[read];
+                    if predicate(v) then {
+                        if write != read then {
+                                let moved = take_memory(self.block.elements() + read);
+                        init_memory(self.block.elements() + write, moved);
+                        };
+                        write += 1;
+                    } else {
+                        deinit_memory(self.block.elements() + read);
+                    };
+                    read += 1;
+                };
+                // 镜像先、盒计数后写（转发链收口，见 payload 注）。
+                init_memory(&self.block.len as *mutable Int, write);
+                self.len = write;
+        });
     };
 
     /// Sort in place by the `Ord` key `key` extracts from each element.
     /// Stable: elements with equal keys keep their relative order.
     public sort_by[K: Ord](self, key: (T) -> K): Void = {
-        let len = self.len;
-        if len <= 1 then {
-            return;
-        };
-        // Short lists are one straight insertion sort: no scratch buffer, no recursion.
-        if len <= 32 then {
-            self.insertion_sort_by_key(key, 0, len);
-            return;
-        };
-        // One scratch buffer for the whole sort, reused by every merge level.
-        let buf = unsafe { alloc_memory[T](UInt(len)) };
-        self.merge_sort_by_key(key, buf, 0, len);
-        unsafe { dealloc_memory(buf) };
+        self.with_locked_void((): Void => {
+                let len = self.len;
+                if len <= 1 then {
+                    return;
+                };
+                // Short lists are one straight insertion sort: no scratch buffer, no recursion.
+                if len <= 32 then {
+                    self.insertion_sort_by_key(key, 0, len);
+                    return;
+                };
+                // One scratch buffer for the whole sort, reused by every merge level.
+                let buf = unsafe { alloc_memory[T](UInt(len)) };
+                self.merge_sort_by_key(key, buf, 0, len);
+                unsafe { dealloc_memory(buf) };
+        });
     };
 
     /// Binary search by the key `key` extracts; the list must already be sorted by that key.
     /// Returns `(index, true)` when found, `(insertion_point, false)` otherwise. O(log n).
     public binary_search_by[K: Ord](self, key: (T) -> K, target: K): Pair[Int, Bool] = {
-        let mutable lo = 0;
-        let mutable hi = self.len;
-        while lo < hi then {
-            let mid = lo + (hi - lo) / 2;
-            let k = key(unsafe { self.source[mid] });
-            if k == target then {
-                return Pair[Int, Bool](mid, true);
-            } else if k < target then {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            };
-        };
-        return Pair[Int, Bool](lo, false);
+        return self.with_locked((): Pair[Int, Bool] => {
+                let mutable lo = 0;
+                let mutable hi = self.len;
+                while lo < hi then {
+                    let mid = lo + (hi - lo) / 2;
+                    let k = key(unsafe { self.block.elements()[mid] });
+                    if k == target then {
+                        return Pair[Int, Bool](mid, true);
+                    } else if k < target then {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    };
+                };
+                return Pair[Int, Bool](lo, false);
+        });
     };
 };
 
@@ -446,12 +605,12 @@ given[T: foreign] List[T] {
 
     /// The element buffer as a raw `*T`, for `foreign` elements only -- the FFI
     /// bridge, not a generic escape hatch. Invalid after any reallocation or drop.
-    public borrow_ptr(self): *T = self.source;
+    public borrow_ptr(self): *T = self.block.elements();
 
     /// The element buffer as a raw `*mutable T`, for `foreign` elements only -- the
     /// FFI bridge, not a generic escape hatch. Invalid after any reallocation or drop.
     public borrow_mut_ptr(self): *mutable T = {
-        return self.source;
+        return self.block.elements();
     };
 };
 
@@ -462,7 +621,7 @@ given[T: Any] List[T]: Clone {
     public clone(self): Self = unsafe {
         let mutable result = List[T].with_capacity(self.len);
         for i in 0..<self.len then {
-            result.push(self.source[i]);
+            result.push(self.block.elements()[i]);
         };
         return result;
     };
@@ -480,15 +639,17 @@ given[T: Eq] List[T]: Eq {
 
     /// Whether `other` has the same length and pairwise-equal elements.
     public equals(self, other: List[T]): Bool = unsafe {
-        if self.len != other.len then {
-            return false;
-        };
-        for i in 0..<self.len then {
-            if self.source[i] != other.source[i] then {
-                return false;
-            };
-        };
-        return true;
+        return self.with_locked((): Bool => {
+                if self.len != other.len then {
+                    return false;
+                };
+                for i in 0..<self.len then {
+                    if self.block.elements()[i] != other.block.elements()[i] then {
+                        return false;
+                    };
+                };
+                return true;
+        });
     };
 };
 
@@ -497,11 +658,13 @@ given[T: Hash] List[T]: Hash {
 
     /// A hash of the element sequence: length and elements combined in order.
     public hash(self): UInt = unsafe {
-        let mutable h: UInt = self.len.hash();
-        for i in 0..<self.len then {
-            h = h.combine_hash(self.source[i].hash());
-        };
-        return h;
+        return self.with_locked((): UInt => {
+                let mutable h: UInt = self.len.hash();
+                for i in 0..<self.len then {
+                    h = h.combine_hash(self.block.elements()[i].hash());
+                };
+                return h;
+        });
     };
 };
 
@@ -511,26 +674,28 @@ given[T: Ord] List[T]: Ord {
     /// Lexicographic three-way comparison (`-1`, `0`, or `1`); the shorter list
     /// is smaller when one is a prefix of the other.
     public compare(self, other: List[T]): Int = unsafe {
-        let self_len = self.len;
-        let other_len = other.len;
-        let limit = if self_len < other_len then self_len else other_len;
+        return self.with_locked((): Int => {
+                let self_len = self.len;
+                let other_len = other.len;
+                let limit = if self_len < other_len then self_len else other_len;
 
-        let mutable idx = 0;
-        while idx < limit then {
-            let ord = self.source[idx].compare(other.source[idx]);
-            if ord != 0 then {
-                return ord;
-            };
-            idx += 1;
-        };
+                let mutable idx = 0;
+                while idx < limit then {
+                    let ord = self.block.elements()[idx].compare(other.block.elements()[idx]);
+                    if ord != 0 then {
+                        return ord;
+                    };
+                    idx += 1;
+                };
 
-        if self_len < other_len then {
-            return -1;
-        };
-        if self_len > other_len then {
-            return 1;
-        };
-        return 0;
+                if self_len < other_len then {
+                    return -1;
+                };
+                if self_len > other_len then {
+                    return 1;
+                };
+                return 0;
+        });
     };
 };
 
@@ -539,37 +704,43 @@ given[T: Eq] List[T] {
 
     /// Whether any element equals `value`. O(n).
     public contains(self, value: T): Bool = unsafe {
-        for i in 0..<self.len then {
-            if self.source[i] == value then {
-                return true;
-            };
-        };
-        return false;
+        return self.with_locked((): Bool => {
+                for i in 0..<self.len then {
+                    if self.block.elements()[i] == value then {
+                        return true;
+                    };
+                };
+                return false;
+        });
     };
 
     /// Removes consecutive duplicate elements. O(n).
     /// For global dedup, sort first then call dedup.
     public dedup(self): Void = unsafe {
-        if self.len <= 1 then {
-            return;
-        };
-        let mutable write = 1;
-        let mutable read = 1;
-        while read < self.len then {
-            let prev = self.source[write - 1];
-            let curr = self.source[read];
-            if curr != prev then {
-                if write != read then {
-                        let moved = take_memory(self.source + read);
-                init_memory(self.source + write, moved);
+        self.with_locked_void((): Void => {
+                if self.len <= 1 then {
+                    return;
                 };
-                write += 1;
-            } else {
-                deinit_memory(self.source + read);
-            };
-            read += 1;
-        };
-        self.len = write;
+                let mutable write = 1;
+                let mutable read = 1;
+                while read < self.len then {
+                    let prev = self.block.elements()[write - 1];
+                    let curr = self.block.elements()[read];
+                    if curr != prev then {
+                        if write != read then {
+                                let moved = take_memory(self.block.elements() + read);
+                        init_memory(self.block.elements() + write, moved);
+                        };
+                        write += 1;
+                    } else {
+                        deinit_memory(self.block.elements() + read);
+                    };
+                    read += 1;
+                };
+                // 镜像先、盒计数后写（转发链收口，见 payload 注）。
+                init_memory(&self.block.len as *mutable Int, write);
+                self.len = write;
+        });
     };
 };
 
@@ -579,9 +750,13 @@ public let make_bytes(count: Int): List[UInt8] = {
     if count == 0 then {
         return bytes;
     };
-    let data = bytes.source;
+    let data = bytes.block.elements();
     for i in 0..<count then {
         unsafe { init_memory(data + i, UInt8(0)) };
+    };
+    // 镜像先、盒计数后写（转发链收口，见 payload 注）。
+    unsafe {
+        init_memory(&bytes.block.len as *mutable Int, count);
     };
     bytes.len = count;
     return bytes;
@@ -593,6 +768,10 @@ public let make_bytes(count: Int): List[UInt8] = {
 /// 读出的值不可观测地任意。
 public let unsafe make_uninitialized_bytes(count: Int): List[UInt8] = {
     let mutable bytes = List[UInt8].with_capacity(count);
+    // 镜像先、盒计数后写（转发链收口，见 payload 注）。
+    unsafe {
+        init_memory(&bytes.block.len as *mutable Int, count);
+    };
     bytes.len = count;
     return bytes;
 };
@@ -606,8 +785,13 @@ protected let push_byte_slice(target: List[UInt8], ptr: *UInt8, count: Int): Voi
         return;
     };
     target.reserve(count);
-    unsafe { copy_memory(target.source + target.len, ptr, UInt(count)) };
-    target.len = target.len + count;
+    unsafe { copy_memory(target.block.elements() + target.len, ptr, UInt(count)) };
+    let next = target.len + count;
+    // 镜像先、盒计数后写（转发链收口，见 payload 注）。
+    unsafe {
+        init_memory(&target.block.len as *mutable Int, next);
+    };
+    target.len = next;
 };
 
 // ============================================================================
@@ -621,7 +805,7 @@ given[T: Any] ListIterator[T]: Iterator[T] {
         if self.index >= self.source.len then {
             return Option[T].None();
         };
-        let value = unsafe { self.source.source[self.index] };
+        let value = unsafe { self.source.block.elements()[self.index] };
         self.index = self.index + 1;
         return Option[T].Some(value);
     };
@@ -651,7 +835,7 @@ given[T: Any] List[T] {
         if end <= start then {
             return;
         };
-        let source = self.source;
+        let source = self.block.elements();
         let startp = source + start;
         let lastp = source + end;
         let mutable ip = startp + 1;
@@ -684,7 +868,7 @@ given[T: Any] List[T] {
         self.merge_sort_by_key(key, buf, mid, end);
         // Already in order: the left run's maximum key is <= the right run's
         // minimum key, so the merge would copy every element onto itself.
-        let source = self.source;
+        let source = self.block.elements();
         if unsafe { key(source[mid - 1]) <= key(source[mid]) } then {
             return;
         };
@@ -711,7 +895,7 @@ given[T: Any] List[T] {
         mid: Int,
         end: Int,
     ): Void = unsafe {
-        let source = self.source;
+        let source = self.block.elements();
         let left_end = buf + (mid - start);
         move_memory(buf, source + start, UInt(mid - start));
 
@@ -749,38 +933,42 @@ given[T: Ord] List[T] {
     /// Binary search on a sorted list. O(log n).
     /// Returns `(index, true)` if found, `(insertion_point, false)` if not found.
     public binary_search(self, target: T): Pair[Int, Bool] = {
-        let mutable lo = 0;
-        let mutable hi = self.len;
-        while lo < hi then {
-            let mid = lo + (hi - lo) / 2;
-            let v = unsafe { self.source[mid] };
-            if v == target then {
-                return Pair[Int, Bool](mid, true);
-            } else if v < target then {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            };
-        };
-        return Pair[Int, Bool](lo, false);
+        return self.with_locked((): Pair[Int, Bool] => {
+                let mutable lo = 0;
+                let mutable hi = self.len;
+                while lo < hi then {
+                    let mid = lo + (hi - lo) / 2;
+                    let v = unsafe { self.block.elements()[mid] };
+                    if v == target then {
+                        return Pair[Int, Bool](mid, true);
+                    } else if v < target then {
+                        lo = mid + 1;
+                    } else {
+                        hi = mid;
+                    };
+                };
+                return Pair[Int, Bool](lo, false);
+        });
     };
 
     /// Sort in place in ascending order using the `Ord` trait.
     /// Stable: equal elements keep their relative order.
     public sort(self): Void = {
-        let len = self.len;
-        if len <= 1 then {
-            return;
-        };
-        // Short lists are one straight insertion sort: no scratch buffer, no recursion.
-        if len <= 32 then {
-            self.insertion_sort_comparable(0, len);
-            return;
-        };
-        // One scratch buffer for the whole sort, reused by every merge level.
-        let buf = unsafe { alloc_memory[T](UInt(len)) };
-        self.merge_sort_comparable(buf, 0, len);
-        unsafe { dealloc_memory(buf) };
+        self.with_locked_void((): Void => {
+                let len = self.len;
+                if len <= 1 then {
+                    return;
+                };
+                // Short lists are one straight insertion sort: no scratch buffer, no recursion.
+                if len <= 32 then {
+                    self.insertion_sort_comparable(0, len);
+                    return;
+                };
+                // One scratch buffer for the whole sort, reused by every merge level.
+                let buf = unsafe { alloc_memory[T](UInt(len)) };
+                self.merge_sort_comparable(buf, 0, len);
+                unsafe { dealloc_memory(buf) };
+        });
     };
 
     // Straight insertion sort over [start, end) for short runs (stable):
@@ -794,7 +982,7 @@ given[T: Ord] List[T] {
         if end <= start then {
             return;
         };
-        let source = self.source;
+        let source = self.block.elements();
         let startp = source + start;
         let lastp = source + end;
         let mutable ip = startp + 1;
@@ -820,18 +1008,20 @@ given[T: Ord] List[T] {
     /// as the last-resort arm: no scratch buffer, O(log n) stack, O(n log n)
     /// worst case.
     public sort_unstable(self): Void = {
-        let len = self.len;
-        if len <= 1 then {
-            return;
-        };
-        // Recursion budget: 2 * floor(log2(len)).
-        let mutable depth = 0;
-        let mutable p = 1;
-        while p < len then {
-            p = p * 2;
-            depth = depth + 1;
-        };
-        self.pdqsort_comparable(0, len, depth * 2);
+        self.with_locked_void((): Void => {
+                let len = self.len;
+                if len <= 1 then {
+                    return;
+                };
+                // Recursion budget: 2 * floor(log2(len)).
+                let mutable depth = 0;
+                let mutable p = 1;
+                while p < len then {
+                    p = p * 2;
+                    depth = depth + 1;
+                };
+                self.pdqsort_comparable(0, len, depth * 2);
+        });
     };
 
     /// Exchange two slots; RC-neutral (two takes, two inits). A self-swap is
@@ -840,7 +1030,7 @@ given[T: Ord] List[T] {
         if a == b then {
             return;
         };
-        let source = self.source;
+        let source = self.block.elements();
         let pa = source + a;
         let pb = source + b;
         let ta = take_memory(pa);
@@ -923,7 +1113,7 @@ given[T: Ord] List[T] {
     /// sorted -- pdqsort's fast path. `true` = the block comes out sorted;
     /// `false` = it needs a real partition (the prefix is still valid).
     private partial_insertion_sort(self, start: Int, end: Int): Bool = unsafe {
-        let source = self.source;
+        let source = self.block.elements();
         let startp = source + start;
         let mutable moves = 0;
         let mutable ip = source + start + 1;
@@ -954,7 +1144,7 @@ given[T: Ord] List[T] {
     /// partition order advances without swapping, so the predictor sees
     /// streaks and only inversions pay a swap.
     private partition_le(self, s: Int, e: Int, pivot_val: T): Int = unsafe {
-        let source = self.source;
+        let source = self.block.elements();
         let mutable lo = s;
         let mutable hi = e - 1;
         while lo < hi then {
@@ -978,7 +1168,7 @@ given[T: Ord] List[T] {
 
     /// The median of three slot values, moving nothing.
     private median3_val(self, a: Int, b: Int, c: Int): T = unsafe {
-        let source = self.source;
+        let source = self.block.elements();
         let va = (source + a)[0];
         let vb = (source + b)[0];
         let vc = (source + c)[0];
@@ -1067,7 +1257,7 @@ given[T: Ord] List[T] {
 
     /// Sift slot `start + root` down through the first `count` slots.
     private sift_down_comparable(self, start: Int, root: Int, count: Int): Void = unsafe {
-        let source = self.source;
+        let source = self.block.elements();
         let mutable r = root;
         while true then {
             let left = r * 2 + 1;
@@ -1104,7 +1294,7 @@ given[T: Ord] List[T] {
         self.merge_sort_comparable(buf, mid, end);
         // Already in order: the left run's maximum is <= the right run's
         // minimum, so the merge would copy every element onto itself.
-        let source = self.source;
+        let source = self.block.elements();
         if unsafe { source[mid - 1] <= source[mid] } then {
             return;
         };
@@ -1124,7 +1314,7 @@ given[T: Ord] List[T] {
     // pointer walks: pointer arithmetic is unchecked, so the hot loop pays no
     // per-step overflow-guard calls.
     private merge_comparable(self, buf: *mutable T, start: Int, mid: Int, end: Int): Void = unsafe {
-        let source = self.source;
+        let source = self.block.elements();
         let left_end = buf + (mid - start);
         move_memory(buf, source + start, UInt(mid - start));
 
@@ -1172,19 +1362,9 @@ given[T: Ord] List[T] {
 /// with their source). The `mutable` form is where the owned buffer's
 /// destructor lives (user destructors are `type mutable` only); the snapshot
 /// itself is immutable after construction.
-public type unsafe sendable mutable FrozenList[T: Any](protected data: *mutable T, protected len: Int);
-
-/// `Drop` for `FrozenList[T]`: frees every element and the buffer when the
-/// last handle dies.
-given[T: Any] FrozenList[T]: Drop {
-
-    drop(self): Void = unsafe {
-        for i in 0..<self.len then {
-            deinit_memory(self.data + i);
-        };
-        dealloc_memory(self.data);
-    };
-};
+/// 存储是统一存储块（slice-design）：快照是写死块（构造期写完永不再写），
+/// 元素释放由块的 RC-0 统一做。
+public type unsafe sendable mutable FrozenList[T: Any](protected block: Block[T]);
 
 /// A one-shot cursor that walks a `FrozenList[T]` from index 0 to the end.
 public type mutable FrozenListIterator[T: Any](source: FrozenList[T], mutable index: Int);
@@ -1192,23 +1372,28 @@ public type mutable FrozenListIterator[T: Any](source: FrozenList[T], mutable in
 /// Read-only access over a `FrozenList[T]`.
 given[T: Any] FrozenList[T] {
 
+    /// 只读切片窗口（slice-design）：`[]T`，零拷贝（写死块生而不可变）。
+    public as_slice(self): []T = {
+        return Slice[T](self.block, 0, self.block.len);
+    };
+
     /// The number of elements in the snapshot.
-    public count(self): Int = self.len;
+    public count(self): Int = self.block.len;
 
     /// Whether the snapshot has no elements.
-    public is_empty(self): Bool = self.len == 0;
+    public is_empty(self): Bool = self.block.len == 0;
 
     /// The element at `index`, or `None` when the index is out of range.
     public get(self, index: Int): Option[T] = {
-        if index < 0 or index >= self.len then {
+        if index < 0 or index >= self.block.len then {
             return Option[T].None();
         };
-        return Option[T].Some(unsafe { self.data[index] });
+        return Option[T].Some(unsafe { self.block.elements()[index] });
     };
 
     /// Copy the snapshot back out as a fresh mutable `List[T]`.
     public to_list(self): List[T] = {
-        let mutable out = List[T].with_capacity(self.len);
+        let mutable out = List[T].with_capacity(self.block.len);
         for e in self then {
             out.push(e);
         };
@@ -1219,10 +1404,10 @@ given[T: Any] FrozenList[T] {
     // `__index_slot`, so a frozen subscript can never be a write target.
     // Out-of-range panic matches the mutable `List` subscript exactly.
     private __index_get(self, key: Int): T = {
-        if key < 0 or key >= self.len then {
-            panic_list_index(key, self.len);
+        if key < 0 or key >= self.block.len then {
+            panic_list_index(key, self.block.len);
         };
-        return unsafe { self.data[key] };
+        return unsafe { self.block.elements()[key] };
     };
 };
 
@@ -1231,12 +1416,12 @@ given[T: Eq] FrozenList[T] {
 
     /// Whether any element equals `value`. O(n).
     public contains(self, value: T): Bool = unsafe {
-        for i in 0..<self.len then {
-            if self.data[i] == value then {
-                return true;
+            for i in 0..<self.block.len then {
+                if self.block.elements()[i] == value then {
+                    return true;
+                };
             };
-        };
-        return false;
+            return false;
     };
 };
 
@@ -1245,8 +1430,8 @@ given[T: Any] FrozenListIterator[T]: Iterator[T] {
 
     /// Yield the next element, or `None` after the last one.
     public next(self): Option[T] = {
-        if self.index < self.source.len then {
-            let value = unsafe { self.source.data[self.index] };
+        if self.index < self.source.block.len then {
+            let value = unsafe { self.source.block.elements()[self.index] };
             self.index = self.index + 1;
             return Option[T].Some(value);
         };
@@ -1269,24 +1454,29 @@ given[T: Any] List[T] {
     /// shared element handles.
     public to_frozen_list(self): FrozenList[T] = unsafe {
         let len = self.len;
-        let data = alloc_memory[T](UInt(len));
+        let block = alloc_block[T](len);
         for i in 0..<len then {
-            init_memory(data + i, self.source[i]);
+            init_memory(block.elements() + i, self.block.elements()[i]);
         };
-        return FrozenList[T](data, len);
+        block.len = len;
+        return FrozenList[T](block);
     };
 
-    /// Transfer the whole buffer into a `FrozenList[T]` in O(1): the elements'
+    /// Transfer the whole block into a `FrozenList[T]` in O(1): the elements'
     /// ownership travels with the block -- nothing is copied, nothing is
     /// retained. The list is left empty and reusable. Where `to_frozen_list`
     /// copies a snapshot out, `into_frozen` hands the storage over; the
     /// elements die when the frozen snapshot dies.
-    public into_frozen_list(self): FrozenList[T] = {
-        let data = self.source;
-        let len = self.len;
-        self.source = unsafe { alloc_memory[T](UInt(1)) };
+    /// 掏空先于转移（slice-design §修改纪律）：先换 immortal 空块，再交块。
+    public into_frozen_list(self): FrozenList[T] = unsafe {
+        if self.lock_depth != 0 then {
+            panic_modified_during("into_frozen_list");
+        };
+        // 存储移交（slice-design §修改纪律）：块句柄按移出交接——零 retain
+        // 零拷贝（rc counter pin 的 w7 守此：hand-off, not a copy）。
+        let block = take_memory[Block[T]](&self.block as *mutable Block[T]);
+        init_memory[Block[T]](&self.block as *mutable Block[T], empty_block[T]());
         self.len = 0;
-        self.cap = 1;
-        return FrozenList[T](data, len);
+        return FrozenList[T](block);
     };
 };

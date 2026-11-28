@@ -222,17 +222,19 @@ static inline uintptr_t __koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t 
 }
 
 // String 字节块的堆载荷布局。与 std/string.koral 的 `type mutable Bytes(data,
-// len)` 字段序耦合，字面量发射（generate_string_literal）同样按 {data, len}
-// 组织静态块——三处一致是 ABI，改动要同步。
-struct __koral_StringPayload {
-    void* data;
+// 统一存储块的 payload 头（slice-design）：{len, cap}，元素区内联其后
+// （payload+16 = align_up(24, alignof(T))==24 处）。字面量发射
+// （generate_string_literal ×2 编译器）与 __koral_string_alloc 同按此形组织
+// 静态/动态块——三处一致是 ABI，改动要同步。
+struct __koral_BlockPayload {
     uintptr_t len;
+    uintptr_t cap;
 };
 
-// 单块 String 对象：一次分配 [Control | payload | bytes(len + 1)]，字节未
-// 初始化、仅 [len] 置 0，data 指向块内字节尾部（不是独立缓冲）。返回
-// payload 地址（即句柄里的 ptr）。strong=1 / weak=1 与 codegen 的受管构造
-// 一致。alloc_bytes intrinsic 的运行时侧。
+// 单块 String 对象：一次分配 [Control | payload{len,cap} | bytes(len + 1)]，
+// 字节未初始化、仅 [len] 置 0（NUL 尾占 cap 的一格）。返回 payload 地址
+// （即句柄里的 ptr）。strong=1 / weak=1 与 codegen 的受管构造一致。
+// alloc_bytes intrinsic 的运行时侧。
 void* __koral_string_alloc(uintptr_t len);
 
 // The checked array allocator behind `alloc_memory`: a size that overflows
@@ -348,6 +350,26 @@ uint32_t __koral_hardware_concurrency(void);
 // 慢路径：强引用归零后调 dtor 销毁 payload，再释放「payload 存活」持有的
 // 隐式 weak。free 由 weak_count 到 0 的唯一判定点决定（见 __koral_weak_release）。
 void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor);
+
+// ---- 统一存储块（slice design）------------------------------------------
+// 块布局：[ Control | len | cap | 元素区… ]，24B 头（len/cap 是 Koral Int =
+// uintptr_t），元素区基址 = 块地址 + align_up(24, 元素对齐)，步长 elem_size。
+// 句柄 = payload（&len），与瘦指针约定一致。
+//
+// immortal 空块：strong = weak = -1、len = cap = 0 的静态常量，空 owner/空窗
+// 持用——合成释放走负数早退，杜绝 release(NULL)（会算出 NULL - sizeof(Control)）。
+// 常量落**可写段**（.data，非 .rodata）：增长/放块路径对负数哨兵跳过 len 写是
+// 承重条款，可写段是双保险——.rodata 上写 len 会让空列表首次 push segfault。
+void* __koral_empty_block(void);
+
+// 分配统一存储块：容量 cap 个元素（步长 elem_size、元素区按 elem_align 对齐）、
+// len = 0；strong = 1 / weak = 1（含隐式 weak，与 codegen 受管构造一致）。
+// elem_align 取 1..16 的 2 次幂；块总开销 = align_up(24, elem_align) + cap×elem_size。
+void* __koral_block_alloc(uint64_t cap, uint64_t elem_size, uint64_t elem_align);
+
+// 强引用计数只读观测（slice design 的逃逸检查用）：不动计数；负数哨兵
+// （immortal -1 / 析构窗口 -2）照常返回，判读归调用方。
+int32_t __koral_strong_count(uint8_t* payload);
 
 // ---- control 层原语 ----
 // 入参是 control 块指针。仅供 `_value` 包装和弱引用内部使用；

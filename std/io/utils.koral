@@ -19,7 +19,7 @@ given Reader {
         let mutable out: List[UInt8] = [];
         let mutable chunk = make_bytes(4096);
         while true then {
-            when self.read(into = chunk, span = ...) in {
+            when chunk.borrow_slice((s) => self.read(into = s)) in {
                 .Ok(n) then {
                     if n == 0 then {
                         return .Ok(out);
@@ -39,12 +39,12 @@ given Reader {
         let mutable chunk = make_bytes(4096);
         let mutable total = 0;
         while true then {
-            when self.read(into = chunk, span = ...) in {
+            when chunk.borrow_slice((s) => self.read(into = s)) in {
                 .Ok(n) then {
                     if n == 0 then {
                         return .Ok(total);
                     };
-                    let _ = dst.write_all(from = chunk, span = 0..<n) or return;
+                    let _ = chunk.borrow_slice((s) => dst.write_all(from = s[0..<n])) or return;
                     total += n;
                 },
                 .Error(e) then {
@@ -65,15 +65,13 @@ given Writer {
 
     /// Write all bytes in `from[span]` to self, looping on short writes. `span`
     /// defaults to the whole buffer, like `Writer.write`.
-    public write_all(self, from: List[UInt8] =, span: Range[Int] = ...): Result[Void] = {
-        let spec = span.resolve_span(from.count());
-        let mutable start = spec.first;
-        let end = spec.first + spec.second;
+    public write_all(self, from: []UInt8 =): Result[Void] = {
+        let mutable start = 0;        let end = from.count();
         if end <= start then {
             return .Ok({});
         };
         while start < end then {
-            when self.write(from = from, span = start..<end) in {
+            when self.write(from = from[start..<end]) in {
                 .Ok(n) then {
                     if n == 0 then {
                         return .Error(IoError.WriteZero());

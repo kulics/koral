@@ -1,0 +1,61 @@
+// EXPECT: PASS
+// 析构重入（slice-design §修改纪律与析构重入）：放块/腾位形（clear/pop/
+// remove_at/take_at）逐步一致、不加锁——元素析构里再 push 是合法的自摘模式
+// （在位压缩形的重入 panic 见 slice_retain_drop_reentry_panic）。
+// drop 链按 id-1 递降、id 0 惰性封底（无界自生链会把析构递归成栈溢出）；
+// 收尾解除武装，让列表最后一轮析构安静退场。
+let mutable g_armed: Bool = true;
+
+type mutable Bomb(owner: List[Bomb], id: Int);
+
+given Bomb: Drop {
+    drop(self): Void = {
+        if g_armed and self.id > 0 then {
+            self.owner.push(Bomb(self.owner, self.id - 1));
+        };
+    };
+};
+
+// pop/take_at 的返回值析构点：助手帧尾即析构（`let _ =` 的临时活到外层作用
+// 域尾，重入时机会偏移——这里收拢成帧内确定时机）。
+let drop_pop(xs: List[Bomb]): Void = {
+    let p = xs.pop();
+    let _ = p;
+};
+
+let drop_take(xs: List[Bomb]): Void = {
+    let t = xs.take_at(0);
+    let _ = t;
+};
+
+let main(): Int = {
+    let xs = List[Bomb].new();
+    xs.push(Bomb(xs, 2));
+    xs.push(Bomb(xs, 2));
+    xs.push(Bomb(xs, 2));
+    assert(xs.count() == 3, "initial");
+
+    // remove_at 腾位后释旧：drop 里 push 回同一列表 → 安全。
+    xs.remove_at(1);
+    assert(xs.count() == 3, "remove_at reentry");
+
+    // pop 同形。
+    drop_pop(xs);
+    assert(xs.count() == 3, "pop reentry");
+
+    // take_at 同形。
+    drop_take(xs);
+    assert(xs.count() == 3, "take_at reentry");
+
+    // clear = 放块：元素析构里 push（重入者见空 owner）→ 安全。
+    xs.clear();
+    assert(xs.count() == 2, "clear reentry");
+
+    // 收尾：解除武装后析构不再自摘，最后一轮放块安静。
+    g_armed = false;
+    xs.clear();
+    assert(xs.count() == 0, "disarmed clear");
+
+    println("PASS");
+    return 0;
+};

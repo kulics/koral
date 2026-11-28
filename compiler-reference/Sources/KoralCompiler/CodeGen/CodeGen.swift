@@ -589,10 +589,10 @@ public class CodeGen {
       byteLiterals += ", "
     }
     byteLiterals += "0x00"
-    buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
-    // The payload is `__koral_StringPayload` -- the `Bytes` managed-block
-    // layout (see std/koral_runtime.h).
-    buffer += "static const struct { struct __koral_Control ctrl; struct __koral_StringPayload payload; } \(storageVar)_block = { { -1, -1 }, { (uint8_t*)\(bytesVar), \(utf8Bytes.count) } };\n"
+    // The payload is the unified storage-block shape `__koral_BlockPayload`
+    // {len, cap} with the byte area inline right after (payload+16, the
+    // Block[T].elements() formula -- see std/koral_runtime.h).
+    buffer += "static const struct { struct __koral_Control ctrl; struct __koral_BlockPayload payload; uint8_t bytes[\(utf8Bytes.count + 1)]; } \(storageVar)_block = { { -1, -1 }, { \(utf8Bytes.count), \(utf8Bytes.count + 1) }, { \(byteLiterals) } };\n"
     return "{ .bytes = { .ptr = (void*)&\(storageVar)_block.payload }, .off = 0, .len = \(utf8Bytes.count) }"
   }
 
@@ -1351,6 +1351,12 @@ public class CodeGen {
     let cName = cIdentifier(for: identifier)
     let returnType = getFunctionReturnType(identifier.type)
     let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
+    // 与 koralc 的 emit_function_declaration 同规：Never 返回的函数声明带
+    // `_Noreturn`——定义侧（generateMIRGlobalFunction）必须同缀，属性失配
+    // 会让 clang 丢掉 noreturn，热循环冷路径的 Never 助手退化成全量 clobber。
+    if case .function(_, let ret, _) = identifier.type, ret == .never {
+      buffer += "_Noreturn "
+    }
     buffer += "\(returnType) \(cName)(\(paramList));\n"
   }
 
@@ -1845,15 +1851,14 @@ public class CodeGen {
     }
     byteLiterals += "0x00"
     addIndent()
-    buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
-
     // Immortal header (the immortal-object trick): strong = -1 makes
     // retain/release bail out, weak = -1 is the sentinel the weak ops check.
-    // The payload is `__koral_StringPayload` -- the `Bytes` managed-block
-    // layout (see std/koral_runtime.h). A literal block is never freed, so
-    // there is no per-eval allocation at all.
+    // The payload is the unified storage-block shape `__koral_BlockPayload`
+    // {len, cap} with the byte area inline right after (payload+16, the
+    // Block[T].elements() formula -- see std/koral_runtime.h). A literal
+    // block is never freed, so there is no per-eval allocation at all.
     addIndent()
-    buffer += "static const struct { struct __koral_Control ctrl; struct __koral_StringPayload payload; } \(storageVar)_block = { { -1, -1 }, { (uint8_t*)\(bytesVar), \(utf8Bytes.count) } };\n"
+    buffer += "static const struct { struct __koral_Control ctrl; struct __koral_BlockPayload payload; uint8_t bytes[\(utf8Bytes.count + 1)]; } \(storageVar)_block = { { -1, -1 }, { \(utf8Bytes.count), \(utf8Bytes.count + 1) }, { \(byteLiterals) } };\n"
 
     let cType = cTypeName(type)
     // The value shape: String = { bytes: handle, off: window start, len: content length }.

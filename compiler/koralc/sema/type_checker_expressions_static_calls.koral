@@ -533,6 +533,65 @@ given TypeChecker {
         );
     };
 
+    /// `alloc_block[T](cap)`：统一存储块分配（slice-design；运行时
+    /// `__koral_block_alloc`，布局 `[Control | len | cap | 元素区]`）。
+    check_alloc_block_intrinsic(
+        self,
+        intrinsic_type_args: List[Type],
+        args: List[Expr],
+        scope: Scope,
+    ): Option[TypedExpr] = {
+        if args.count() != 1 then {
+            return Option[TypedExpr].None();
+        };
+        let elem_type = self.first_type_arg_or_unknown(intrinsic_type_args);
+        when elem_type in {
+            .Unknown() then {
+                return Option[TypedExpr].None();
+            },
+            _ then {},
+        };
+        let cap = self.check_expr_scoped_ref(args[0], .None(), scope);
+        let result_type = self.block_storage_instance(elem_type, unknown_span());
+        return Option[TypedExpr].Some(
+            make_typed_expr(
+                TypedExprKind.IntrinsicCall(
+                    TypedIntrinsic.AllocBlock(cap, elem_type, result_type),
+                ),
+                result_type,
+            ),
+        );
+    };
+
+    /// `empty_block[T]()`：immortal 空块（slice-design；不分配、负数哨兵，
+    /// 空 owner/空窗持用）。
+    check_empty_block_intrinsic(
+        self,
+        intrinsic_type_args: List[Type],
+        args: List[Expr],
+        scope: Scope,
+    ): Option[TypedExpr] = {
+        if args.count() != 0 then {
+            return Option[TypedExpr].None();
+        };
+        let elem_type = self.first_type_arg_or_unknown(intrinsic_type_args);
+        when elem_type in {
+            .Unknown() then {
+                return Option[TypedExpr].None();
+            },
+            _ then {},
+        };
+        let result_type = self.block_storage_instance(elem_type, unknown_span());
+        return Option[TypedExpr].Some(
+            make_typed_expr(
+                TypedExprKind.IntrinsicCall(
+                    TypedIntrinsic.EmptyBlock(result_type),
+                ),
+                result_type,
+            ),
+        );
+    };
+
     /// `compare_memory(a, b, count)`：批量字节比较（语义见 std/primitives.koral）。
     check_compare_memory_intrinsic(
         self,
@@ -1733,7 +1792,8 @@ given TypeChecker {
     /// for everyone. Mirrored in the Swift reference's
     /// `nonpublicIntrinsicNames`.
     private nonpublic_intrinsic_names_contain(self, name: String): Bool = {
-        return name == "alloc_bytes" or name == "spawn_thread";
+        return name == "alloc_bytes" or name == "spawn_thread"
+            or name == "alloc_block" or name == "empty_block";
     };
 
     check_intrinsic_call_ref(
@@ -1791,6 +1851,14 @@ given TypeChecker {
 
         if intrinsic_name == "alloc_bytes" then {
             return self.check_alloc_bytes_intrinsic(args, scope);
+        };
+
+        if intrinsic_name == "alloc_block" then {
+            return self.check_alloc_block_intrinsic(intrinsic_type_args, args, scope);
+        };
+
+        if intrinsic_name == "empty_block" then {
+            return self.check_empty_block_intrinsic(intrinsic_type_args, args, scope);
         };
 
         if intrinsic_name == "compare_memory" then {

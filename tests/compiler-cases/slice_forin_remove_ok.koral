@@ -1,0 +1,29 @@
+// EXPECT: PASS
+// retain-first（slice-design §跨用户代码的元素保留）：for-in 无锁无检查下，
+// 循环变量是保留形——体里 remove 释放槽位后 e 仍是活对象。同尺寸堆串回收已
+// 释放槽：无保留形时 e 会读到回收值（首字节 88 而不是 65），探针即可检出。
+let heap_pair(prefix: String, n: Int): String = {
+    return prefix + n.to_string();
+};
+
+let main(): Int = {
+    let xs = List[String].new();
+    xs.push(heap_pair("A", 0));
+    xs.push(heap_pair("A", 1));
+    xs.push(heap_pair("A", 2));
+    xs.push(heap_pair("A", 3));
+
+    let mutable kept = 0;
+    for e in xs then {
+        xs.remove_at(0);
+        // 同尺寸堆串（"X?"/2 字节）回收已释放槽。
+        let junk = heap_pair("X", kept);
+        assert(e.count() == 2 and e[0] == 65, "loop variable must survive removal");
+        let _ = junk.count();
+        kept += 1;
+    };
+    assert(kept >= 1, "cursor yielded at least once");
+
+    println("PASS");
+    return 0;
+};

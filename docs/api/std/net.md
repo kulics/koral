@@ -355,13 +355,13 @@ given TcpSocket {
 given TcpSocket: Reader {
     /// Reader trait: read bytes into into[range].
     /// Returns Ok(0) on EOF (peer closed connection).
-    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public read(self, into: []mutable UInt8 =): Result[Int];
 };
 
 /// Writer conformance: sends bytes to the connected peer.
 given TcpSocket: Writer {
     /// Writer trait: write bytes from from[range] into the connection.
-    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public write(self, from: []UInt8 =): Result[Int];
     /// Writer trait: flush. TCP has no user-space buffer, so this is a no-op.
     public flush(self): Result[Void];
 };
@@ -379,22 +379,22 @@ given UdpSocket {
     public bind[T: ToSocketAddr](addr: T): Result[UdpSocket];
     /// Send a datagram to the specified address.
     /// Returns the number of bytes sent.
-    public send_to[T: ToSocketAddr](self, addr: T, from: List[UInt8] =, span: Range[Int] = ...): Result[Int];
+    public send_to[T: ToSocketAddr](self, addr: T, from: []UInt8 =): Result[Int];
     /// Receive a datagram and return the number of bytes read and the sender's address.
     /// Returns Error when the target span is empty: no datagram is received and
     /// reporting a fabricated sender would be wrong.
-    public recv_from(self, into: List[UInt8] =, span: Range[Int] = ...): Result[Pair[Int, SocketAddr]];
+    public recv_from(self, into: []mutable UInt8 =): Result[Pair[Int, SocketAddr]];
     /// Associate this socket with a remote socket address (connected mode).
     /// After calling connect, use send/recv instead of send_to/recv_from.
     public connect[T: ToSocketAddr](self, addr: T): Result[Void];
     /// Send data in connected mode.
     /// Returns the number of bytes sent.
     /// Returns Error if the socket is not connected.
-    public send(self, from: List[UInt8] =, span: Range[Int] = ...): Result[Int];
+    public send(self, from: []UInt8 =): Result[Int];
     /// Receive data in connected mode.
     /// Returns the number of bytes received.
     /// Returns Error if the socket is not connected.
-    public recv(self, into: List[UInt8] =, span: Range[Int] = ...): Result[Int];
+    public recv(self, into: []mutable UInt8 =): Result[Int];
     /// Get the local address this socket is bound to.
     public local_addr(self): Result[SocketAddr];
     /// Get the peer address of this socket (connected mode only).

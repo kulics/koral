@@ -109,22 +109,23 @@ let new_flags(): Flags = {
     );
 };
 
-let to_run_flags(flags: Flags): RunFlags = RunFlags(
-    flags.line_numbers,
-    flags.ignore_case,
-    flags.invert,
-    flags.count_only,
-    flags.files_with_matches,
-    flags.files_without_matches,
-    flags.no_filename,
-    flags.only_matching,
-    flags.quiet,
-    flags.whole_line,
-    flags.word_match,
-    flags.max_count,
-    flags.after_context,
-    flags.before_context,
-);
+let to_run_flags(flags: Flags): RunFlags =
+    RunFlags(
+        flags.line_numbers,
+        flags.ignore_case,
+        flags.invert,
+        flags.count_only,
+        flags.files_with_matches,
+        flags.files_without_matches,
+        flags.no_filename,
+        flags.only_matching,
+        flags.quiet,
+        flags.whole_line,
+        flags.word_match,
+        flags.max_count,
+        flags.after_context,
+        flags.before_context,
+    );
 
 /// Parse a numeric option argument (digits only).
 let digits: String = "0123456789";
@@ -317,9 +318,7 @@ let line_subject(line: String): String = {
 /// ASCII word constituent (`-w`): letter, digit, or underscore. Multi-byte
 /// neighbors read as non-word bytes -- the documented ASCII-only word set.
 let is_word_byte(b: UInt8): Bool = {
-    return b == '_' or (b >= '0' and b <= '9') or (b >= 'A' and b <= 'Z') or (
-        b >= 'a' and b <= 'z'
-    );
+    return b == '_' or (b >= '0' and b <= '9') or (b >= 'A' and b <= 'Z') or (b >= 'a' and b <= 'z');
 };
 
 /// GNU `-w`: the occurrence must touch a non-word constituent or the line
@@ -672,61 +671,63 @@ let run_parallel[W: Writer](
         let shared_show_name = show_name;
         let shared_index = next_index;
 
-        threads.push(run_task(
-            () => {
-                while true then {
-                    let idx = shared_index.fetch_add(1);
-                    if idx < 0 or idx >= shared_files.count() then {
-                        break;
+        threads.push(
+            run_task(
+                () => {
+                    while true then {
+                        let idx = shared_index.fetch_add(1);
+                        if idx < 0 or idx >= shared_files.count() then {
+                            break;
+                        };
+                        let path = shared_files.get(idx).unwrap();
+                        let acc = StringBuilder.new();
+                        when open_file(path.to_path(), OpenMode.Read()) in {
+                            .Ok(file) then {
+                                when grep_stream(
+                                    shared_patterns,
+                                    shared_flags,
+                                    file,
+                                    name = path,
+                                    show_name = shared_show_name,
+                                    acc = acc,
+                                ) in {
+                                    .Ok(matched) then {
+                                        let _ = shared_sender.send(
+                                            FileOutcome(
+                                                idx,
+                                                acc.into_string(),
+                                                matched,
+                                                Option[String].None(),
+                                            ),
+                                        );
+                                    },
+                                    .Error(e) then {
+                                        let _ = shared_sender.send(
+                                            FileOutcome(
+                                                idx,
+                                                acc.into_string(),
+                                                false,
+                                                Option[String].Some(e.message()),
+                                            ),
+                                        );
+                                    },
+                                };
+                            },
+                            .Error(e) then {
+                                let _ = shared_sender.send(
+                                    FileOutcome(
+                                        idx,
+                                        "",
+                                        false,
+                                        Option[String].Some(e.message()),
+                                    ),
+                                );
+                            },
+                        };
                     };
-                    let path = shared_files.get(idx).unwrap();
-                    let acc = StringBuilder.new();
-                    when open_file(path.to_path(), OpenMode.Read()) in {
-                        .Ok(file) then {
-                            when grep_stream(
-                                shared_patterns,
-                                shared_flags,
-                                file,
-                                name = path,
-                                show_name = shared_show_name,
-                                acc = acc,
-                            ) in {
-                                .Ok(matched) then {
-                                    let _ = shared_sender.send(
-                                        FileOutcome(
-                                            idx,
-                                            acc.into_string(),
-                                            matched,
-                                            Option[String].None(),
-                                        ),
-                                    );
-                                },
-                                .Error(e) then {
-                                    let _ = shared_sender.send(
-                                        FileOutcome(
-                                            idx,
-                                            acc.into_string(),
-                                            false,
-                                            Option[String].Some(e.message()),
-                                        ),
-                                    );
-                                },
-                            };
-                        },
-                        .Error(e) then {
-                            let _ = shared_sender.send(
-                                FileOutcome(
-                                    idx,
-                                    "",
-                                    false,
-                                    Option[String].Some(e.message()),
-                                ),
-                            );
-                        },
-                    };
-                };
-            },
-        ));
+                },
+            ),
+        );
     };
 
     let mutable pending = List[Option[FileOutcome]].new();
@@ -749,7 +750,7 @@ let run_parallel[W: Writer](
                     let slot = pending[next];
                     if slot is .Some(ev) then {
                         if ev.block.count() > 0 then {
-                            out.write_all(from = ev.block.to_bytes()) or else as e in {
+                            out.write_all(from = ev.block.as_slice()) or else as e in {
                                 eprintln("grep: \(e.message())");
                                 return 2;
                             };
@@ -843,7 +844,7 @@ let main(): Int = {
         };
         let block = acc.into_string();
         if block.count() > 0 then {
-            out.write_all(from = block.to_bytes()) or else as e in {
+            out.write_all(from = block.as_slice()) or else as e in {
                 eprintln("grep: \(e.message())");
                 return 2;
             };
@@ -872,7 +873,7 @@ let main(): Int = {
             };
             let block = acc.into_string();
             if block.count() > 0 then {
-                out.write_all(from = block.to_bytes()) or else as e in {
+                out.write_all(from = block.as_slice()) or else as e in {
                     eprintln("grep: \(e.message())");
                     return 2;
                 };
@@ -884,14 +885,7 @@ let main(): Int = {
         };
     } else {
         let show_name = not flags.no_filename and (inputs.count() > 1 or config.flags.recursive);
-        return run_parallel(
-            patterns,
-            flags,
-            inputs,
-            config.flags.jobs,
-            show_name,
-            out = out,
-        );
+        return run_parallel(patterns, flags, inputs, config.flags.jobs, show_name, out = out);
     };
 
     return if any_relevant then 0 else 1;

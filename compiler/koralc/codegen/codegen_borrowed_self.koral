@@ -609,11 +609,13 @@ let borrowed_self_walk_value(
 
 let borrowed_self_walk_intrinsic(w: BorrowedSelfWalk, node: MIRIntrinsic): Void = {
     when node in {
-        .AllocMemory(count, _) or .AllocString(count, _) or .DeallocMemory(count) then borrowed_self_walk_value(
+        .AllocMemory(count, _) or .AllocString(count, _) or .AllocBlock(count, _, _) or .DeallocMemory(count) then borrowed_self_walk_value(
             w,
             count,
             false,
         ),
+.EmptyBlock(_) then {},
+
         .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count)
         or .CompareMemory(dest, source, count) then {
             borrowed_self_walk_value(w, dest, false);
@@ -892,11 +894,13 @@ private let atomic_addr_scan_intrinsic(
     atomic_ids: Dict[UInt, Bool],
 ): Void = {
     when node in {
-        .AllocMemory(count, _) or .AllocString(count, _) then atomic_addr_scan_value(
+        .AllocMemory(count, _) or .AllocString(count, _) or .AllocBlock(count, _, _) then atomic_addr_scan_value(
             count,
             candidates,
             atomic_ids,
         ),
+.EmptyBlock(_) then {},
+
         .DeallocMemory(pointer) or .DeinitMemory(pointer) or .TakeMemory(pointer, _) then atomic_addr_scan_value(
             pointer,
             candidates,
@@ -1250,6 +1254,24 @@ let compute_borrowed_param_slots(
             result.insert(slot_key, true);
         };
     };
+    // 视图返回（mir_result_borrows_arguments，种子 `mirResultBorrowsArguments`
+    // 的镜像）：结果是裸指针/借用引用的函数，形参一律 +0 借入——返回值是参数
+    // 内存的视图，句柄不归被调方释放。rule 5 会把派生取址判成逃逸并降级
+    // （`__index_slot` 正是这样掉出 fixpoint 的），这里按结果类型无条件覆盖：
+    // 被调方半边（不释放）经 non_owning 落地，vtable 槽的 +1 由 wrapper 按槽
+    // 释放网配平（slot 入表即强制 wrapper），调用侧半边在 finish_call /
+    // lower_trait_method_call。入表全槽（标量无 RC，语义等价）。
+    for function in program.functions then {
+        if not mir_result_borrows_arguments(function.return_type) then {
+            continue;
+        };
+        for pair in function.params.lazy().enumerate() then {
+            result.insert(
+                borrowed_slot_key(function.identifier.def_id.id, pair.first),
+                true,
+            );
+        };
+    };
     return result;
 };
 
@@ -1307,9 +1329,11 @@ let purity_walk_operand(w: PurityWalk, operand: MIROperand): Void = {
 
 let purity_walk_intrinsic(w: PurityWalk, node: MIRIntrinsic): Void = {
     when node in {
-        .AllocMemory(count, _) or .AllocString(count, _) then {
+        .AllocMemory(count, _) or .AllocString(count, _) or .AllocBlock(count, _, _) then {
             purity_walk_value(w, count);
         },
+.EmptyBlock(_) then {},
+
         .NullPtr(_) then {},
         .FixedArrayLiteral(_, elements) then {
             for element in elements then {
@@ -1379,11 +1403,12 @@ let purity_walk_value(w: PurityWalk, value: MIRValue): Void = {
             };
         },
         .Ref(place, _, _) or .Pointer(place) then {
-            // A reference into caller state: any later write through it
-            // counts against purity.
-            if purity_place_reaches_caller_state(place, w.root_ids, w.drop_local_ids) then {
-                w.impure = true;
-            };
+            // 取址本身不是改写：经引用的写回由 Assign/Exchange/Drop 目标的
+            // Deref 规则捕获（purity_place_reaches_caller_state 对
+            // Deref/PointerElement 一律 true），引用外逃后的写也在那条路上。
+            // 把「取址即不纯」删掉（2026-11-28）：它把 borrow_ptr 一族读函数
+            // 判成不纯、连带 `String.equals` 拒之门外，槽装载消去整个失效
+            // （rc_counter_pin w11 的 4/4 就是这么来的）。
         },
         .Binary(operation) then {
             purity_walk_operand(w, operation.left);
@@ -1575,22 +1600,156 @@ private let move_type_drop_observable(tainted: Dict[UInt, Bool], t: Type): Bool 
     };
 };
 
+/// 析构体可见性走查（compute_observable_drop_defs 的上游）：一个函数的传递
+/// 调用闭包里能到达「时机可观察」的效应——foreign 调用、trait 派发、闭包、
+/// 原子、全局写、SpawnThread、显式 Drop 语句——就判可见。内在（含
+/// deinit_memory 元素析构：那是类型实参通道，归下面的污染规则）与簿记
+/// 不算。`Block[T]` 的元素走查体因此是机械的，`TcpListener` 的关端口不是。
+type mutable DropVisibleWalk(
+    mutable visible: Bool,
+    visible_fns: Dict[UInt, Bool],
+    atomic_ids: Dict[UInt, Bool],
+);
+
+let drop_visible_walk_value(w: DropVisibleWalk, value: MIRValue): Void = {
+    when value in {
+        .Operand(_) or .PlaceRead(_, _) or .Binary(_) or .Unary(_)
+        or .Cast(_, _, _) or .Intrinsic(_) or .Ref(_, _, _) or .Pointer(_) then {},
+        .Call(call) then {
+            when call.callee in {
+                .Function(symbol) then {
+                    if w.atomic_ids.get(symbol.def_id.id) is .Some(_)
+                        or w.visible_fns.get(symbol.def_id.id) is .Some(_) then {
+                        w.visible = true;
+                    } else {
+                        when symbol.symbol_type in {
+                            .ForeignFunctionType(_, _) then {
+                                w.visible = true;
+                            },
+                            _ then {},
+                        };
+                    };
+                },
+                _ then {
+                    w.visible = true;
+                },
+            };
+        },
+        .Aggregate(aggregate) then {
+            for field in aggregate.fields then {
+                drop_visible_walk_value(w, field);
+            };
+        },
+        .EnumCase(construction) then {
+            for argument in construction.arguments then {
+                drop_visible_walk_value(w, argument);
+            };
+        },
+        .EnumTag(tag) then drop_visible_walk_value(w, tag.subject),
+        .TraitObjectConversion(conversion) then drop_visible_walk_value(
+            w,
+            conversion.inner,
+        ),
+        .TraitMethodCall(_) then {
+            w.visible = true;
+        },
+        .Lambda(_) then {
+            w.visible = true;
+        },
+    };
+};
+
+let drop_visible_walk_statement(w: DropVisibleWalk, statement: MIRStatement): Void = {
+    when statement in {
+        .Declare(_) or .ScopeEnter(_) or .ScopeExit(_) or .DebugSource(_)
+        or .Lock(_) or .Unlock(_) or .Retain(_) or .Release(_) then {},
+        .Assign(place, value) then {
+            when place in {
+                .Global(_) then {
+            w.visible = true;
+        },
+                _ then {},
+            };
+            drop_visible_walk_value(w, value);
+        },
+        .AtomicLoad(_, _) or .AtomicStore(_, _) or .Exchange(_, _, _) then {
+            w.visible = true;
+        },
+        .Drop(_) then {
+            // 显式 Drop 语句跑被放者的析构——保守判可见（std 的机械体只走
+            // deinit_memory 内在，不落 Drop 语句）。
+            w.visible = true;
+        },
+        .Evaluate(value) then drop_visible_walk_value(w, value),
+    };
+};
+
+let compute_drop_body_visible_ids(codegen: CodeGen): Dict[UInt, Bool] = {
+    let atomic_ids = compute_atomic_builtin_def_ids(codegen.program);
+    let mutable visible = Dict[UInt, Bool].new();
+    let mutable changed = true;
+    while changed then {
+        changed = false;
+        for function in codegen.program.functions then {
+            let key = function.identifier.def_id.id;
+            if visible.get(key) is .None() then {
+                let walk = DropVisibleWalk(false, visible, atomic_ids);
+                for block in function.blocks then {
+                    for statement in block.statements then {
+                        drop_visible_walk_statement(walk, statement);
+                    };
+                };
+                if walk.visible then {
+                    visible.insert(key, true);
+                    changed = true;
+                };
+            };
+        };
+    };
+    return visible;
+};
+
 /// 「析构跑用户码」的名义类型闭包（不动点）：用户 `Drop` 目标为根，字段类型
 /// 向上污染容器。`type mutable` 的析构钩子只能写在 `Drop` 实现里，判据就是
 /// given 的 trait 身份（`is_std_drop_impl`）。
+///
+/// 根污染只收**时机可观察**的 Drop 实现（2026-11-28）：Drop 体自身的
+/// foreign/trait 派发/闭包/原子/全局写/SpawnThread/显式 Drop 是可见效应
+/// （TcpListener 关端口、Timer 取消、用户打印都算）；**机械释放体**（只走
+/// 元素/存储析构的 `Block[T]`/容器族）不作根——它的可观察面就是元素析构，
+/// 由下面的类型实参规则传递（`List[MyBomb]` 照旧钉死、`List[String]` 可
+/// 移动）。此前 Block[T] 的机械 Drop 无条件根污染，把整个块族判成不可移动
+/// ——w7 的两个拷贝对、以及容器值满地 copy/drop 的性能税都源于此。
 let compute_observable_drop_defs(codegen: CodeGen): Dict[UInt, Bool] = {
+    let visible_fns = compute_drop_body_visible_ids(codegen);
     let mutable tainted = Dict[UInt, Bool].new();
     for global in codegen.program.globals then {
         when global in {
-            .Given(target_type, _, _, _, trait_def_id) then {
+            .Given(target_type, _, _, methods, trait_def_id) then {
                 if codegen.is_std_drop_impl(trait_def_id) then {
-                    when target_type in {
-                        .StructureType(def_id) then tainted.insert(def_id.id, true),
-                        .GenericStruct(template_def_id, _) then tainted.insert(
-                            template_def_id.id,
-                            true,
-                        ),
-                        _ then {},
+                    let mutable body_visible = true;
+                    let mutable found_any = false;
+                    for method in methods then {
+                        for function in codegen.program.functions then {
+                            if function.identifier.def_id.id == method.def_id.id then {
+                                found_any = true;
+                                if visible_fns.get(function.identifier.def_id.id) is .Some(_) then {
+                                    body_visible = true;
+                                } else {
+                                    body_visible = false;
+                                };
+                            };
+                        };
+                    };
+                    if (not found_any) or body_visible then {
+                        when target_type in {
+                            .StructureType(def_id) then tainted.insert(def_id.id, true),
+                            .GenericStruct(template_def_id, _) then tainted.insert(
+                                template_def_id.id,
+                                true,
+                            ),
+                            _ then {},
+                        };
                     };
                 };
             },
@@ -1770,18 +1929,44 @@ private let move_table_note_projection(
 };
 
 /// 借用实参的顶层读：不复制、不消费——按普通值读计（不是移动候选）。
-/// 被借用的句柄可能被投影出指向内部的裸引用（借用投影风险）。
-private let move_walk_value_as_borrow(value: MIRValue, table: MoveUseTable): Void = {
+/// 借用投影风险只记两种形状（2026-11-28 收窄）：读的是**投影**
+/// （`observe(h, h.box)` 族，别名释放面由发射侧稳定性副本兜住）或被调方
+/// **视图返回**（裸引用外逃，根的保活期必须拖到作用域尾）。裸局部喂给普通
+/// 借用槽（`xs.push()`/`xs.count()`）不记——否则任何用过借用方法的局部都
+/// 永不移动，w7 的移交、满地容器值的 copy/drop 全被钉死。
+private let move_walk_value_as_borrow(
+    value: MIRValue,
+    table: MoveUseTable,
+    view_callee: Bool,
+): Void = {
     when value in {
         .PlaceRead(place, _) then {
-            when move_place_root_local(place) in {
-                .Some(root) then move_table_note_projection(table, root),
-                .None() then {},
+            if view_callee or move_place_is_projection(place) then {
+                when move_place_root_local(place) in {
+                    .Some(root) then move_table_note_projection(table, root),
+                    .None() then {},
+                };
             };
             move_walk_place(place, table);
         },
         _ then move_walk_value(value, table),
     };
+};
+
+/// place 的投影链里是否带 Field/EnumPayload 段（裸局部/全局/解引用不算）。
+private let move_place_is_projection(place: MIRPlace): Bool = {
+    let mutable current = place;
+    while true then {
+        when current in {
+            .Local(_) or .Global(_) or .Deref(_, _) or .PointerElement(_, _) then {
+                return false;
+            },
+            .Field(base, _) or .EnumPayload(base, _, _, _, _) then {
+                return true;
+            },
+        };
+    };
+    return false;
 };
 
 /// 消费性实参的顶层读（init_memory 的 value）：按 MIR 自带消费点计（与
@@ -1824,7 +2009,9 @@ private let move_walk_place(place: MIRPlace, table: MoveUseTable): Void = {
 
 private let move_walk_intrinsic(node: MIRIntrinsic, table: MoveUseTable): Void = {
     when node in {
-        .AllocMemory(count, _) or .AllocString(count, _) then move_walk_value(count, table),
+        .AllocMemory(count, _) or .AllocString(count, _) or .AllocBlock(count, _, _) then move_walk_value(count, table),
+.EmptyBlock(_) then {},
+
         .DeallocMemory(pointer) or .DeinitMemory(pointer) or .TakeMemory(pointer, _) then {
             move_walk_value(pointer, table)
         },
@@ -1934,7 +2121,11 @@ private let move_walk_value(value: MIRValue, table: MoveUseTable): Void = {
             for pair in call.arguments.lazy().enumerate() then {
                 let slot_key = borrowed_slot_key(callee_def_id, pair.first);
                 if table.borrowed_slots.get(slot_key) is .Some(_) then {
-                    move_walk_value_as_borrow(pair.second, table);
+                    move_walk_value_as_borrow(
+                        pair.second,
+                        table,
+                        mir_result_borrows_arguments(call.result_type),
+                    );
                 } else {
                     if owners_match then {
                         move_walk_value(pair.second, table);
@@ -2501,10 +2692,12 @@ private let slot_elision_count_intrinsic(
     counts: Dict[Int, Int],
 ): Void = {
     when node in {
-        .AllocMemory(count, _) or .AllocString(count, _) then slot_elision_count_value(
+        .AllocMemory(count, _) or .AllocString(count, _) or .AllocBlock(count, _, _) then slot_elision_count_value(
             count,
             counts,
         ),
+.EmptyBlock(_) then {},
+
         .DeallocMemory(pointer) or .DeinitMemory(pointer)
         or .TakeMemory(pointer, _) then slot_elision_count_value(pointer, counts),
         .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count)

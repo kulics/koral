@@ -339,6 +339,18 @@ given CodeGen {
                 if is_mutable then Type.MutablePointerType(resolved_inner)
                 else Type.PointerType(resolved_inner)
             },
+            .Slice(inner, is_mutable, span) then {
+                let mutable slice_args = List[TypeNode].new();
+                slice_args.push(inner);
+                self.resolve_type_node_for_vtable(
+                    TypeNode.Generic(
+                        if is_mutable then "MutSlice" else "Slice",
+                        slice_args,
+                        span,
+                    ),
+                    bindings,
+                )
+            },
             .WeakReference(inner, is_mutable, span) then {
                 let resolved = self.resolve_type_node_for_vtable(inner, bindings);
                 if is_mutable then Type.MutableWeakReferenceType(resolved)
@@ -1998,7 +2010,7 @@ given CodeGen {
         requests: List[VtableCodegenRequest],
     ): Void = {
         when node in {
-            .AllocMemory(count, _) or .AllocString(count, _) then self.collect_implicit_trait_object_vtable_requests_in_value(
+            .AllocMemory(count, _) or .AllocString(count, _) or .AllocBlock(count, _, _) then self.collect_implicit_trait_object_vtable_requests_in_value(
                 count,
                 local_types,
                 requests,
@@ -2120,10 +2132,12 @@ given CodeGen {
         out: List[MIRTraitObjectConversion],
     ): Void = {
         when node in {
-            .AllocMemory(count, _) or .AllocString(count, _) then self.collect_trait_object_conversions_in_value(
+            .AllocMemory(count, _) or .AllocString(count, _) or .AllocBlock(count, _, _) then self.collect_trait_object_conversions_in_value(
                 count,
                 out,
             ),
+.EmptyBlock(_) then {},
+
             .DeallocMemory(pointer) then self.collect_trait_object_conversions_in_value(
                 pointer,
                 out,

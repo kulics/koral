@@ -209,6 +209,11 @@ extension Monomorphizer {
         case .pointer(let inner, mutable: let mutable, span: _):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
             return mutable ? .mutablePointer(element: innerType) : .pointer(element: innerType)
+
+        case .slice(let inner, let mutable, let span):
+            return try resolveTypeNode(
+                .generic(base: mutable ? "MutSlice" : "Slice", args: [inner], span: span),
+                substitution: substitution)
             
         case .generic(let base, let args, _):
             // Look up generic template
@@ -1808,6 +1813,16 @@ extension Monomorphizer {
                 len: resolveTypesInExpression(len),
                 resultType: resolveParameterizedType(resultType)
             )
+
+        case .allocBlock(let cap, let elemType, let resultType):
+            return .allocBlock(
+                cap: resolveTypesInExpression(cap),
+                elemType: resolveParameterizedType(elemType),
+                resultType: resolveParameterizedType(resultType)
+            )
+
+        case .emptyBlock(let resultType):
+            return .emptyBlock(resultType: resolveParameterizedType(resultType))
             
         case .deallocMemory(let ptr):
             return .deallocMemory(ptr: resolveTypesInExpression(ptr))

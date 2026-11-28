@@ -49,6 +49,8 @@ public type TypeNode {
     Reference(inner: TypeNode, is_mutable: Bool, span: SourceSpan),
     BorrowedReference(inner: TypeNode, is_mutable: Bool, span: SourceSpan),
     Pointer(inner: TypeNode, is_mutable: Bool, span: SourceSpan),
+    /// 切片窗口：`[]T` / `[]mutable T`（slice-design.md）
+    Slice(inner: TypeNode, is_mutable: Bool, span: SourceSpan),
     WeakReference(inner: TypeNode, is_mutable: Bool, span: SourceSpan),
     Generic(base: String, args: List[TypeNode], span: SourceSpan),
     InferredSelf(span: SourceSpan),
@@ -66,7 +68,7 @@ public type TypeNode {
 public let type_node_span(node: TypeNode): SourceSpan = {
     return when node in {
         .Identifier(_, span) or .Reference(_, _, span) or .BorrowedReference(_, _, span)
-        or .Pointer(_, _, span) or .WeakReference(_, _, span) or .Generic(_, _, span) or .InferredSelf(span)
+        or .Pointer(_, _, span) or .Slice(_, _, span) or .WeakReference(_, _, span) or .Generic(_, _, span) or .InferredSelf(span)
         or .FunctionType(_, _, span) or .FixedArray(_, _, span) or .ForeignFunction(_, _, span) then span,
         // 无独立 span 槽：锚点跟随被限定类型的 span（两侧解析路径一致）。
         .SendableQualified(inner) then type_node_span(inner),
@@ -85,6 +87,7 @@ public let type_node_with_span(node: TypeNode, span: SourceSpan): TypeNode = {
             span,
         ),
         .Pointer(inner, is_mutable, _) then TypeNode.Pointer(inner, is_mutable, span),
+        .Slice(inner, is_mutable, _) then TypeNode.Slice(inner, is_mutable, span),
         .WeakReference(inner, is_mutable, _) then TypeNode.WeakReference(
             inner,
             is_mutable,
@@ -120,6 +123,10 @@ public let type_node_spelling(node: TypeNode): String = {
         .Pointer(inner, is_mutable, _) then {
             if is_mutable then "*mutable \(type_node_spelling(inner))"
             else "*\(type_node_spelling(inner))"
+        },
+        .Slice(inner, is_mutable, _) then {
+            if is_mutable then "[]mutable \(type_node_spelling(inner))"
+            else "[]\(type_node_spelling(inner))"
         },
         .WeakReference(inner, _, _) then "?\(type_node_spelling(inner))",
         .Generic(base, args, _) then {
@@ -181,7 +188,7 @@ public let type_node_name(node: TypeNode): String = {
         .Identifier(name, _) then name,
         .Generic(base, _, _) then base,
         .Reference(inner, _, _) or .BorrowedReference(inner, _, _) or .Pointer(inner, _, _)
-        or .WeakReference(inner, _, _) then type_node_name(inner),
+        or .Slice(inner, _, _) or .WeakReference(inner, _, _) then type_node_name(inner),
         .InferredSelf(_) then "self",
         .FunctionType(_, _, _) then "fn",
         .FixedArray(_, element, _) then type_node_name(element),
@@ -292,6 +299,9 @@ public let type_node_display(node: TypeNode): String = {
         .BorrowedReference(inner, is_mutable, _) then (if is_mutable then "mutable &"
         else "&") + type_node_display(inner),
         .Pointer(inner, is_mutable, _) then (if is_mutable then "mutable *" else "*") + type_node_display(
+            inner,
+        ),
+        .Slice(inner, is_mutable, _) then (if is_mutable then "[]mutable " else "[]") + type_node_display(
             inner,
         ),
         .WeakReference(inner, _, _) then "?" + type_node_display(inner),

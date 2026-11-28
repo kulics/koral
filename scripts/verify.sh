@@ -240,6 +240,15 @@ clang -I std tests/runtime-cases/refcount_release_race.c "$WORK/rt_track.o" \
 "$WORK/refcount_release_race$EXE"
 echo "refcount protocol OK"
 
+# The unified storage block (slice design): 24B header ABI, the block alloc
+# init contract (strong = 1, weak = 1, len = 0), and the immortal empty block
+# (strong = weak = -1) whose RC/weak ops must all be no-ops -- empty owners and
+# empty windows hold it instead of NULL, so it must never reach free().
+clang -I std tests/runtime-cases/block_sentinel_pin.c "$WORK/rt_track.o" \
+  -o "$WORK/block_sentinel_pin$EXE" -Wno-everything -O1 $RT_LIBS $WIN_STACK
+"$WORK/block_sentinel_pin$EXE"
+echo "block sentinel pin OK"
+
 # The non-atomic RC family of determinately non-sendable objects
 # (concurrency-design.md §RC 分流): same strong/weak protocol single-threaded
 # -- exactly-one-free, weak upgrade/downgrade, the destructor window (retain

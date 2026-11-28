@@ -773,6 +773,8 @@ public class TypeResolver: CompilerPass {
             return extractTypeName(from: inner)
         case .pointer(let inner, _, _):
             return extractTypeName(from: inner)
+        case .slice(let inner, _, _):
+            return extractTypeName(from: inner)
         case .weakReference(let inner, _, _):
             return extractTypeName(from: inner)
         case .fixedArray(_, let element, _):

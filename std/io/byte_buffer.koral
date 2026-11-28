@@ -7,20 +7,15 @@ using "std" { ... };
 // ============================================================================
 
 /// In-memory byte stream with a single cursor, supporting `Reader`, `Writer`, and `Seeker`.
+///
+/// 存储是统一存储块（slice-design）：`block` 是 `Block[UInt8]`；`lock_depth` 是
+/// 修改锁（借出/回调期间的修改入口查锁 panic）。清理 = 合成字段释放（块 RC-0
+/// 统一析构）。空缓冲持 immortal 空块，零分配。
 public type mutable ByteBuffer(
-    mutable data: *mutable UInt8,
-    mutable len: Int,
-    mutable cap: Int,
+    mutable block: Block[UInt8],
     mutable cursor: Int,
+    mutable lock_depth: Int,
 );
-
-/// Implements `Drop`, freeing the buffer's heap allocation.
-given ByteBuffer: Drop {
-
-    drop(self): Void = unsafe {
-        dealloc_memory(self.data);
-    };
-};
 
 /// Creates `ByteBuffer` values that are empty, pre-sized, or copied from a string or byte list.
 given ByteBuffer {
@@ -28,7 +23,7 @@ given ByteBuffer {
     /// Create an empty byte buffer. The backing block is allocated on first
     /// write（`new()` 不分配，与 `List` 同形）。
     public new(): ByteBuffer = {
-        return ByteBuffer(null, 0, 0, 0);
+        return ByteBuffer(empty_block[UInt8](), 0, 0);
     };
 
     /// Create an empty byte buffer with room for at least `cap` bytes.
@@ -38,8 +33,8 @@ given ByteBuffer {
             panic("ByteBuffer with_capacity negative capacity");
         };
         let actual_cap = if cap < 1 then 1 else cap;
-        let data = unsafe { alloc_memory[UInt8](UInt(actual_cap)) };
-        return ByteBuffer(data, 0, actual_cap, 0);
+        let block = alloc_block[UInt8](actual_cap);
+        return ByteBuffer(block, 0, 0);
     };
 
     /// Create a byte buffer holding the UTF-8 bytes of `s`.
@@ -48,22 +43,24 @@ given ByteBuffer {
     public from_string(s: String): ByteBuffer = unsafe {
         let len = s.count();
         let cap = if len < 1 then 1 else len;
-        let data = alloc_memory[UInt8](UInt(cap));
+        let block = alloc_block[UInt8](cap);
         if len > 0 then {
-            copy_memory(data, s.borrow_ptr(), UInt(len));
+            copy_memory(block.elements(), s.borrow_ptr(), UInt(len));
         };
-        return ByteBuffer(data, len, cap, 0);
+        block.len = len;
+        return ByteBuffer(block, 0, 0);
     };
 
     /// Create a byte buffer holding a copy of `bytes`.
     public from_bytes(bytes: List[UInt8]): ByteBuffer = unsafe {
         let len = bytes.count();
         let cap = if len < 1 then 1 else len;
-        let data = alloc_memory[UInt8](UInt(cap));
+        let block = alloc_block[UInt8](cap);
         if len > 0 then {
-            copy_memory(data, bytes.borrow_ptr(), UInt(len));
+            copy_memory(block.elements(), bytes.borrow_ptr(), UInt(len));
         };
-        return ByteBuffer(data, len, cap, 0);
+        block.len = len;
+        return ByteBuffer(block, 0, 0);
     };
 
     /// Hand the accumulated bytes to a `String`, then empty the buffer.
@@ -74,13 +71,13 @@ given ByteBuffer {
     /// cursor reset and its capacity kept, like `clear`. 校验 UTF-8，非法
     /// 字节 panic（checked 形态）；免检交接走 `into_string_unchecked`。
     public into_string(self): String = unsafe {
-        if self.len == 0 then {
+        if self.block.len == 0 then {
             return "";
         };
-        let result = String.from_utf8_ptr(self.data, self.len) or else {
+        let result = String.from_utf8_ptr(self.block.elements(), self.block.len) or else {
             panic("ByteBuffer.into_string: invalid UTF-8");
         };
-        self.len = 0;
+        self.block.len = 0;
         self.cursor = 0;
         return result;
     };
@@ -88,11 +85,11 @@ given ByteBuffer {
     /// Unchecked handover: no UTF-8 validation. Behavior is undefined when
     /// the accumulated bytes are not valid UTF-8.
     public unsafe into_string_unchecked(self): String = unsafe {
-        if self.len == 0 then {
+        if self.block.len == 0 then {
             return "";
         };
-        let result = String.from_utf8_ptr_unchecked(self.data, self.len);
-        self.len = 0;
+        let result = String.from_utf8_ptr_unchecked(self.block.elements(), self.block.len);
+        self.block.len = 0;
         self.cursor = 0;
         return result;
     };
@@ -102,11 +99,11 @@ given ByteBuffer {
     /// the whole buffer is handed over regardless of the cursor, and the
     /// buffer ends empty with its cursor reset and its capacity kept.
     public into_bytes(self): List[UInt8] = unsafe {
-        let out = make_bytes(self.len);
-        if self.len > 0 then {
-            copy_memory(out.borrow_mut_ptr(), self.data, UInt(self.len));
+        let out = make_bytes(self.block.len);
+        if self.block.len > 0 then {
+            copy_memory(out.borrow_mut_ptr(), self.block.elements(), UInt(self.block.len));
         };
-        self.len = 0;
+        self.block.len = 0;
         self.cursor = 0;
         return out;
     };
@@ -116,10 +113,10 @@ given ByteBuffer {
     /// content regardless of the cursor. 校验 UTF-8，非法字节 panic
     /// （checked 形态）；免检快照走 `to_string_unchecked`。
     public to_string(self): String = unsafe {
-        if self.len == 0 then {
+        if self.block.len == 0 then {
             return "";
         };
-        return String.from_utf8_ptr(self.data, self.len) or else {
+        return String.from_utf8_ptr(self.block.elements(), self.block.len) or else {
             panic("ByteBuffer.to_string: invalid UTF-8");
         };
     };
@@ -127,19 +124,19 @@ given ByteBuffer {
     /// Unchecked snapshot: no UTF-8 validation. Behavior is undefined when
     /// the accumulated bytes are not valid UTF-8.
     public unsafe to_string_unchecked(self): String = unsafe {
-        if self.len == 0 then {
+        if self.block.len == 0 then {
             return "";
         };
-        return String.from_utf8_ptr_unchecked(self.data, self.len);
+        return String.from_utf8_ptr_unchecked(self.block.elements(), self.block.len);
     };
 
     /// Return the accumulated bytes as a `List[UInt8]` snapshot; the buffer
     /// is untouched. Unlike the `Reader` extension `read_all`, this copies
     /// the whole content regardless of the cursor and does not advance it.
     public to_bytes(self): List[UInt8] = unsafe {
-        let out = make_bytes(self.len);
-        if self.len > 0 then {
-            copy_memory(out.borrow_mut_ptr(), self.data, UInt(self.len));
+        let out = make_bytes(self.block.len);
+        if self.block.len > 0 then {
+            copy_memory(out.borrow_mut_ptr(), self.block.elements(), UInt(self.block.len));
         };
         return out;
     };
@@ -150,24 +147,85 @@ given ByteBuffer {
         if additional < 0 then {
             panic("ByteBuffer reserve negative additional");
         };
-        self.ensure_capacity(self.len + additional);
+        self.ensure_capacity(self.block.len + additional);
     };
 
     private ensure_capacity(self, min_capacity: Int): Void = unsafe {
-        if min_capacity <= self.cap then {
+        if min_capacity <= self.block.cap then {
             return;
         };
-        let mutable new_cap = self.cap * 2;
+        let mutable new_cap = self.block.cap * 2;
         if new_cap < min_capacity then {
             new_cap = min_capacity;
         };
-        let new_data = alloc_memory[UInt8](UInt(new_cap));
-        if self.len > 0 then {
-            copy_memory(new_data, self.data, UInt(self.len));
+        let new_block = alloc_block[UInt8](new_cap);
+        let old = self.block;
+        let old_len = old.len;
+        if old_len > 0 then {
+            copy_memory(new_block.elements(), old.elements(), UInt(old_len));
         };
-        dealloc_memory(self.data);
-        self.data = new_data;
-        self.cap = new_cap;
+        new_block.len = old_len;
+        // 换块账目（slice-design §修改纪律）：旧块 len 归零防 RC-0 再析构；
+        // `old_len != 0` 即哨兵跳写（immortal 空块 len 本来就是 0）。
+        if old_len != 0 then {
+            old.len = 0;
+        };
+        self.block = new_block;
+    };
+
+    /// The number of accumulated bytes.
+    public count(self): Int = self.block.len;
+
+    // ==================================================================
+    // 修改锁与借出（slice-design §修改锁 / §借出）——与 List 同形
+    // ==================================================================
+
+    private lock(self): Void = {
+        self.lock_depth = self.lock_depth + 1;
+    };
+
+    private unlock(self): Void = {
+        self.lock_depth = self.lock_depth - 1;
+    };
+
+
+    private with_locked[R: Any](self, body: () -> R): R = {
+        self.lock();
+        let result = body();
+        self.unlock();
+        return result;
+    };
+
+    /// 借出（slice-design）：把可写窗口借给闭包，全程持锁 + 块 RC 逃逸检查。
+    public borrow_slice[R: Any](self, fn: ([]mutable UInt8) -> R): R = {
+        let keep = self;
+        self.lock();
+        // 入口读在建窗前、窗口死于内层块尾、检查在块后（RC 账目词法闭合）。
+        let entry_rc = block_strong_count(self.block);
+        let result = {
+            let window = MutSlice[UInt8](self.block, 0, self.block.len);
+            fn(window)
+        };
+        self.unlock();
+        let now_rc = block_strong_count(self.block);
+        if now_rc != entry_rc then {
+            panic("borrow_slice: slice escaped its borrow");
+        };
+        let _ = keep;
+        return result;
+    };
+
+    /// 消费转移（slice-design）：整块转成可写切片，self 置空（掏空先于转移）。
+    public into_slice(self): []mutable UInt8 = unsafe {
+        if self.lock_depth != 0 then {
+            panic_modified_during("into_slice");
+        };
+        // 移出式交接（同 List.into_frozen_list）：零 retain。
+        let block = take_memory[Block[UInt8]](&self.block as *mutable Block[UInt8]);
+        let len = block.len;
+        init_memory[Block[UInt8]](&self.block as *mutable Block[UInt8], empty_block[UInt8]());
+        self.cursor = 0;
+        return MutSlice[UInt8](block, 0, len);
     };
 };
 
@@ -175,24 +233,22 @@ given ByteBuffer {
 given ByteBuffer: Reader {
 
     /// Read bytes at the cursor into `into[span]`, returning the count read and stopping at the end of the buffer.
-    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int] = {
-        let span = span.resolve_span(into.count());
-        let start = span.first;
-        let end = span.first + span.second;
+    public read(self, into: []mutable UInt8 =): Result[Int] = {
+        let start = 0;        let end = into.count();
         if end <= start then {
             return Result[Int].Ok(0);
         };
 
-        let available = self.len - self.cursor;
+        let available = self.block.len - self.cursor;
         if available == 0 then {
             return Result[Int].Ok(0);
         };
 
-        let want = span.second;
+        let want = end - start;
         let n = if available < want then available else want;
         unsafe {
-            let dst_ptr = into.borrow_mut_ptr() + start;
-            let src_ptr = self.data + self.cursor;
+            let dst_ptr = into.elements() + start;
+            let src_ptr = self.block.elements() + self.cursor;
             copy_memory(dst_ptr, src_ptr, UInt(n));
         };
         self.cursor += n;
@@ -204,21 +260,19 @@ given ByteBuffer: Reader {
 given ByteBuffer: Writer {
 
     /// Write bytes from `from[span]` at the cursor, returning the count written and growing the buffer past its end.
-    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int] = {
-        let span = span.resolve_span(from.count());
-        let start = span.first;
-        let end = span.first + span.second;
+    public write(self, from: []UInt8 =): Result[Int] = {
+        let start = 0;        let end = from.count();
         if end <= start then {
             return Result[Int].Ok(0);
         };
 
-        let n = span.second;
+        let n = end - start;
         let write_start = self.cursor;
         let write_end = write_start + n;
-        let new_len = if write_end > self.len then write_end else self.len;
+        let new_len = if write_end > self.block.len then write_end else self.block.len;
         self.ensure_capacity(new_len);
-        unsafe { copy_memory(self.data + write_start, from.borrow_ptr() + start, UInt(n)) };
-        self.len = new_len;
+        unsafe { copy_memory(self.block.elements() + write_start, from.elements() + start, UInt(n)) };
+        self.block.len = new_len;
         self.cursor = write_end;
         return Result[Int].Ok(n);
     };
@@ -234,7 +288,7 @@ given ByteBuffer: Seeker {
     /// Out-of-range targets — including offsets that overflow `Int64` arithmetic — fail
     /// with `Result.Error` and never panic.
     public seek(self, pos: SeekOrigin): Result[Int] = {
-        let len = self.len;
+        let len = self.block.len;
         let mutable target = 0;
         when pos in {
             .Start(offset) then {

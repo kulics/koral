@@ -1,0 +1,18 @@
+// EXPECT-ERROR: Panic: List modified during iteration or borrow: push
+// 在位压缩形的析构重入（slice-design §修改纪律与析构重入）：retain 的压缩段
+// 锁内运行，元素析构（用户 Drop）里改表 → 入口立刻 panic。
+type mutable Bomb(owner: List[Bomb], id: Int);
+
+given Bomb: Drop {
+    drop(self): Void = {
+        self.owner.push(Bomb(List[Bomb].new(), 0));
+    };
+};
+
+let main(): Void = {
+    let xs = List[Bomb].new();
+    xs.push(Bomb(xs, 1));
+    xs.push(Bomb(xs, 5));
+    xs.push(Bomb(xs, 3));
+    xs.retain((b) => b.id != 5);
+};

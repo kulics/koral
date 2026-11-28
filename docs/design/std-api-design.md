@@ -300,6 +300,22 @@ Receiver choice and method naming should reinforce each other:
   (`into_frozen_*` on the mutable containers stays `into_*` -- it hands the
   storage over)
 
+**容器视图/转换族**（slice-design「来源与转换」的命名契约，2026-11-27 并入；
+全库撞名扫描核验过）：
+
+- `as_` = **零拷贝视图**（非消耗）：`as_slice` 是本族首例容器视图（过往只用于
+  标量提取）。
+- `to_` = **拷贝出口**（非消耗派生）：`to_list`/`to_frozen_list` 既有拼写直接
+  复用；切片族内 `to_*` 一律拷贝（`CString.to_string` 的零拷贝是登记在案的既有
+  例外）；切片**不加 `to_bytes`**（`to_list` 已覆盖，公理 6）。
+- `into_` = **消费转移**：into_ 族先例全部清空接收者（`into_frozen_list` 的
+  「O(1) 移交、self 置空」就是 `into_slice` 的同契约先例）。
+- `from_*` = **拷贝/校验进口**：进 String 走 `from_slice`/`from_bytes` 家族，
+  checked/unchecked 成对（`let unsafe` 调用契约）。
+- `borrow_` = **非持有访问**：`borrow_ptr`/`borrow_mut_ptr` 族 + `borrow_slice`
+  借出（闭包作用域 + 修改锁 + 逃逸检查）；借出拼写不入 `with_*`（被构造器族
+  `with_capacity` ×14 占据，易误读）。
+
 ### 计数域与宽度域
 
 签名里的数分两个域，按**这个数是什么**分，不按实现方便分：

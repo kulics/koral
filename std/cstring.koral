@@ -19,7 +19,7 @@
 /// `sendable` (safe): `Bytes` carries the construction-then-immutable promise
 /// and the atomic RC for the shared block, `len` is a scalar -- so values
 /// cross threads freely.
-public type sendable CString(protected bytes: Bytes, protected len: Int);
+public type sendable CString(protected bytes: Block[UInt8], protected len: Int);
 
 /// Construction from `String`, and the NUL-terminated accessors C needs.
 given CString {
@@ -40,7 +40,7 @@ given CString {
         };
         let s = alloc_bytes(UInt(len));
         if len > 0 then {
-            copy_memory(s.data, data, UInt(len));
+            copy_memory(s.elements(), data, UInt(len));
         };
         return Result[CString].Ok(CString(s, len));
     };
@@ -53,7 +53,7 @@ given CString {
         let len = value.count();
         let s = alloc_bytes(UInt(len));
         if len > 0 then {
-            copy_memory(s.data, value.borrow_ptr(), UInt(len));
+            copy_memory(s.elements(), value.borrow_ptr(), UInt(len));
         };
         return CString(s, len);
     };
@@ -66,7 +66,12 @@ given CString {
     /// Borrow the NUL-terminated bytes; `count() + 1` bytes are readable from
     /// the returned pointer and byte `[count()]` is 0. Valid while the value
     /// lives. This is the pointer to hand to C `char*` parameters.
-    public borrow_ptr(self): *UInt8 = self.bytes.data;
+    public borrow_ptr(self): *UInt8 = self.bytes.elements();
+
+    /// 只读切片窗口（slice-design）：`[]UInt8`，零拷贝（写死块）。
+    public as_slice(self): []UInt8 = {
+        return Slice[UInt8](self.bytes, 0, self.len);
+    };
 
     /// The content as a `String`, without a copy -- the result is a window on
     /// this block (the NUL is not part of the content). Use `clone` on the

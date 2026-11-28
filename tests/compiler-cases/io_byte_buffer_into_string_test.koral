@@ -13,7 +13,7 @@ let main(): Void = {
     assert(b.into_string() == "", "drained");
 
     // The buffer stays usable after the handover.
-    let _ = b.write_all(from = "again".to_bytes());
+    let _ = b.write_all(from = "again".as_slice());
     assert(b.into_string() == "again", "reuse after handover");
 
     // The whole buffer is handed over regardless of the cursor.
@@ -21,7 +21,8 @@ let main(): Void = {
     let mutable sink = List[UInt8].new();
     sink.push(0);
     sink.push(0);
-    let n = c.read(into = sink, span = 0..<2) or else 0;
+    let c2 = c;
+    let n = sink.borrow_slice((sl) => c2.read(into = sl[0..<2])) or else 0;
     assert(n == 2, "read two");
     assert(c.into_string() == "abcd", "whole buffer handover");
     assert(c.into_string() == "", "drained after cursor use");
@@ -44,7 +45,8 @@ let main(): Void = {
 
     // `to_bytes` ignores the cursor, unlike the Reader `read_all`.
     let mutable e = ByteBuffer.from_string("wxyz");
-    let n2 = e.read(into = sink, span = 0..<2) or else 0;
+    let e2 = e;
+    let n2 = sink.borrow_slice((sl) => e2.read(into = sl[0..<2])) or else 0;
     assert(n2 == 2, "read two again");
     let full = e.to_bytes();
     assert(full.count() == 4, "to_bytes whole content");

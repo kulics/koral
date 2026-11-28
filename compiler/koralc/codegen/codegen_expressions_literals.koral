@@ -29,22 +29,18 @@ given CodeGen {
         };
         byte_literals.push_string("0x00");
 
-        self.add_indent();
-        self.buffer.push_string(
-            "static const uint8_t \(bytes_var_name.to_string())[] = { \(byte_literals.to_string()) };\n",
-        );
-
         let byte_count = utf8_bytes.count();
         // Immortal 头（Swift 的 immortal object 做法）：静态字面量的 control 块
         // strong_count = -1，retain/release 直接早退，永不释放。
         // weak_count 同为 -1 哨兵：weak 操作读到 strong == -1 早退（见
         // __koral_weak_retain），所以 downgrade/release 不会把静态块送进 free。
         // 布局仍是 [Control | payload]，所以 __koral_control_of(ptr) 能反推回来。
-        // 载荷是 __koral_StringPayload——Bytes 托管块的 {data, len} 布局
-        // （见 std/koral_runtime.h 的 ABI 注）。
+        // 载荷是统一存储块形 __koral_BlockPayload{len, cap}，字节区内联其后
+        // （payload+16 处，与 Block[T].elements() 同一公式——见
+        // std/koral_runtime.h 的 ABI 注）。
         self.add_indent();
         self.buffer.push_string(
-            "static const struct { struct __koral_Control ctrl; struct __koral_StringPayload payload; } \(storage_var_name)_block = { { \(immortal_refcount()), -1 }, { (uint8_t*)\(bytes_var_name), \(byte_count) } };\n",
+            "static const struct { struct __koral_Control ctrl; struct __koral_BlockPayload payload; uint8_t bytes[\(byte_count + 1)]; } \(storage_var_name)_block = { { \(immortal_refcount()), -1 }, { \(byte_count), \(byte_count + 1) }, { \(byte_literals.to_string()) } };\n",
         );
 
         let c_type = self.c_type_name(str_type);
@@ -73,13 +69,9 @@ given CodeGen {
         };
         byte_literals.push_string("0x00");
 
-        self.buffer.push_string(
-            "static const uint8_t \(bytes_var_name)[] = { \(byte_literals.to_string()) };\n",
-        );
-
         let byte_count = utf8_bytes.count();
         self.buffer.push_string(
-            "static const struct { struct __koral_Control ctrl; struct __koral_StringPayload payload; } \(storage_var_name)_block = { { \(immortal_refcount()), -1 }, { (uint8_t*)\(bytes_var_name), \(byte_count) } };\n",
+            "static const struct { struct __koral_Control ctrl; struct __koral_BlockPayload payload; uint8_t bytes[\(byte_count + 1)]; } \(storage_var_name)_block = { { \(immortal_refcount()), -1 }, { \(byte_count), \(byte_count + 1) }, { \(byte_literals.to_string()) } };\n",
         );
         // 值形初始化（地址常量，C 静态初始化合法）：String = { bytes, off, len }。
         return "{ .bytes = { .ptr = (void*)&\(storage_var_name)_block.payload }, .off = 0, .len = \(byte_count) }";

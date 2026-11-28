@@ -135,8 +135,10 @@ void* __koral_string_alloc(uintptr_t len) {
     // 长度溢出闸：`len` 走 unchecked 路径（foreign / unchecked 算术）进来时，
     // `overhead + len` 会回绕成小 need，随后 `tail[len] = 0` 越界写。先按最大
     // 开销收口再算 need——Koral 层的 `+` 自带溢出 panic，这里是 C 侧最后一道。
+    // 统一块形（slice-design）：[Control | payload{len,cap} | 字节区]，字节区
+    // 内联在 payload+16（与 Block[T].elements() 同一公式）。
     const uintptr_t overhead =
-        sizeof(struct __koral_Control) + sizeof(struct __koral_StringPayload) + 1;
+        sizeof(struct __koral_Control) + sizeof(struct __koral_BlockPayload) + 1;
     if (len > UINTPTR_MAX - overhead) {
         __koral_panic_print("string length overflow while allocating a string block", NULL);
     }
@@ -165,17 +167,69 @@ void* __koral_string_alloc(uintptr_t len) {
     }
     control->strong_count = 1;
     control->weak_count = 1;
-    struct __koral_StringPayload* payload =
-        (struct __koral_StringPayload*)__koral_payload_of(control);
-    uint8_t* tail = (uint8_t*)payload + sizeof(struct __koral_StringPayload);
+    struct __koral_BlockPayload* payload =
+        (struct __koral_BlockPayload*)__koral_payload_of(control);
+    uint8_t* tail = (uint8_t*)payload + sizeof(struct __koral_BlockPayload);
     tail[len] = 0;
-    payload->data = tail;
     payload->len = len;
+    payload->cap = len + 1;
     return payload;
 }
 
 int32_t __koral_memcmp(uint8_t* a, uint8_t* b, uintptr_t n) {
     return (int32_t)memcmp(a, b, (size_t)n);
+}
+
+// ---- 统一存储块（布局与哨兵契约见 koral_runtime.h）----
+
+// immortal 空块：strong = weak = -1、len = cap = 0。放**可写段**（非 const）——
+// 增长/放块路径对负数哨兵跳过 len 写是承重条款，可写段是双保险。
+static struct __koral_EmptyBlockStorage {
+    struct __koral_Control control;
+    uintptr_t len;
+    uintptr_t cap;
+} __koral_empty_block_storage = {
+    { KORAL_IMMORTAL_REFCOUNT, KORAL_IMMORTAL_REFCOUNT }, 0, 0
+};
+
+void* __koral_empty_block(void) {
+    return __koral_payload_of(&__koral_empty_block_storage.control);
+}
+
+void* __koral_block_alloc(uint64_t cap, uint64_t elem_size, uint64_t elem_align) {
+    // Alignment cap 8 = the Koral side's element-area formula (payload + 16)
+    // assumes align_up(24, alignof(T)) == 24, true exactly for alignof <= 8.
+    // Every Koral type's alignment is <= 8 (pointers/Int/Float64).
+    if (elem_align == 0 || elem_align > 8 || (elem_align & (elem_align - 1)) != 0) {
+        __koral_panic_print("block element alignment must be a power of two in 1..8", NULL);
+    }
+    const uint64_t offset = (24u + elem_align - 1u) & ~(elem_align - 1u);
+    // 容量闸与 __koral_alloc_array 同口径（panic 词汇严格区分）：请求的**元素
+    // 字节**超过 Int.max = caller bug，报 `capacity overflow`；上限之内而机器
+    // 发不出报 `oom`。头开销不占索引上限（24B 是块的固定开销，不是请求）。
+    if (elem_size != 0 && cap > (uint64_t)INT64_MAX / elem_size) {
+        __koral_panic_print("capacity overflow", NULL);
+    }
+    const uint64_t need = offset + cap * elem_size;
+    if (need > (uint64_t)SIZE_MAX) {
+        __koral_panic_print("oom", NULL);
+    }
+    // len/cap 在 payload 头 16B（块偏移 8..24），offset ≥ 24 恒不重叠。
+    struct __koral_Control* control = (struct __koral_Control*)malloc((size_t)need);
+    if (control == NULL) {
+        __koral_panic_print("oom", NULL);
+    }
+    control->strong_count = 1;
+    control->weak_count = 1;
+    uintptr_t* payload = (uintptr_t*)__koral_payload_of(control);
+    payload[0] = 0;                  // len
+    payload[1] = (uintptr_t)cap;     // cap
+    return payload;
+}
+
+int32_t __koral_strong_count(uint8_t* payload) {
+    return atomic_load_explicit(&__koral_control_of(payload)->strong_count,
+                                memory_order_relaxed);
 }
 
 // 慢路径：强引用归零后的析构与释放。快路径在 koral_runtime.h 里内联。

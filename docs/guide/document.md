@@ -630,6 +630,50 @@ Rules:
 
 Iteration order over a `Dict` or `Set` is **unspecified**: it follows the table layout, which is seeded per process (the hash-flooding defence), so it can differ between runs. Code that needs a stable order sorts the keys itself. `List` and `Deque` iterate in storage order.
 
+#### Slices: `[]T` and `[]mutable T`
+
+A slice is a zero-copy window over shared storage — the same unified element
+block that backs `List`, `FrozenList`, `String` and `ByteBuffer`. `[]T` reads
+elements; `[]mutable T` additionally writes them and narrows implicitly to
+`[]T`. Slices are short-lived views: they carry no literal form (every window
+comes from an owner) and never cross threads.
+
+Where windows come from, and what each one promises:
+
+| From | Call | Meaning |
+|---|---|---|
+| `String` / `CString` / `FrozenList[T]` | `as_slice()` | zero-copy; may escape (the storage is frozen) |
+| `List[T]` / `ByteBuffer` | `borrow_slice((s) => ...)` | zero-copy borrow for the closure; escaping panics |
+| `List[T]` / `ByteBuffer` | `into_slice()` | consuming transfer: the owner empties, the window may escape |
+| a slice | `s[a..<b]` | O(1) re-windowing |
+
+Reads follow `List`'s spellings — `count`, `is_empty`, `get`, `first`,
+`last`, `contains`, `iterator` — plus the built-in subscripts `s[i]` and
+`s[a..<b]` (out of range panics). `to_list` / `to_frozen_list` copy out;
+`String.from_slice` / `String.from_slice_unchecked` copy back into text.
+
+```koral
+let text = "hello world";
+let bytes = text.as_slice();          // []UInt8 over the same block
+assert(bytes.count() == 11);
+
+let xs = List[UInt8].new();
+xs.push(1);
+xs.push(2);
+let n = xs.borrow_slice((s) => {
+    s[0] = 10;                        // window writes are the borrow's channel
+    s.count()
+});
+assert(n == 2);
+```
+
+`borrow_slice` holds a modification lock for the duration of the closure: any
+change through the `List` — `push`, `remove_at`, subscript writes, `clear`,
+`into_slice`, including through aliases — panics at its entry. Window writes
+(`s[i] = v`) stay legal; that is what the borrow is for. The window must not
+escape the closure: storing it (or a derived subwindow, even a zero-length
+one) anywhere outside panics at the exit check.
+
 ### Variables and Bindings
 
 Koral's variables use binding semantics, equivalent to binding a variable name and a value together. For safety reasons, variables are immutable by default, but we also provide mutable variables.

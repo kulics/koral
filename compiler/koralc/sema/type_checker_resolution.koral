@@ -497,6 +497,10 @@ given TypeChecker {
                 if is_mutable then Type.MutablePointerType(resolved_inner)
                 else Type.PointerType(resolved_inner)
             },
+            .Slice(inner, is_mutable, span) then {
+                let resolved_inner = self.resolve_type(inner);
+                self.slice_window_instance(resolved_inner, is_mutable, span)
+            },
             .WeakReference(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_type(inner);
                 if is_mutable then self.resolve_mutable_weak_reference_type(
@@ -735,6 +739,11 @@ given TypeChecker {
                 if is_mutable then Type.MutablePointerType(resolved_inner)
                 else Type.PointerType(resolved_inner)
             },
+            .Slice(inner, is_mutable, span) then self.slice_window_instance(
+                self.resolve_type_with_bindings(inner, bindings),
+                is_mutable,
+                span,
+            ),
             .WeakReference(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_type_with_bindings(inner, bindings);
                 if is_mutable then self.resolve_mutable_weak_reference_type(
@@ -1012,6 +1021,11 @@ given TypeChecker {
                 if is_mutable then Type.MutablePointerType(resolved_inner)
                 else Type.PointerType(resolved_inner)
             },
+            .Slice(inner, is_mutable, span) then self.slice_window_instance(
+                self.resolve_type_in_scope(inner, scope),
+                is_mutable,
+                span,
+            ),
             .WeakReference(inner, is_mutable, span) then {
                 let resolved_inner = self.resolve_type_in_scope(inner, scope);
                 if is_mutable then self.resolve_mutable_weak_reference_type(
@@ -1271,12 +1285,123 @@ given TypeChecker {
     };
 
     builtin_bytes_type(self): Type = {
-        return when self.storage.global_scope.lookup_type_in_module(
-            "Bytes",
+        // `Bytes` 是 `Block[UInt8]` 别名（slice-design）；别名直查会拿到占位符
+        // 而非实例（方法查找键错位），故直建 Block[UInt8] 实例。
+        return self.block_storage_instance(Type.UInt8Type(), unknown_span());
+    };
+
+    /// `[]T` / `[]mutable T`（slice-design）：内建拼写锚定 std 根模块的
+    /// `Slice` / `MutSlice` 模板（protected，用户不可名状——拼写本身就是
+    /// 可见性，公理 6 的唯一表达）。锚定机制与 builtin_bytes_type 同一形；
+    /// 实例化走模板的实参/边界校验，跳过可见性检查（语法即授权）。
+    slice_window_instance(
+        self,
+        resolved_inner: Type,
+        is_mutable: Bool,
+        span: SourceSpan,
+    ): Type = {
+        let base_name = if is_mutable then "MutSlice" else "Slice";
+        let base_type = when self.storage.global_scope.lookup_type_in_module(
+            base_name,
             self.storage.module_path,
         ) in {
             .Some(t) then self.canonicalize_alias_type(t),
             .None() then Type.Unknown(),
+        };
+        return when base_type in {
+            .StructureType(def_id) then {
+                if not self.is_generic_template_def(def_id) then {
+                    self.push_diagnostic("Undefined type: \(base_name)", span);
+                    return Type.Unknown();
+                };
+                let mutable resolved_args = List[Type].new();
+                resolved_args.push(resolved_inner);
+                if not self.validate_generic_template_arity(def_id, resolved_args) then {
+                    return Type.Unknown();
+                };
+                self.validate_template_bounds(def_id, resolved_args, span, false);
+                Type.GenericStruct(
+                    def_id,
+                    self.to_type_ref_list_in_resolution(resolved_args),
+                )
+            },
+            _ then {
+                self.push_diagnostic("Undefined type: \(base_name)", span);
+                Type.Unknown()
+            },
+        };
+    };
+
+    /// 切片窗口模板身份判定（slice-design）：`def_id` 是 std 根模块的
+    /// `Slice` / `MutSlice` 模板吗？身份按 DefId（共同前提），名字只用于
+    /// 这条锚定查找本身。
+    slice_window_template_is(self, def_id: DefId, is_mutable: Bool): Bool = {
+        let base_name = if is_mutable then "MutSlice" else "Slice";
+        return when self.storage.global_scope.lookup_type_in_module(
+            base_name,
+            self.storage.module_path,
+        ) in {
+            .Some(t) then when self.canonicalize_alias_type(t) in {
+                .StructureType(d) then d.id == def_id.id,
+                _ then false,
+            },
+            _ then false,
+        };
+    };
+
+    /// `[]mutable T` → `[]T` 的单向能力收窄（公理 3 登记例外，与 `*mutable` →
+    /// `*` 同形）：期望是 Slice[T] 实例、实参是同实参的 MutSlice[T] 实例。
+    /// 表示相同，收窄只改标类型。
+    slice_window_narrowing_match(self, expected: Type, actual: Type): Bool = {
+        return when expected in {
+            .GenericStruct(e_def, e_args) then when actual in {
+                .GenericStruct(a_def, a_args) then {
+                    if e_args.count() != 1 or a_args.count() != 1 then {
+                        return false;
+                    };
+                    if not (e_args[0] == a_args[0]) then {
+                        return false;
+                    };
+                    self.slice_window_template_is(e_def, false)
+                        and self.slice_window_template_is(a_def, true)
+                },
+                _ then false,
+            },
+            _ then false,
+        };
+    };
+
+    /// `Block[T]`（slice-design 统一存储块）：std 根模块的 `Block` 模板实例。
+    /// 与 slice_window_instance 同一锚定形（protected，内建入口即授权）。
+    block_storage_instance(self, elem_type: Type, span: SourceSpan): Type = {
+        let base_type = when self.storage.global_scope.lookup_type_in_module(
+            "Block",
+            self.storage.module_path,
+        ) in {
+            .Some(t) then self.canonicalize_alias_type(t),
+            .None() then Type.Unknown(),
+        };
+        return when base_type in {
+            .StructureType(def_id) then {
+                if not self.is_generic_template_def(def_id) then {
+                    self.push_diagnostic("Undefined type: Block", span);
+                    return Type.Unknown();
+                };
+                let mutable resolved_args = List[Type].new();
+                resolved_args.push(elem_type);
+                if not self.validate_generic_template_arity(def_id, resolved_args) then {
+                    return Type.Unknown();
+                };
+                self.validate_template_bounds(def_id, resolved_args, span, false);
+                Type.GenericStruct(
+                    def_id,
+                    self.to_type_ref_list_in_resolution(resolved_args),
+                )
+            },
+            _ then {
+                self.push_diagnostic("Undefined type: Block", span);
+                Type.Unknown()
+            },
         };
     };
 

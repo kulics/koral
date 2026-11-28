@@ -206,6 +206,21 @@ public let resolve_type_node(
             if is_mutable then Type.MutablePointerType(resolved_inner)
             else Type.PointerType(resolved_inner)
         },
+        // `[]T`/`[]mutable T`（slice-design）：合成 Generic 节点复用模板注册表
+        // 路径（可见性已由 sema 上游把关，mono 只求身份正确）。
+        .Slice(inner, is_mutable, span) then {
+            let mutable slice_args = List[TypeNode].new();
+            slice_args.push(inner);
+            resolve_type_node(
+                mono,
+                TypeNode.Generic(
+                    if is_mutable then "MutSlice" else "Slice",
+                    slice_args,
+                    span,
+                ),
+                substitution,
+            )
+        },
         // TypeNode.WeakReference: recursively resolve inner type and wrap.
         .WeakReference(inner, is_mutable, _) then {
             let resolved_inner = resolve_type_node(mono, inner, substitution);
@@ -380,6 +395,19 @@ public let resolve_type_node_identity(
             let resolved_inner = resolve_type_node_identity(mono, inner, type_params);
             if is_mutable then Type.MutablePointerType(resolved_inner)
             else Type.PointerType(resolved_inner)
+        },
+        .Slice(inner, is_mutable, span) then {
+            let mutable slice_args = List[TypeNode].new();
+            slice_args.push(inner);
+            resolve_type_node_identity(
+                mono,
+                TypeNode.Generic(
+                    if is_mutable then "MutSlice" else "Slice",
+                    slice_args,
+                    span,
+                ),
+                type_params,
+            )
         },
         .WeakReference(inner, is_mutable, span) then {
             let resolved_inner = resolve_type_node_identity(mono, inner, type_params);

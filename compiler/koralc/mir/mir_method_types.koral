@@ -1609,6 +1609,7 @@ given MIRFunctionBuilder {
         let _ = self;
         return when node in {
             .AllocMemory(_, result_type) or .AllocString(_, result_type)
+            or .AllocBlock(_, _, result_type) or .EmptyBlock(result_type)
             or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type)
             or .TakeMemory(_, result_type) or .NullPtr(result_type) then result_type,
             .FixedArrayLiteral(result_type, _) then result_type,
@@ -1625,7 +1626,19 @@ given MIRFunctionBuilder {
         ownerships: List[MIROwnershipUse],
         result_type: Type,
     ): Option[MIRExprResult] = {
-        let value = MIRValue.Call(MIRCall(callee, values, ownerships, result_type));
+        // 视图返回的调用同 borrowed 约定（mir_result_borrows_arguments）：
+        // 实参 +0 借入，被调方不释放句柄，调用方的临时活到语句尾——否则返回
+        // 的视图即刻悬空。
+        let mutable call_ownerships = ownerships;
+        if mir_result_borrows_arguments(result_type) then {
+            call_ownerships = List[MIROwnershipUse].new();
+            let mutable borrow_index = 0;
+            while borrow_index < values.count() then {
+                call_ownerships.push(MIROwnershipUse.Borrow());
+                borrow_index += 1;
+            };
+        };
+        let value = MIRValue.Call(MIRCall(callee, values, call_ownerships, result_type));
         if self.type_is_never(result_type) then {
             self.append_statement(MIRStatement.Evaluate(value));
             self.terminate(MIRTerminator.Unreachable());
@@ -1909,16 +1922,28 @@ given MIRFunctionBuilder {
         let trait_name = trait_ref.trait_name;
         let trait_def_id = trait_ref.trait_def_id;
         let trait_args = trait_ref.trait_type_args;
+        // 视图返回的 trait 方法同 borrowed 约定（mir_result_borrows_arguments）：
+        // 接收者与实参 +0 借入、临时活到语句尾。vtable 发射把 Borrow 升 Copy
+        // 转移（ownership-first 配平不变），换来的正是消费源不死的时序。
+        let borrowed_shape = mir_result_borrows_arguments(result_type);
         let mutable values = List[MIRValue].new();
         let mutable ownerships = List[MIROwnershipUse].new();
         for arg in args then {
             values.push(self.lower_value(arg));
-            ownerships.push(self.ownership_use(arg));
+            let mutable arg_ownership = self.ownership_use(arg);
+            if borrowed_shape then {
+                arg_ownership = MIROwnershipUse.Borrow();
+            };
+            ownerships.push(arg_ownership);
+        };
+        let mutable receiver_ownership = self.ownership_use(receiver);
+        if borrowed_shape then {
+            receiver_ownership = MIROwnershipUse.Borrow();
         };
         let value = MIRValue.TraitMethodCall(
             MIRTraitMethodCall(
                 self.lower_value(receiver),
-                self.ownership_use(receiver),
+                receiver_ownership,
                 trait_name,
                 trait_def_id,
                 trait_args,

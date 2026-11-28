@@ -41,7 +41,7 @@ given[R: Reader] BufReader[R] {
         };
         self.start = 0;
         self.end = 0;
-        return when self.inner.read(into = self.buf, span = 0..<self.cap) in {
+        return when self.buf.borrow_slice((s) => self.inner.read(into = s)) in {
             .Ok(n) then {
                 // The buffer pointers are indexed raw at the call sites; a
                 // fill that reports more bytes than the buffer holds would
@@ -56,6 +56,16 @@ given[R: Reader] BufReader[R] {
             },
             .Error(e) then Result[Int].Error(e),
         };
+    };
+
+    /// 零拷贝帧（slice-design §BufReader 帧，Go 语义）：把缓冲区当前内容作为
+    /// `[]UInt8` 窗口借出，帧在下一次读取前有效；过期读到陈旧字节（逻辑错误，
+    /// 非 UB——帧钉块不悬垂）。不填充、不消费。
+    public read_frame(self): []UInt8 = {
+        let _ = self.fill_buf() or else {
+            return MutSlice[UInt8](empty_block[UInt8](), 0, 0);
+        };
+        return MutSlice[UInt8](self.buf.block, self.start, self.end - self.start);
     };
 
     /// Read one byte through the buffer, returning `None` at end of input.
@@ -164,13 +174,11 @@ given[R: Reader] BufReader[R] {
     public read_until(
         self,
         delim: UInt8,
-        into: List[UInt8] =,
-        span: Range[Int] = ...,
+        into: []mutable UInt8 =,
     ): Result[Int] = {
-        let spec = span.resolve_span(into.count());
-        let base = spec.first;
+        let base = 0;
         let mutable out_pos = base;
-        let out_end = spec.first + spec.second;
+        let out_end = into.count();
         if out_end <= out_pos then {
             return Result[Int].Ok(0);
         };
@@ -189,7 +197,7 @@ given[R: Reader] BufReader[R] {
                     // the fill (`start <= end <= cap`); the scan and copy stay
                     // within `avail` and the output remainder.
                     let src_ptr = self.buf.borrow_ptr();
-                    let dst_ptr = into.borrow_mut_ptr();
+                    let dst_ptr = into.elements();
 
                     let mutable i = 0;
                     let mutable found = false;
@@ -232,7 +240,7 @@ given[R: Reader] BufReader[R] {
         let mutable tmp = make_bytes(4096);
         let mutable done = false;
         while not done then {
-            when self.read_until(UInt8(10), into = tmp, span = ...) in {
+            when tmp.borrow_slice((s) => self.read_until(UInt8(10), into = s)) in {
                 .Ok(n) then {
                     if n == 0 then {
                         done = true;
@@ -287,11 +295,10 @@ given[R: Reader] BufReader[R] {
 given[R: Reader] BufReader[R]: Reader {
 
     /// Fill `into[span]` from buffered bytes, refilling from the inner reader as needed, and return the count read.
-    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int] = {
-        let span = span.resolve_span(into.count());
-        let base = span.first;
+    public read(self, into: []mutable UInt8 =): Result[Int] = {
+        let base = 0;
         let mutable out_pos = base;
-        let out_end = span.first + span.second;
+        let out_end = into.count();
         if out_end <= out_pos then {
             return Result[Int].Ok(0);
         };
@@ -305,7 +312,7 @@ given[R: Reader] BufReader[R]: Reader {
                     // Pointers fresh per fill, never across one -- see
                     // `read_until`.
                     let src_ptr = self.buf.borrow_ptr();
-                    let dst_ptr = into.borrow_mut_ptr();
+                    let dst_ptr = into.elements();
                     let remain_out = out_end - out_pos;
                     let take = if avail < remain_out then avail else remain_out;
                     unsafe { copy_memory(dst_ptr + out_pos, src_ptr + self.start, UInt(take)) };

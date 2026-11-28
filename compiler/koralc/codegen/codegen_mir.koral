@@ -273,7 +273,7 @@ private let mir_walk_intrinsic_uses(
     active_scopes: List[MIRScopeID],
 ): Void = {
     when intrinsic_node in {
-        .AllocMemory(count, _) or .AllocString(count, _) then mir_walk_value_uses(
+        .AllocMemory(count, _) or .AllocString(count, _) or .AllocBlock(count, _, _) then mir_walk_value_uses(
             shared_use_scope_by_local,
             first_use_block_by_local,
             multiple_use_blocks_by_local,
@@ -283,6 +283,8 @@ private let mir_walk_intrinsic_uses(
             block,
             active_scopes,
         ),
+        .EmptyBlock(_) then {},
+
         .DeallocMemory(pointer) then mir_walk_value_uses(
             shared_use_scope_by_local,
             first_use_block_by_local,
@@ -1376,6 +1378,13 @@ given MIRFunctionCodeEmitter {
     emit_return(self, operand: Option[MIROperand]): Void = {
         when operand in {
             .Some(op) then {
+                // 泛型方法在返回类型实参 = Void 的实例化上，MIR 仍带 Void 值操作数
+                // （`return result` 于 R := Void）——C 侧 void 函数不能 return 值。
+                if self.type_of_operand(op) is .VoidType() then {
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("return;\n");
+                    return;
+                };
                 let raw_emission = self.emit_operand_value(op);
                 let mutable return_type = self.type_of_operand(op);
                 let emission = raw_emission;
@@ -1823,6 +1832,7 @@ given MIRFunctionCodeEmitter {
                         call.arguments[0],
                         ownership,
                         self.codegen.impure_function_ids.get(symbol.def_id.id) is .None(),
+                        mir_result_borrows_arguments(call.result_type),
                     );
                     // Auto-wrap: if the function parameter expects a borrowed reference
                     // but the argument is a raw value, wrap it in a stack borrow.
@@ -1875,11 +1885,13 @@ given MIRFunctionCodeEmitter {
                         call.arguments[0],
                         first_ownership,
                         self.codegen.impure_function_ids.get(symbol.def_id.id) is .None(),
+                        mir_result_borrows_arguments(call.result_type),
                     );
                     let second_emission = self.emit_direct_call_argument(
                         call.arguments[1],
                         second_ownership,
                         self.codegen.impure_function_ids.get(symbol.def_id.id) is .None(),
+                        mir_result_borrows_arguments(call.result_type),
                     );
                     // Auto-wrap borrowed reference parameters.
                     let mutable first_type = self.type_of_value(call.arguments[0]);
@@ -1994,6 +2006,7 @@ given MIRFunctionCodeEmitter {
                 arg,
                 ownership,
                 callee_pure,
+                mir_result_borrows_arguments(call.result_type),
             );
             // Auto-wrap: if the function parameter expects a borrowed reference
             // but the argument is a raw value, wrap it in a stack borrow.
@@ -2206,6 +2219,7 @@ given MIRFunctionCodeEmitter {
         value: MIRValue,
         ownership: MIROwnershipUse,
         callee_pure: Bool,
+        view_result: Bool,
     ): MIRValueEmission = {
         let mutable value_type = self.type_of_value(value);
         return when ownership in {
@@ -2217,6 +2231,7 @@ given MIRFunctionCodeEmitter {
                         value,
                         MIROwnershipUse.Move(),
                         callee_pure,
+                        view_result,
                     );
                 };
                 let emission = self.emit_value(value);
@@ -2279,9 +2294,14 @@ given MIRFunctionCodeEmitter {
                 // callee is a pure reader (see `compute_impure_function_ids`)
                 // and can rewrite nothing reachable. Everything else keeps a
                 // retained temp that drops right after the call.
+                // 视图返回豁免（mir_result_borrows_arguments，种子同形）：结果
+                // 是裸指针/借用引用的调用实参一律 +0 裸传——被调方不释放句柄、
+                // 调用方的 place 自持引用到语句尾（种子 `case .borrow:
+                // sourceMode` 同形）。稳定性副本只留给普通借用调用的投影读
+                // （borrowed_param_projection_alias_drop_timing 钉住的面）。
                 let emission = when value in {
                     .PlaceRead(place, _) then {
-                        let stable = callee_pure
+                        let stable = view_result or callee_pure
                             or self.borrowed_place_is_stable(place);
                         if not stable and self.codegen.needs_drop(value_type) then {
                             self.emit_place_read(place, MIROwnershipUse.Copy(), false)
@@ -2650,7 +2670,7 @@ given MIRFunctionCodeEmitter {
                     ](fields) then {
                         let value = pair.first;
                         let member = pair.second;
-                        let emission = self.emit_value(value);
+                        let emission = self.emit_field_source_value(value);
                         let field_name = self.codegen.sanitize_codegen_identifier(
                             member.name,
                         );
@@ -2791,7 +2811,7 @@ given MIRFunctionCodeEmitter {
             for field in case_info.second then {
                 if not self.codegen.type_is_void(field.param_type) then {
                     let arg_value = construction.arguments[argument_index];
-                    let emission = self.emit_value(arg_value);
+                    let emission = self.emit_field_source_value(arg_value);
                     let field_dest = "\(member_base).\(self.codegen.sanitize_codegen_identifier(field.name))";
                     let assigned_expression = self.adapt_expression_for_target_type(
                         emission.expression,
@@ -2850,7 +2870,7 @@ given MIRFunctionCodeEmitter {
         for field in case_info.second then {
             if not self.codegen.type_is_void(field.param_type) then {
                 let arg_value = construction.arguments[argument_index];
-                let emission = self.emit_value(arg_value);
+                let emission = self.emit_field_source_value(arg_value);
                 let field_dest = "\(expression).data.\(self.codegen.sanitize_codegen_identifier(construction.case_name)).\(self.codegen.sanitize_codegen_identifier(field.name))";
                 let assigned_expression = self.adapt_expression_for_target_type(
                     emission.expression,
@@ -3111,6 +3131,7 @@ given MIRFunctionCodeEmitter {
                 pair.second,
                 transfer,
                 true,
+                false,
             );
             arg_values.push(emission.expression);
             arg_types.push(self.type_of_value(pair.second));
@@ -3712,6 +3733,19 @@ given MIRFunctionCodeEmitter {
                 loc_literal,
             );
             converted
+        } else if self.codegen.is_nominal_struct_type(target_type)
+            and self.codegen.is_nominal_struct_type(source_type) then {
+            // 同布局名义族的强制转（slice-design 的 `[]mutable T` → `[]T` 收窄）：
+            // C 不允许结构体值转换；语义 = 位拷 + 目标拷贝语义（retain 托管
+            // 字段）——借目标拷贝函数传指针强转（布局相同）。
+            let temp = self.codegen.next_temp_with_decl(target_c_type);
+            self.codegen.append_copy_or_move_assignment(
+                target_type,
+                "*(const \(target_c_type)*)&(\(source.expression))",
+                temp,
+                true,
+            );
+            temp
         } else self.codegen.next_temp_with_init(
             target_c_type,
             "(\(target_c_type))\(source.expression)",
@@ -3754,6 +3788,33 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(len_emission.expression);
                 self.codegen.buffer.push_string(");\n");
                 self.emit_cleanup(len_emission.cleanup);
+                MIRValueEmission(expression, Option[MIRValueCleanup].None())
+            },
+            .AllocBlock(cap, elem_type, result_type) then {
+                self.saw_alloc_memory = true;
+                let cap_emission = self.emit_value_source(cap);
+                let expression = self.codegen.next_temp_with_decl(
+                    self.codegen.c_type_name(result_type),
+                );
+                self.codegen.add_indent();
+                self.codegen.buffer.push_string(expression);
+                self.codegen.buffer.push_string(".ptr = __koral_block_alloc(");
+                self.codegen.buffer.push_string(cap_emission.expression);
+                self.codegen.buffer.push_string(", sizeof(");
+                self.codegen.buffer.push_string(self.codegen.c_type_name(elem_type));
+                self.codegen.buffer.push_string("), _Alignof(");
+                self.codegen.buffer.push_string(self.codegen.c_type_name(elem_type));
+                self.codegen.buffer.push_string("));\n");
+                self.emit_cleanup(cap_emission.cleanup);
+                MIRValueEmission(expression, Option[MIRValueCleanup].None())
+            },
+            .EmptyBlock(result_type) then {
+                let expression = self.codegen.next_temp_with_decl(
+                    self.codegen.c_type_name(result_type),
+                );
+                self.codegen.add_indent();
+                self.codegen.buffer.push_string(expression);
+                self.codegen.buffer.push_string(".ptr = __koral_empty_block();\n");
                 MIRValueEmission(expression, Option[MIRValueCleanup].None())
             },
             .DeallocMemory(pointer) then {
@@ -4614,6 +4675,17 @@ given MIRFunctionCodeEmitter {
             return false;
         };
         return self.source_is_consumed(MIRValue.Operand(operand));
+    };
+
+    /// 构造实参的值发射（聚合字段/枚举载荷）：命中 P5 末次使用移动就按移动源
+    /// 发射（裸读 + 就地消费源，免 retain 副本），否则走普通发射。漏掉这层
+    /// 就是 into_frozen_list 一族「移交」总带一对 retain/release 的账
+    /// （rc_counter_pin w7 的最后一拷）。
+    emit_field_source_value(self, value: MIRValue): MIRValueEmission = {
+        if self.consume_last_use_source(value) then {
+            return self.emit_value_source(value);
+        };
+        return self.emit_value(value);
     };
 
     should_copy_borrowed_aggregate_field(self, value: MIRValue): Bool = {
@@ -5517,6 +5589,14 @@ given CodeGen {
                 self.nested_function_definitions = StringBuilder.new();
             };
 
+            // 定义必须与声明同缀（声明在 emit_function_declaration 按
+            // type_is_never 发 `_Noreturn`）：C 侧声明/定义属性失配会让 clang
+            // 丢掉 noreturn——调用点退化成全量 clobber 的 MemoryDef，热循环里
+            // 冷路径的 Never 助手（锁检查 panic 一族）打断句柄/len 的
+            // store→load 转发链（纯 push 每迭代被迫重装 len，实测 ~2×）。
+            if self.type_is_never(concrete_return_type) then {
+                self.buffer.push_string("_Noreturn ");
+            };
             if body_emission.allocates then {
                 self.buffer.push_string("KORAL_NOINLINE ");
             };

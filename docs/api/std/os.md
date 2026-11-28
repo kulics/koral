@@ -339,14 +339,14 @@ given File {
 given File: Reader {
     /// Read bytes into the target list over the given span and return how many were read.
     /// Unbuffered: each call hits the file descriptor and errors surface immediately.
-    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public read(self, into: []mutable UInt8 =): Result[Int];
 };
 
 /// Writer conformance writing directly to the file descriptor.
 given File: Writer {
     /// Write bytes from the source list over the given span and return how many were written.
     /// Unbuffered: each call hits the file descriptor and errors surface immediately.
-    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public write(self, from: []UInt8 =): Result[Int];
     /// flush is a no-op on unbuffered File (data is already in kernel buffer).
     public flush(self): Result[Void];
 };

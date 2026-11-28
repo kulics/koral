@@ -601,6 +601,47 @@ let empty: List[Int] = [];             // 空字面量需要类型上下文
 
 `Dict` 与 `Set` 的遍历顺序**不作承诺**：顺序跟随表布局，而表布局按进程取种子（散列洪泛防线），因此每次运行可能不同。需要稳定顺序的代码应自行对键排序。`List` 与 `Deque` 按存储顺序遍历。
 
+#### 切片：`[]T` 与 `[]mutable T`
+
+切片是共享存储上的零拷贝窗口——背衬就是 `List`、`FrozenList`、`String`、
+`ByteBuffer` 共用的统一元素块。`[]T` 只读元素；`[]mutable T` 额外可写，并隐式
+收窄为 `[]T`。切片是短命视图：没有字面量形（窗口只能从 owner 取得），也永远
+不跨线程。
+
+窗口从哪里来、各自承诺什么：
+
+| 来源 | 调用 | 语义 |
+|---|---|---|
+| `String` / `CString` / `FrozenList[T]` | `as_slice()` | 零拷贝、可逃逸（存储已冻结） |
+| `List[T]` / `ByteBuffer` | `borrow_slice((s) => ...)` | 闭包作用域的零拷贝借出，逃逸 panic |
+| `List[T]` / `ByteBuffer` | `into_slice()` | 消费转移：owner 掏空，窗口可逃逸 |
+| 一个切片 | `s[a..<b]` | O(1) 再开窗 |
+
+读侧拼写对齐 `List`——`count`、`is_empty`、`get`、`first`、`last`、
+`contains`、`iterator`——加上内建下标 `s[i]` 与 `s[a..<b]`（越界 panic）。
+`to_list` / `to_frozen_list` 拷贝出口；`String.from_slice` /
+`String.from_slice_unchecked` 拷贝回文本。
+
+```koral
+let text = "hello world";
+let bytes = text.as_slice();          // 同一块上的 []UInt8
+assert(bytes.count() == 11);
+
+let xs = List[UInt8].new();
+xs.push(1);
+xs.push(2);
+let n = xs.borrow_slice((s) => {
+    s[0] = 10;                        // 窗写是借出的授权通道
+    s.count()
+});
+assert(n == 2);
+```
+
+`borrow_slice` 在闭包全程持修改锁：经 `List` 的任何修改——`push`、
+`remove_at`、下标写、`clear`、`into_slice`，含经别名——入口立刻 panic。窗写
+（`s[i] = v`）保持合法，那正是借出的用途。窗口不得逃出闭包：把它（或派生
+子窗，哪怕零长）存到闭包外任何地方，退出检查 panic。
+
 ### 变量与绑定
 
 Koral 的变量采用绑定语义，相当于把变量名和值绑定在一起。出于安全考虑，变量默认不可变，同时也提供可变变量。

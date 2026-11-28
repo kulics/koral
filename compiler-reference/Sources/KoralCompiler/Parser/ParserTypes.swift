@@ -94,6 +94,8 @@ extension Parser {
       return .reference(inner, mutable: mutable, span: span)
     case .pointer(let inner, let mutable, _):
       return .pointer(inner, mutable: mutable, span: span)
+    case .slice(let inner, let mutable, _):
+      return .slice(inner, mutable: mutable, span: span)
     case .weakReference(let inner, let mutable, _):
       return .weakReference(inner, mutable: mutable, span: span)
     case .generic(let base, let args, _):
@@ -170,7 +172,18 @@ extension Parser {
       // Fixed-size array: `[N]Element`. The size is a positive integer
       // literal; the element is the full type that follows, so `[2]*Int` is
       // two `*Int` and `*[2]Int` is a pointer to an array.
+      // Slice window (slice-design): `[]Element` / `[]mutable Element` -- a
+      // `]` right after `[` is a slice; `mutable` trails the sigil (the
+      // `*mutable` shape).
       try match(.leftBracket)
+      if currentToken === .rightBracket {
+        try match(.rightBracket)
+        let isMutable = currentToken === .mutableKeyword
+        if isMutable { try match(.mutableKeyword) }
+        let element = try parseType()
+        return .slice(element, mutable: isMutable,
+                      span: SourceSpan(start: startSpan.start, end: element.span.end))
+      }
       guard case .integer(let raw) = currentToken else {
         throw ParserError.unexpectedToken(
           span: currentSpan, got: currentToken.description,

@@ -1,0 +1,47 @@
+// EXPECT: PASS
+// 借出窗口的授权面（slice-design §修改锁）：窗写 `s[i] = v` 不查锁（借出的
+// 授权通道）；嵌套借出组合成立（锁是深度计数）；for-in 体修改不 panic（游标
+// 语义，回归钉）；immortal 空块——空列表首次 push 不 segfault、空窗合成释放
+// 早退。
+let main(): Int = {
+    // immortal 空块：空 owner 持哨兵，首次 push 不 segfault。
+    let empty = List[UInt8].new();
+    empty.push(1);
+    assert(empty.count() == 1, "empty list first push");
+
+    let xs = List[UInt8].new();
+    xs.push(1);
+    xs.push(2);
+    xs.push(3);
+
+    // 窗写合法 + 嵌套借出（内层解一层，外层照常）。
+    let outer = xs.borrow_slice((s) => {
+        s[0] = 10;
+        let inner = xs.borrow_slice((t) => {
+            t[1] = 20;
+            t.count()
+        });
+        assert(inner == 3, "nested borrow count");
+        s.count()
+    });
+    assert(outer == 3, "outer borrow count");
+    assert(xs[0] == 10 and xs[1] == 20, "window writes visible");
+
+    // for-in 体修改不 panic（Go range 游标语义，回归钉）。
+    let mutable seen = 0;
+    for e in xs then {
+        seen += 1;
+        if seen == 1 then {
+            xs.push(99);
+        };
+        let _ = e;
+    };
+    assert(xs.count() == 4, "for-in body mutation legal");
+
+    // 空窗（immortal 空块）合成释放早退。
+    let empty_window = List[UInt8].new().into_slice();
+    assert(empty_window.count() == 0, "empty window");
+
+    println("PASS");
+    return 0;
+};

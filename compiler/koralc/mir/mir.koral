@@ -158,6 +158,21 @@ public type MIRGlobal {
     TemplatePlaceholder(name: String),
 };
 
+/// 视图返回（种子 `mirResultBorrowsArguments` 的镜像）：结果是裸指针/借用
+/// 引用的函数，返回值是**参数内存的视图**——实参按 +0 借入、被调方不释放
+/// 句柄、调用方的临时活到语句尾。两半缺一返回的视图即刻悬空（`__index_slot`
+/// 的延迟装载就是这个形状：末次使用移动把基座送进被调方释放，装载读到已
+/// 释放内存）。direct 侧两半在 `finish_call`（实参 ownership）与
+/// `compute_borrowed_param_slots`（被调方不释放 + vtable 释放网配平），
+/// trait 侧在 `lower_trait_method_call`。标量槽无 RC，入表与否语义等价。
+public let mir_result_borrows_arguments(t: Type): Bool = {
+    return when t in {
+        .PointerType(_) or .MutablePointerType(_)
+        or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then true,
+        _ then false,
+    };
+};
+
 public type MIRFunction(
     identifier: Symbol,
     params: List[TypedParam],
@@ -391,6 +406,8 @@ public type MIRLambda(
 public type MIRIntrinsic {
     AllocMemory(count: MIRValue, result_type: Type),
     AllocString(len: MIRValue, result_type: Type),
+    AllocBlock(cap: MIRValue, elem_type: Type, result_type: Type),
+    EmptyBlock(result_type: Type),
     DeallocMemory(pointer: MIRValue),
     CopyMemory(dest: MIRValue, source: MIRValue, count: MIRValue),
     MoveMemory(dest: MIRValue, source: MIRValue, count: MIRValue),

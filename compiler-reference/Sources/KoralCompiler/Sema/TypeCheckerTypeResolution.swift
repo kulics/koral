@@ -339,6 +339,9 @@ extension TypeChecker {
     case .pointer(let inner, let mutable, _):
       let base = try resolveTypeNode(inner)
       return mutable ? .mutablePointer(element: base) : .pointer(element: base)
+    case .slice(let inner, let mutable, let span):
+      return try sliceWindowInstance(
+        resolvedInner: resolveTypeNode(inner), isMutable: mutable, span: span)
     case .generic(let base, let args, let span):
       if let aliasTemplate = currentScope.lookupGenericAliasTemplate(base) {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -512,6 +515,11 @@ extension TypeChecker {
     case .pointer(let inner, let mutable, _):
       let base = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
       return mutable ? .mutablePointer(element: base) : .pointer(element: base)
+
+    case .slice(let inner, let mutable, let span):
+      return try sliceWindowInstance(
+        resolvedInner: resolveTypeNodeWithSubstitution(inner, substitution: substitution),
+        isMutable: mutable, span: span)
       
     case .generic(let base, let args, let span):
       let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
@@ -1436,6 +1444,14 @@ extension TypeChecker {
       return .castExpression(expression: expr, type: expected, span: expr.span)
     case (.pointer(let expectedElement), .mutablePointer(let actualElement))
       where expectedElement == actualElement:
+      return .castExpression(expression: expr, type: expected, span: expr.span)
+    case (.genericStruct(let expectedDef, let expectedArgs), .genericStruct(let actualDef, let actualArgs))
+      where isSliceWindowTemplate(expectedDef, isMutable: false)
+        && isSliceWindowTemplate(actualDef, isMutable: true)
+        && expectedArgs.count == 1 && actualArgs.count == 1
+        && expectedArgs[0] == actualArgs[0]:
+      // `[]mutable T` → `[]T` (slice-design): one-way capability narrowing,
+      // the `*mutable`-to-`*` shape; same representation, just re-typed.
       return .castExpression(expression: expr, type: expected, span: expr.span)
     default:
       break

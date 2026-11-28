@@ -3550,6 +3550,36 @@ given TypeChecker {
                             );
                             self.build_fixed_array_element_place(typed_base, index_expr)
                         },
+                        .Slice(element_type, _) then {
+                            // `s[i]` / `s[a..<b]`（slice-design）：键先按无期望定型
+                            // （Range 键活到 lowering 再按类型分派助手），随后收口到
+                            // 所选方法的形参（helper 构造器负责）。
+                            let wants_mut_ref = when expected in {
+                                .Some(expected_type) then expected_type is .MutableReferenceType(_),
+                                .None() then false,
+                            };
+                            let expects_shared_ref = when expected in {
+                                .Some(expected_type) then expected_type is .ReferenceType(_),
+                                .None() then false,
+                            };
+                            let wants_ref = wants_mut_ref or expects_shared_ref;
+                            let mutable typed_args = List[TypedExpr].new();
+                            for a in args then {
+                                typed_args.push(
+                                    self.check_expr_scoped_ref(a, Option[Type].None(), scope),
+                                );
+                            };
+                            if wants_ref then self.resolve_builtin_subscript_as_reference(
+                                typed_base,
+                                typed_args,
+                                wants_mut_ref,
+                            )
+                            else self.lower_subscript_read_expr(
+                                typed_base,
+                                typed_args,
+                                element_type,
+                            )
+                        },
                     },
                     .None() then {
                         self.push_expr_diagnostic(
@@ -3985,7 +4015,7 @@ given TypeChecker {
                                         );
                                     };
                                 },
-                                .List(_) or .Deque(_) or .Dict(_, _) then {
+                                .List(_) or .Deque(_) or .Dict(_, _) or .Slice(_, true) then {
                                     let param_types = self.resolve_method_param_types(
                                         typed_base.expr_type,
                                         "__index_slot",
@@ -4008,7 +4038,7 @@ given TypeChecker {
                                         );
                                     };
                                 },
-                                .FrozenList(_) or .FrozenDict(_, _) then {
+                                .FrozenList(_) or .FrozenDict(_, _) or .Slice(_, false) then {
                                     let param_types = self.resolve_method_param_types(
                                         typed_base.expr_type,
                                         "__index_get",

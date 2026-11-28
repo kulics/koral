@@ -545,6 +545,9 @@ public class BidirectionalInference {
             return mutable ? .mutableReference(inner: resolveTypeNode(inner)) : .reference(inner: resolveTypeNode(inner))
         case .pointer(let inner, let mutable, _):
             return mutable ? .mutablePointer(element: resolveTypeNode(inner)) : .pointer(element: resolveTypeNode(inner))
+        case .slice(let inner, let mutable, let span):
+            return resolveTypeNode(
+                .generic(base: mutable ? "MutSlice" : "Slice", args: [inner], span: span))
         case .inferredSelf:
             // Self 类型需要从上下文获取
             return .genericParameter(name: "Self")

@@ -1,0 +1,41 @@
+// EXPECT: PASS
+// retain-first：sort/sort_by 的暂存句柄跨比较器调用保留形——嵌套借出窗写释放
+// 元素也不悬垂（安全回归钉）；map 回调窗写同规。数值面只断言结构完整（比较
+// 器本身在改表，结果不承诺）。
+let main(): Int = {
+    let xs = List[Int].new();
+    let mutable i = 0;
+    while i < 40 then {
+        xs.push(40 - i);
+        i += 1;
+    };
+    xs.borrow_slice((s) => {
+        xs.sort_by((e) => {
+            s[0] = 99;
+            e
+        });
+    });
+    assert(xs.count() == 40, "sort keeps count");
+    let mutable k = 0;
+    while k < 40 then {
+        assert(xs[k] >= 1 and xs[k] <= 99, "sort elements intact");
+        k += 1;
+    };
+
+    // map 回调窗写（回调实参保留形：e 是已取走的副本，写不影响映射结果）。
+    let ys = List[Int].new();
+    ys.push(1);
+    ys.push(2);
+    ys.borrow_slice((t) => {
+        let mapped = ys.map((e) => {
+            t[0] = 7;
+            e + 1
+        });
+        assert(mapped.count() == 2, "map count");
+        assert(mapped[0] == 2 and mapped[1] == 3, "map contents");
+    });
+    assert(ys[0] == 7, "map window write landed");
+
+    println("PASS");
+    return 0;
+};

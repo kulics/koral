@@ -33,13 +33,13 @@ public trait Reader {
     /// Fill `into[span]` with bytes and return the count read; `Ok(0)` marks end of input.
     /// `span` defaults to the whole buffer, which is what every caller wants
     /// unless it is resuming a partial transfer.
-    read(self, into: List[UInt8] =, span: Range[Int] = ...): Result[Int];
+    read(self, into: []mutable UInt8 =): Result[Int];
 };
 
 /// A byte sink that consumes caller-provided buffers.
 public trait Writer {
     /// Write bytes from `from[span]` and return the count written.
-    write(self, from: List[UInt8] =, span: Range[Int] = ...): Result[Int];
+    write(self, from: []UInt8 =): Result[Int];
     /// Write any buffered bytes to the underlying sink.
     flush(self): Result[Void];
 };
@@ -60,6 +60,10 @@ public type mutable BufReader[R: Reader];
 public type mutable BufWriter[W: Writer];
 
 /// In-memory byte stream with a single cursor, supporting `Reader`, `Writer`, and `Seeker`.
+///
+/// 存储是统一存储块（slice-design）：`block` 是 `Block[UInt8]`；`lock_depth` 是
+/// 修改锁（借出/回调期间的修改入口查锁 panic）。清理 = 合成字段释放（块 RC-0
+/// 统一析构）。空缓冲持 immortal 空块，零分配。
 public type mutable ByteBuffer;
 
 /// IO failure: `InvalidUtf8` for bad UTF-8, `WriteZero` for an empty write, or `Other` with a detail message.
@@ -111,6 +115,10 @@ given[R: Reader] BufReader[R] {
     public new(r: R): BufReader[R];
     /// Wrap `r` in a reader with a `cap`-byte buffer, panicking when `cap` is zero or negative.
     public with_capacity(cap: Int, r: R): BufReader[R];
+    /// 零拷贝帧（slice-design §BufReader 帧，Go 语义）：把缓冲区当前内容作为
+    /// `[]UInt8` 窗口借出，帧在下一次读取前有效；过期读到陈旧字节（逻辑错误，
+    /// 非 UB——帧钉块不悬垂）。不填充、不消费。
+    public read_frame(self): []UInt8;
     /// Read one byte through the buffer, returning `None` at end of input.
     public read_byte(self): Result[Option[UInt8]];
     /// Read one UTF-8 rune through the buffer, returning `None` at end of input and failing on invalid UTF-8.
@@ -118,7 +126,7 @@ given[R: Reader] BufReader[R] {
     /// Read bytes through `delim` into `into[span]` and return the count copied, delimiter included.
     /// `span` bounds where the delimiter is looked for and where bytes land,
     /// defaulting to the whole buffer like `Reader.read`.
-    public read_until(self, delim: UInt8, into: List[UInt8] =, span: Range[Int] = ...): Result[Int];
+    public read_until(self, delim: UInt8, into: []mutable UInt8 =): Result[Int];
     /// Read one line through its newline as a `String`, returning `None` at end of input and failing on invalid UTF-8.
     public read_line(self): Result[Option[String]];
     /// Skip the next `n` bytes, returning the count actually skipped when input ends early.
@@ -129,7 +137,7 @@ given[R: Reader] BufReader[R] {
 /// Implements `Reader` through the internal buffer.
 given[R: Reader] BufReader[R]: Reader {
     /// Fill `into[span]` from buffered bytes, refilling from the inner reader as needed, and return the count read.
-    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public read(self, into: []mutable UInt8 =): Result[Int];
 };
 
 /// Implements `Seeker`, adjusting `Current` offsets for unread buffered bytes and then discarding them.
@@ -159,7 +167,7 @@ given[W: Writer] BufWriter[W] {
 /// Implements `Writer` through the internal buffer.
 given[W: Writer] BufWriter[W]: Writer {
     /// Writes data from `from[span]` into the internal buffer, auto-flushing when full, and returns the count written.
-    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public write(self, from: []UInt8 =): Result[Int];
     /// Flushes internal buffer to inner writer. On partial failure, preserves remaining bytes.
     public flush(self): Result[Void];
 };
@@ -174,9 +182,6 @@ given[W: Writer and Seeker] BufWriter[W]: Seeker {
     /// Flush the internal buffer, then move the inner writer to `pos`.
     public seek(self, pos: SeekOrigin): Result[Int];
 };
-
-/// Implements `Drop`, freeing the buffer's heap allocation.
-given ByteBuffer: Drop {};
 
 /// Creates `ByteBuffer` values that are empty, pre-sized, or copied from a string or byte list.
 given ByteBuffer {
@@ -223,18 +228,24 @@ given ByteBuffer {
     /// Grow capacity so the buffer can hold `additional` more bytes without
     /// reallocating. Panics when `additional` is negative（容量族负值 panic）。
     public reserve(self, additional: Int): Void;
+    /// The number of accumulated bytes.
+    public count(self): Int;
+    /// 借出（slice-design）：把可写窗口借给闭包，全程持锁 + 块 RC 逃逸检查。
+    public borrow_slice[R: Any](self, fn: ([]mutable UInt8) -> R): R;
+    /// 消费转移（slice-design）：整块转成可写切片，self 置空（掏空先于转移）。
+    public into_slice(self): []mutable UInt8;
 };
 
 /// Implements `Reader`, reading from the buffer's cursor.
 given ByteBuffer: Reader {
     /// Read bytes at the cursor into `into[span]`, returning the count read and stopping at the end of the buffer.
-    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public read(self, into: []mutable UInt8 =): Result[Int];
 };
 
 /// Implements `Writer`, writing at the buffer's cursor and growing the buffer as needed.
 given ByteBuffer: Writer {
     /// Write bytes from `from[span]` at the cursor, returning the count written and growing the buffer past its end.
-    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public write(self, from: []UInt8 =): Result[Int];
     /// Flush is a no-op here, since writes already land in the buffer.
     public flush(self): Result[Void];
 };
@@ -268,7 +279,7 @@ given Stdin {
 given Stdin: Reader {
     /// Unbuffered: directly calls the OS read, errors returned immediately.
     /// Returns the number of bytes transferred; `Ok(0)` means EOF.
-    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public read(self, into: []mutable UInt8 =): Result[Int];
 };
 
 /// Exposes the underlying file descriptor and terminal detection for the stream.
@@ -285,7 +296,7 @@ given Stdout: Writer {
     /// Unbuffered: directly calls the OS write under the stream's write lock,
     /// errors returned immediately. Returns the number of bytes transferred;
     /// short writes are possible.
-    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public write(self, from: []UInt8 =): Result[Int];
     /// flush is a no-op on the unbuffered handle (data is already in kernel
     /// buffer); it takes the write lock so flush serializes with writes.
     public flush(self): Result[Void];
@@ -305,7 +316,7 @@ given Stderr: Writer {
     /// Unbuffered: directly calls the OS write under the stream's write lock,
     /// errors returned immediately. Returns the number of bytes transferred;
     /// short writes are possible.
-    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
+    public write(self, from: []UInt8 =): Result[Int];
     /// flush is a no-op on the unbuffered handle (data is already in kernel
     /// buffer); it takes the write lock so flush serializes with writes.
     public flush(self): Result[Void];
@@ -323,6 +334,6 @@ given Reader {
 given Writer {
     /// Write all bytes in `from[span]` to self, looping on short writes. `span`
     /// defaults to the whole buffer, like `Writer.write`.
-    public write_all(self, from: List[UInt8] =, span: Range[Int] = ...): Result[Void];
+    public write_all(self, from: []UInt8 =): Result[Void];
 };
 ```

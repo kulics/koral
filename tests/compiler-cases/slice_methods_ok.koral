@@ -1,0 +1,63 @@
+// EXPECT: PASS
+// 切片读侧方法面（slice-design §std 方法面 / API 变更清单 B 表）：contains
+// （retain-first 形见 slice_retain_contains_ok）、iterator 进迭代管道、
+// to_list/to_frozen_list 拷贝出口、String.from_slice 家族拷贝进口。
+// `[]mutable T` 与 `[]T` 同面（读侧拼写对齐 List）。
+let main(): Int = {
+    let xs = List[UInt8].new();
+    xs.push(10);
+    xs.push(20);
+    xs.push(30);
+    let s = xs.into_slice();
+
+    // contains 命中/未命中。
+    assert(s.contains(20), "slice contains hit");
+    assert(not s.contains(99), "slice contains miss");
+
+    // iterator / for-in 游标。
+    let mutable total: UInt8 = 0;
+    for e in s then {
+        total += e;
+    };
+    assert(total == 60, "slice for-in sum");
+
+    // to_list 拷贝出口：拷贝独立，不动窗。
+    let copied = s.to_list();
+    assert(copied.count() == 3 and copied[1] == 20, "slice to_list");
+    copied.push(40);
+    assert(s.count() == 3, "to_list copy independence");
+
+    // to_frozen_list 拷贝出口。
+    let frozen = s.to_frozen_list();
+    assert(frozen.count() == 3 and frozen[2] == 30, "slice to_frozen_list");
+
+    // 只读窗 `[]T` 同面（`[]mutable T` 收窄）。
+    let r: []UInt8 = s;
+    assert(r.contains(10) and not r.contains(40), "readonly contains");
+    let mutable rt: UInt8 = 0;
+    for e in r then {
+        rt += e;
+    };
+    assert(rt == 60, "readonly for-in");
+    assert(r.to_list().count() == 3 and r.to_frozen_list().count() == 3, "readonly copies");
+
+    // String.from_slice 家族：合法 UTF-8 拷贝进口。
+    let str = "héllo";
+    let ws = str.as_slice();
+    let back = String.from_slice(ws) or else {
+        panic("from_slice must accept valid UTF-8");
+    };
+    assert(back == "héllo", "from_slice roundtrip");
+
+    // 非法 UTF-8 报错；unchecked 形按原字节保真。
+    let bad_list = List[UInt8].new();
+    bad_list.push(97);
+    bad_list.push(255);
+    let bad = bad_list.into_slice();
+    assert(String.from_slice(bad).is_error(), "from_slice invalid UTF-8");
+    let raw = unsafe { String.from_slice_unchecked(bad) };
+    assert(raw.to_bytes().count() == 2 and raw.to_bytes()[1] == 255, "from_slice_unchecked fidelity");
+
+    println("PASS");
+    return 0;
+};

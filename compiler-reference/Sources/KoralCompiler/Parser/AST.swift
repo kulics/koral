@@ -124,6 +124,8 @@ public indirect enum TypeNode: CustomStringConvertible {
   case identifier(String, span: SourceSpan)
   case reference(TypeNode, mutable: Bool, span: SourceSpan)
   case pointer(TypeNode, mutable: Bool, span: SourceSpan)
+  /// Slice window: `[]T` / `[]mutable T` (slice-design).
+  case slice(TypeNode, mutable: Bool, span: SourceSpan)
   case weakReference(TypeNode, mutable: Bool, span: SourceSpan)
   case generic(base: String, args: [TypeNode], span: SourceSpan)
   case inferredSelf(span: SourceSpan)
@@ -144,6 +146,7 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .identifier(_, let span): return span
     case .reference(_, _, let span): return span
     case .pointer(_, _, let span): return span
+    case .slice(_, _, let span): return span
     case .weakReference(_, _, let span): return span
     case .generic(_, _, let span): return span
     case .inferredSelf(let span): return span
@@ -164,6 +167,8 @@ public indirect enum TypeNode: CustomStringConvertible {
       return mutable ? "*mutable \(inner)" : "*\(inner)"
     case .pointer(let inner, let mutable, _):
       return mutable ? "*mutable \(inner)" : "*\(inner)"
+    case .slice(let inner, let mutable, _):
+      return mutable ? "[]mutable \(inner)" : "[]\(inner)"
     case .weakReference(let inner, _, _):
       // Surface spelling is `?T`; the old `?*T` form is rejected at parse.
       return "?\(inner)"
