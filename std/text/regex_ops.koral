@@ -10,16 +10,11 @@ using "std" { ... };
 /// Compile patterns into `Regex` values.
 given Regex {
 
-    /// Compile `pattern` with default flags into a `Regex`.
+    /// Compile `pattern` into a `Regex`. Flags are spelled INLINE in the
+    /// pattern (`(?i)` / `(?m)` / `(?im)`, and `(?i:...)` scoped to a group).
     /// Returns `Result.Error` with the engine's message if the pattern is invalid.
-    public compile(pattern: String): Result[Regex] =
-        Regex.compile_with_flags(pattern, RegexFlag.none());
-
-    /// Compile `pattern` with `flags` applied, returning `Result.Error` on an invalid pattern.
-    public compile_with_flags(pattern: String, flags: RegexFlag): Result[Regex] = {
-        let ignore_case = flags.has(RegexFlag.ignore_case());
-        let multiline = flags.has(RegexFlag.multiline());
-        return when re_compile(pattern, ignore_case, multiline) in {
+    public compile(pattern: String): Result[Regex] = {
+        return when re_compile(pattern, false, false) in {
             .Ok(prog) then Result[Regex].Ok(Regex(prog, pattern, prog.ngroups)),
             .Error(e) then Result[Regex].Error(e),
         };
@@ -42,14 +37,11 @@ given Regex {
     };
 
     /// Return the first match in `text`, recording only the whole match's span.
-    /// Returns `None` when the pattern does not match.
-    public find(self, text: String): Option[Match] = Regex.find_at(self, 0, text);
-
-    /// Return the first match in `text` starting at byte `offset`. Returns
-    /// `None` when `offset` falls inside a multi-byte character (starts must
-    /// land on rune boundaries).
-    public find_at(self, offset: Int, text: String): Option[Match] = {
-        return when re_run(self.prog, text, offset, false) in {
+    /// `from` names the byte offset to start at (default 0); returns `None`
+    /// when `from` falls inside a multi-byte character (starts must land on
+    /// rune boundaries).
+    public find(self, text: String, from: Int = 0): Option[Match] = {
+        return when re_run(self.prog, text, from, false) in {
             .Some(m) then {
                 Option[Match].Some(Match(text, Int(m.slot(0)), Int(m.slot(1))))
             },
@@ -69,17 +61,13 @@ given Regex {
     /// capture groups. The view is `Iterable` (`for`, and `lazy()` for
     /// pipelines); it hands out a fresh cursor per `iterator()` and is never
     /// spent.
-    public find_all(self, text: String): MatchView = MatchView(self, text);
+    public find_all(self, text: String): RegexFindView = RegexFindView(self, text);
 
     /// Return the first match in `text` with all of its capture groups.
-    /// Returns `None` when the pattern does not match.
-    public captures(self, text: String): Option[Captures] =
-        Regex.captures_at(self, 0, text);
-
-    /// Return the first match in `text` starting at byte `offset`, with
-    /// all of its capture groups. Starts must land on rune boundaries.
-    public captures_at(self, offset: Int, text: String): Option[Captures] = {
-        return when re_run(self.prog, text, offset, true) in {
+    /// `from` names the byte offset to start at (default 0); starts must land
+    /// on rune boundaries. Returns `None` when the pattern does not match.
+    public captures(self, text: String, from: Int = 0): Option[Captures] = {
+        return when re_run(self.prog, text, from, true) in {
             .Some(m) then {
                 Option[Captures].Some(
                     Captures(text, m.slots, m.spill, self.groups, self.prog.names),
@@ -93,7 +81,7 @@ given Regex {
     /// capture groups. The view is `Iterable` (`for`, and `lazy()` for
     /// pipelines); it hands out a fresh cursor per `iterator()` and is never
     /// spent.
-    public captures_all(self, text: String): CapturesView = CapturesView(self, text);
+    public captures_all(self, text: String): RegexCapturesView = RegexCapturesView(self, text);
 };
 
 // ============================================================================
@@ -134,7 +122,7 @@ given Regex {
         let mutable prev_end = -1;
 
         while offset <= text_len then {
-            when Regex.captures_at(self, offset, text) in {
+            when self.captures(text, from = offset) in {
                 .Some(c) then {
                     if c.start() == c.end() and c.start() == prev_end then {
                         // 跳过：只把该处的一个字符并进结果，不出替换。
@@ -210,11 +198,10 @@ given Regex {
         return result.to_string();
     };
 
-    /// Replace the first match in `text` by the string `f` builds from it
-    /// (the closure sees every capture group). Returns `text` unchanged when
-    /// there is no match. The `by` argument leads, `text` trails -- same
-    /// order as `find_at`'s `offset`.
-    public replace_by(self, f: (Captures) -> String, text: String): String = {
+    /// Replace the first match in `text` with the string `with` builds from
+    /// it (the closure sees every capture group). Returns `text` unchanged
+    /// when there is no match.
+    public replace_fn(self, text: String, with: (Captures) -> String =): String = {
         when self.captures(text) in {
             .None() then {
                 return text;
@@ -224,7 +211,7 @@ given Regex {
                 if c.start() > 0 then {
                     result.push_string(text.substring(0..<c.start()));
                 };
-                result.push_string(f(c));
+                result.push_string(with(c));
                 if c.end() < text.count() then {
                     result.push_string(text.substring(c.end()...));
                 };
@@ -233,11 +220,10 @@ given Regex {
         };
     };
 
-    /// Replace every match in `text` by the string `f` builds from it.
+    /// Replace every match in `text` with the string `with` builds from it.
     /// Zero-width matches step one rune at a time; 紧接上一匹配结束位置的
-    /// 零宽匹配跳过（Go 规则），该处字符原样并入。The `by` argument leads,
-    /// `text` trails -- same order as `find_at`'s `offset`.
-    public replace_all_by(self, f: (Captures) -> String, text: String): String = {
+    /// 零宽匹配跳过（Go 规则），该处字符原样并入。
+    public replace_all_fn(self, text: String, with: (Captures) -> String =): String = {
         let mutable result = StringBuilder.new();
         let mutable offset = 0;
         let text_len = text.count();
@@ -245,7 +231,7 @@ given Regex {
         let mutable prev_end = -1;
 
         while offset <= text_len then {
-            when Regex.captures_at(self, offset, text) in {
+            when self.captures(text, from = offset) in {
                 .Some(c) then {
                     if c.start() == c.end() and c.start() == prev_end then {
                         // 跳过：只把该处的一个字符并进结果，不出替换。
@@ -261,7 +247,7 @@ given Regex {
                         if c.start() > offset then {
                             result.push_string(text.substring(offset..<c.start()));
                         };
-                        result.push_string(f(c));
+                        result.push_string(with(c));
                         prev_end = c.end();
                         if c.end() == offset then {
                             if offset < text_len then {

@@ -203,21 +203,21 @@ given ByteBuffer {
     /// `StringBuilder.into_string`). The whole buffer is handed over
     /// regardless of the cursor; afterwards the buffer is empty with its
     /// cursor reset and its capacity kept, like `clear`. 校验 UTF-8，非法
-    /// 字节 panic（checked 形态）；免检交接走 `into_string_unchecked`。
-    public into_string(self): String;
+    /// 字节走 `Result.Error`（不 panic）；免检交接走 `into_string_unchecked`。
+    public try_into_string(self): Result[String];
     /// Unchecked handover: no UTF-8 validation. Behavior is undefined when
     /// the accumulated bytes are not valid UTF-8.
     public unsafe into_string_unchecked(self): String;
     /// Hand the accumulated bytes to a `List[UInt8]`, then empty the buffer.
-    /// One copy into fresh `List` storage (same reason as `into_string`);
+    /// One copy into fresh `List` storage (same reason as `try_into_string`);
     /// the whole buffer is handed over regardless of the cursor, and the
     /// buffer ends empty with its cursor reset and its capacity kept.
     public into_bytes(self): List[UInt8];
     /// Return the accumulated bytes as a `String` snapshot; the buffer is
-    /// untouched. Copies once, like `into_string`, and takes the whole
-    /// content regardless of the cursor. 校验 UTF-8，非法字节 panic
-    /// （checked 形态）；免检快照走 `to_string_unchecked`。
-    public to_string(self): String;
+    /// untouched. Copies once, like `try_into_string`, and takes the whole
+    /// content regardless of the cursor. 校验 UTF-8，非法字节走
+    /// `Result.Error`（不 panic）；免检快照走 `to_string_unchecked`。
+    public try_to_string(self): Result[String];
     /// Unchecked snapshot: no UTF-8 validation. Behavior is undefined when
     /// the accumulated bytes are not valid UTF-8.
     public unsafe to_string_unchecked(self): String;

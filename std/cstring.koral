@@ -58,6 +58,23 @@ given CString {
         return CString(s, len);
     };
 
+    /// Copy the NUL-terminated bytes at `cstr` into a fresh block. 字节保真：
+    /// 内容可以是任意字节（`CString` 不声称 UTF-8）——C 字节串原样进、原样
+    /// 出，不过 `String` 世界（那边恒合法 UTF-8）。`String` 侧指针构造器的
+    /// 对称面。
+    /// 调用契约（`let unsafe`）：担保 `cstr` 指向 NUL 结尾的可读字节串。
+    public unsafe from_cstring_ptr_unchecked(cstr: *UInt8): CString = unsafe {
+        let mutable len = 0;
+        while cstr[len] != UInt8(0) then {
+            len += 1;
+        };
+        let s = alloc_bytes(UInt(len));
+        if len > 0 then {
+            copy_memory(s.elements(), cstr, UInt(len));
+        };
+        return CString(s, len);
+    };
+
     /// The content length in bytes, without the trailing NUL.
     public count(self): Int = self.len;
     /// Whether there are no content bytes (the block still holds the NUL).
@@ -72,9 +89,13 @@ given CString {
     public as_slice(self): []UInt8 = {
         return Slice[UInt8](self.bytes, 0, self.len);
     };
+};
 
+/// `ToString` for `CString`: the content as a `String`, without a copy -- the
+/// result is a window on this block (the NUL is not part of the content). Use
+/// `clone` on the result to detach it from this block.
+given CString: ToString {
     /// The content as a `String`, without a copy -- the result is a window on
-    /// this block (the NUL is not part of the content). Use `clone` on the
-    /// result to detach it from this block.
+    /// this block (the NUL is not part of the content).
     public to_string(self): String = String(self.bytes, UInt32(0), UInt32(self.len));
 };

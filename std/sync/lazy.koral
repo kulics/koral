@@ -40,7 +40,9 @@ public type unsafe sendable mutable Lazy[T: sendable](
     private state: AtomicInt,
     private mutex: Mutex,
     private condvar: MutexCondvar,
-    private func: sendable () -> T,
+    // Option 持有：初始化者取出即置 None，闭包（及其捕获环境）随取出方的
+    // 局部析构释放——初始化后不再占内存（item: Lazy 不留闭包）。
+    private mutable func: Option[sendable () -> T],
     private mutable value: Option[T],
     private init_owner: AtomicUInt,
 );
@@ -52,12 +54,12 @@ given[T: sendable] Lazy[T] {
     /// locks) and runs at most once -- the `Lazy` name carries that shape.
     public new(f: sendable () -> T): Lazy[T] = {
         let mutex = Mutex.new();
-        let condvar = mutex.condvar();
+        let condvar = mutex.new_condvar();
         return Lazy[T](
             AtomicInt.new(lazy_state_uninitialized),
             mutex,
             condvar,
-            f,
+            Option[sendable () -> T].Some(f),
             Option[T].None(),
             AtomicUInt.new(UInt(0)),
         );
@@ -78,7 +80,16 @@ given[T: sendable] Lazy[T] {
         };
         if self.state.compare_exchange(expected = lazy_state_uninitialized, desired = lazy_state_initializing) then {
             self.init_owner.store(UInt(__koral_thread_current_id()));
-            let result = self.func();
+            // 取出即置 None：闭包所有权转到本局部，调用后随作用域析构
+            // （初始化后不再占内存）。
+            let f = when self.func in {
+                .Some(fn) then fn,
+                .None() then {
+                    panic("Lazy: initializer missing");
+                },
+            };
+            self.func = Option[sendable () -> T].None();
+            let result = f();
             self.value = Option[T].Some(result);
             self.state.store(lazy_state_done);
             self.mutex.lock();

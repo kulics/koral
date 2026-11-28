@@ -396,7 +396,7 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
 
     /// Remove `key`'s entry and return its value, if any. The old key is
     /// released after the unlock.
-    public take(self, key: K): Option[V] = {
+    public remove(self, key: K): Option[V] = {
         self.rw_lock.lock();
         let mutable out = Option[V].None();
         let mutable dead_record = Option[ConcurrentDictSlot[K, V]].None();
@@ -418,32 +418,6 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
         };
         self.rw_lock.unlock();
         return out;
-    };
-
-    /// Remove `key`'s entry and report whether it existed. The value and the
-    /// old key are released after the unlock.
-    public try_remove(self, key: K): Bool = {
-        self.rw_lock.lock();
-        let mutable existed = false;
-        let mutable dead_record = Option[ConcurrentDictSlot[K, V]].None();
-        when dict_find_slot(self.slots, self.capacity, key) in {
-            .Some(idx) then {
-                unsafe {
-                    let slot_ptr = self.slots + idx;
-                    if slot_ptr.tag == UInt(1) then {
-                        existed = true;
-                        dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
-                        dict_set_tag(slot_ptr, UInt(2));
-                        self.size = self.size - 1;
-                        self.deleted = self.deleted + 1;
-                        dict_stamp_tombstone(slot_ptr, key, self.stamp_write());
-                    };
-                };
-            },
-            .None() then {},
-        };
-        self.rw_lock.unlock();
-        return existed;
     };
 
     /// The value stored under `key`, storing `value` first when absent. An

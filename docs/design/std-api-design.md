@@ -113,7 +113,6 @@ Examples include:
 - `MonoTime`
 - sometimes `DateTime` when treated as a compact timestamp value rather than a heavy handle
 - compact address or identifier values such as `Ipv4Addr`, `Ipv6Addr`, `IpAddr`, and `SocketAddr`
-- compact bitflag wrappers such as `RegexFlag`
 
 For such types, it is acceptable to keep observation and pure derivation methods on `self` when all of the following are true:
 
@@ -229,7 +228,7 @@ A producer that names a WALK rather than a position returns a named `Iterable`
 view, not a cursor: `string.split` / `lines` / `bytes` / `runes` /
 `split_ascii_whitespace`, `dict.keys` / `values`, and `regex.find_all` /
 `captures_all` / `split` hand back `StringSplitView`, `DictKeysView`,
-`MatchView` and friends. The view holds the source and the walk's parameters,
+`RegexFindView` and friends. The view holds the source and the walk's parameters,
 hands out a fresh cursor per `iterator()`, and is never spent; `lazy()` stays
 the one door into pipelines, so a view carries no lazy names of its own.
 One-shot producers keep cursors: `read_dir` / `walk_dir` advance an OS
@@ -327,7 +326,7 @@ Receiver choice and method naming should reinforce each other:
   判据：数的是「第几个 / 多少个 / 在哪里」，天然要与负值检查搭配。
 - **宽度域保持 `UInt`**：哈希值与散列种子、位运算（移位量、`count_ones` 族、掩码）、
   `BitSet` 成员、字节值（`UInt8`）、FFI 与内存原语的宽度（`alloc_memory`/`copy_memory`、
-  foreign 声明里的 `size_t` 形）、`AtomicUInt`、`RegexFlag`，以及**值域型** API
+  foreign 声明里的 `size_t` 形）、`AtomicUInt`，以及**值域型** API
   （`next_uint`、`JsonValue.UInt`、radix、端口、码点）。
   判据：数的是位模式、宽度或某个数值域里的值，负值无意义且不需要参与计数运算。
 
@@ -338,7 +337,7 @@ Receiver choice and method naming should reinforce each other:
 
 边界行为三条：
 
-1. **Option 型访问器是全函数**：`get(-1)`、`find_from(-1, …)` 之类，任何越域
+1. **Option 型访问器是全函数**：`get(-1)`、`find(…, from = -1)` 之类，任何越域
    （负值或越上界）都归 `None`，不 panic。
 2. **下标与修改类 API 越域 panic**（含负值）：`xs[-1]`、`insert_at(-1, …)`、
    `substring(-1..2)` 等与越上界同族的 `out of bounds` panic。

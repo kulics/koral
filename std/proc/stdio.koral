@@ -30,6 +30,13 @@ public type sendable IoRedirect {
     StdoutPipe(pipe: StdoutPipe),
     /// Use another child process's stderr pipe (typically for stdin chaining).
     StderrPipe(pipe: StderrPipe),
+    /// Feed `data` to the child's stdin from memory（库内边读边写：管道写端
+    /// 由库内后台任务泵入，避免大输入堵死管道缓冲；数据冻结成
+    /// `FrozenList`——跨任务捕获要 sendable）。
+    Bytes(data: FrozenList[UInt8]),
+    /// Send this stream to the SAME pipe as stdout（stderr 用：两条流共管道，
+    /// 输出按到达序合流）。
+    ToStdout(),
 };
 
 /// String conformance: names the redirection mode, including the target file descriptor when there is one.
@@ -43,5 +50,7 @@ given IoRedirect: ToString {
         .File(f) then "file:fd=" + f.fd().to_string(),
         .StdoutPipe(p) then "stdout-pipe:fd=" + p.fd().to_string(),
         .StderrPipe(p) then "stderr-pipe:fd=" + p.fd().to_string(),
+        .Bytes(b) then "bytes:len=" + b.count().to_string(),
+        .ToStdout() then "to-stdout",
     };
 };

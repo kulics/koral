@@ -77,7 +77,7 @@
 4. **BitSet 宇宙 `size` 留 `UInt`**——否决：它计「多少个」、进计数算术、是
    `new(size)` 的计数实参；成员值留 `UInt`（位位置）。值↔域的交叉在推导线
    （`value >= UInt(size)`）各留一次受检转换，计数搬运路径仍零转型。
-5. **`find_from` 越上界保留 panic**——否决（用户裁定）：Option 型访问器是全函数，
+5. **`find`（`from` 越上界）保留 panic**——否决（用户裁定）：Option 型访问器是全函数，
    负值与越上界一律归 `None`；下标与修改类 API 越域（含负值）panic；
    容量/分配类负值 panic。三条边界各有用例钉住。
 
@@ -86,7 +86,7 @@
 | 形态 | 行为 | 钉子 |
 |---|---|---|
 | `xs[-1]` / `s[-1]` / `[N]T` 负下标 | 越界 panic | `list_negative_index_panic` 等 |
-| `xs.get(-1)` / `find_from(-1, …)` | `None`（全函数） | `list_get_negative_none_test`、`string_find_from_negative_test` |
+| `xs.get(-1)` / `find(…, from = -1)` | `None`（全函数） | `list_get_negative_none_test`、`string_find_from_negative_test` |
 | `insert_at(-1, …)` 等修改类 | 越界 panic | `list_insert_at_negative_panic` |
 | `with_capacity(-1)` 等容量类 | `<Type> <method> negative <param>` panic | `list_with_capacity_negative_panic` |
 | `p[i]` / `p + i` 负偏移 | 裸 C 寻址，合法 | 指针下标规则（guide） |

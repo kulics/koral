@@ -20,10 +20,10 @@ type TestCase(name: String, result: TestResult);
 
 type ProcessOutput(stdout: String, stderr: String, exit_code: Int);
 
-// 视图方法与 CommandOutput 同名：断言侧统一用 stdout_text()/stderr_text()。
+// 视图方法与 CommandOutput 同名：断言侧统一用 stdout_text_lossy()/stderr_text_lossy()。
 given ProcessOutput {
-    stdout_text(self): String = self.stdout;
-    stderr_text(self): String = self.stderr;
+    stdout_text_lossy(self): String = self.stdout;
+    stderr_text_lossy(self): String = self.stderr;
 };
 
 let pass(): TestResult = TestResult.Pass();
@@ -53,7 +53,7 @@ let run_grep(args: List[String], stdin_file: Option[String]): Result[ProcessOutp
     };
     let out = cmd.run_output() or return;
     let exit_code = out.status.code() or else 0;
-    return Result[ProcessOutput].Ok(ProcessOutput(out.stdout_text(), out.stderr_text(), exit_code));
+    return Result[ProcessOutput].Ok(ProcessOutput(out.stdout_text_lossy(), out.stderr_text_lossy(), exit_code));
 };
 
 let assert_eq(actual: String, expected: String, msg: String): TestResult = {
@@ -97,7 +97,7 @@ let check(
     expected_exit: Int,
     msg: String,
 ): TestResult = {
-    let r1 = assert_eq(normalize_newlines(out.stdout_text()), expected_stdout, msg + " output");
+    let r1 = assert_eq(normalize_newlines(out.stdout_text_lossy()), expected_stdout, msg + " output");
     if r1 is .Fail(_) then {
         return r1;
     };
@@ -200,7 +200,7 @@ let test_bad_pattern(): TestResult = {
     if r1 is .Fail(_) then {
         return r1;
     };
-    return assert_true(out.stderr_text().contains("invalid pattern"), "bad_pattern stderr");
+    return assert_true(out.stderr_text_lossy().contains("invalid pattern"), "bad_pattern stderr");
 };
 
 let test_missing_file(): TestResult = {
@@ -212,7 +212,7 @@ let test_missing_file(): TestResult = {
         return r1;
     };
     return assert_true(
-        out.stderr_text().contains("tmp_grep_no_such_file.txt"),
+        out.stderr_text_lossy().contains("tmp_grep_no_such_file.txt"),
         "missing_file stderr",
     );
 };
@@ -381,7 +381,7 @@ let test_no_pattern(): TestResult = {
     if r1 is .Fail(_) then {
         return r1;
     };
-    return assert_true(out.stderr_text().contains("usage"), "no_pattern stderr");
+    return assert_true(out.stderr_text_lossy().contains("usage"), "no_pattern stderr");
 };
 
 // ----------------------------------------------------------------------------
@@ -522,7 +522,7 @@ let test_r_flag(): TestResult = {
     if out.exit_code != 0 then {
         return fail("r_flag exit");
     };
-    let norm = normalize_paths(out.stdout_text());
+    let norm = normalize_paths(out.stdout_text_lossy());
     let e1 = normalize_paths(base.to_path().join("a.txt").to_string());
     let e2 = normalize_paths(base.to_path().join("sub/b.txt").to_string());
     let r1 = assert_true(norm.contains(e1 + ":hit"), "r_flag entry a");

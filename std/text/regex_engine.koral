@@ -223,8 +223,9 @@ let re_wrap_question(atom: List[ReInst]): List[ReInst] = {
 
 type mutable ReParser(
     pat: String,
-    ignore_case: Bool,
-    multiline: Bool,
+    // mutable：`(?i)`/`(?m)` 行内旗标在解析途中改写它们（作用域形恢复）。
+    mutable ignore_case: Bool,
+    mutable multiline: Bool,
     mutable pos: Int,
     mutable ngroups: Int,
     mutable error: String,
@@ -444,17 +445,29 @@ given ReParser {
         let c = self.peek();
         if c == '(' then {
             self.step();
-            // `(?P<name>...)` / `(?<name>...)` 是命名捕获组；其余 `(?`
-            // 前缀不支持（ERE 无非捕获组）。
+            // `(?i)`/`(?m)`/`(?im)` 行内旗标（效至当前组尾）；`(?i:...)` 作用域
+            // 形（非捕获、旗标只在组内存效）；`(?P<name>...)` / `(?<name>...)`
+            // 是命名捕获组。
             let mutable name = "";
             if not self.at_end() and self.peek() == '?' then {
                 self.step();
+                let mutable named_form = false;
+                if not self.at_end() then {
+                    let head = self.peek();
+                    named_form = head == 'P' or head == '<';
+                };
+                if not named_form then {
+                    return self.parse_inline_flag_group(out);
+                };
                 let mut_name = self.parse_group_name();
                 if mut_name is .None() then {
                     return false;
                 };
                 name = mut_name or else "";
             };
+            // 捕获组进出保存/恢复旗标：`(?i)` 的效期是当前组尾。
+            let saved_case = self.ignore_case;
+            let saved_multi = self.multiline;
             if self.ngroups >= 65535 then {
                 return self.fail("Too many capture groups (at most 65535)");
             };
@@ -478,6 +491,8 @@ given ReParser {
             };
             self.step();
             out.push(ReInst.Save(g * 2 + 1));
+            self.ignore_case = saved_case;
+            self.multiline = saved_multi;
             return true;
         };
         if c == '[' then {
@@ -507,6 +522,49 @@ given ReParser {
         self.step();
         out.push(ReInst.Rune(c.to_uint32(), self.ignore_case));
         return true;
+    };
+
+    /// 行内旗标形（已过 `(?`）：`[im]*` 后接 `)` 是全组作用的旗标指令（本体
+    /// 零输出，效期由所在组的保存/恢复负责）；接 `:` 是作用域形 `(?i:...)`
+    /// ——非捕获组，旗标只在组内存效。其余引出符走命名组路径报原错。
+    parse_inline_flag_group(self, out: List[ReInst]): Bool = {
+        let saved_case = self.ignore_case;
+        let saved_multi = self.multiline;
+        let mutable saw_letter = false;
+        while not self.at_end() and (self.peek() == 'i' or self.peek() == 'm') then {
+            if self.peek() == 'i' then {
+                self.ignore_case = true;
+            } else {
+                self.multiline = true;
+            };
+            saw_letter = true;
+            self.step();
+        };
+        if not self.at_end() and self.peek() == ')' and saw_letter then {
+            self.step();
+            return true;
+        };
+        if not self.at_end() and self.peek() == ':' and saw_letter then {
+            self.step();
+            if not self.parse_alt(out) then {
+                return false;
+            };
+            if self.at_end() or self.peek() != ')' then {
+                return self.fail("Unmatched (");
+            };
+            self.step();
+            self.ignore_case = saved_case;
+            self.multiline = saved_multi;
+            return true;
+        };
+        self.ignore_case = saved_case;
+        self.multiline = saved_multi;
+        // 其余 `(?` 引出符维持原有错误面（命名组路径的诊断）。
+        let mut_name = self.parse_group_name();
+        if mut_name is .None() then {
+            return false;
+        };
+        return self.fail("Invalid group modifier");
     };
 
     /// The `P<name>` / `<name>` tail of a named group introducer, already

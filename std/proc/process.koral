@@ -41,15 +41,23 @@ let unsafe foreign __koral_try_waitpid(
 ): Int32;
 
 /// Concurrently read all data from stdout and stderr pipes (uses poll/select internally).
+/// `timeout_ms < 0` = until EOF; `>= 0` = grace deadline (returns with what was
+/// read, `out_timed_out = 1`).
 /// Allocates memory for output buffers (caller must free with dealloc_memory).
 let unsafe foreign __koral_read_all_pipes(
     stdout_fd: Int32,
     stderr_fd: Int32,
+    timeout_ms: Int64,
     out_stdout: *mutable *mutable UInt8,
     out_stdout_len: *mutable UInt64,
     out_stderr: *mutable *mutable UInt8,
     out_stderr_len: *mutable UInt64,
+    out_timed_out: *mutable Int32,
 ): Int32;
+
+/// Block until the child exits WITHOUT consuming the wait record (POSIX
+/// WNOWAIT). The locked reap then calls __koral_waitpid_full to consume.
+let unsafe foreign __koral_waitpid_wnowait(pid: UInt32): Int32;
 
 /// Yield the current thread's time slice (used while another thread reaps).
 let foreign __koral_thread_yield(): Void;
@@ -79,6 +87,7 @@ type unsafe sendable mutable ProcessStorage(
     mutable peak_rss_bytes: UInt64,
     mutable waiting: Bool,
     mutable raw_status: Int,
+    mutable detached: Bool,
     private mutex: Mutex,
 );
 
@@ -97,26 +106,31 @@ let make_process_storage(
     0,
     false,
     0,
+    false,
     Mutex.new(),
 );
 
 given ProcessStorage: Drop {
 
-    /// On drop: close any un-taken pipe fds, then auto-wait to prevent zombie processes.
+    /// On drop: close any un-taken pipe fds and auto-DETACH (no wait).
+    /// 未回收的子进程保持运行；它退出后由父进程退出时的收养回收兜底
+    /// （或显式 wait/kill/terminate 之一收口）。`detach` 是同一个动作的
+    /// 显式形——幂等。
     drop(self): Void = unsafe {
         self.mutex.lock();
         if self.stdin_fd >= 0 then {
             __koral_pipe_close(self.stdin_fd);
+            self.stdin_fd = -1;
         };
         if self.stdout_fd >= 0 then {
             __koral_pipe_close(self.stdout_fd);
+            self.stdout_fd = -1;
         };
         if self.stderr_fd >= 0 then {
             __koral_pipe_close(self.stderr_fd);
+            self.stderr_fd = -1;
         };
-        if not self.waited then {
-            __koral_waitpid(self.pid);
-        };
+        self.detached = true;
         self.mutex.unlock();
     };
 };
@@ -150,73 +164,127 @@ given Process {
         ExitStatus.from_code(self.storage.raw_status)
     };
 
+    /// Force-kill the child (SIGKILL). 只杀根进程——孙进程不杀（与
+    /// `Command.set_timeout` 的到期杀同语义，文档见 `set_timeout`）。
+    public kill(self): Result[Void] = {
+        let result = unsafe { __koral_send_signal(self.storage.pid, 9) };
+        if result != 0 then {
+            return Result[Void].Error(last_error_message());
+        };
+        return Result[Void].Ok({});
+    };
+
+    /// Gracefully terminate the child (SIGTERM; Windows: TerminateProcess).
+    /// 只作用于根进程。
+    public terminate(self): Result[Void] = {
+        let result = unsafe { __koral_send_signal(self.storage.pid, 15) };
+        if result != 0 then {
+            return Result[Void].Error(last_error_message());
+        };
+        return Result[Void].Ok({});
+    };
+
+    /// Detach: release this handle's claims (un-taken pipes close now) and
+    /// stop tracking the child -- the drop of the handle runs the same
+    /// action. 剩余生命周期归操作系统（父进程退出时收养回收兜底）。
+    public detach(self): Void = unsafe {
+        self.storage.mutex.lock();
+        if self.storage.stdin_fd >= 0 then {
+            __koral_pipe_close(self.storage.stdin_fd);
+            self.storage.stdin_fd = -1;
+        };
+        if self.storage.stdout_fd >= 0 then {
+            __koral_pipe_close(self.storage.stdout_fd);
+            self.storage.stdout_fd = -1;
+        };
+        if self.storage.stderr_fd >= 0 then {
+            __koral_pipe_close(self.storage.stderr_fd);
+            self.storage.stderr_fd = -1;
+        };
+        self.storage.detached = true;
+        self.storage.mutex.unlock();
+    };
+
     /// Block until the child process exits, returning its exit status.
     /// Idempotent and thread-safe: any number of threads may call wait()
-    /// concurrently; exactly one of them reaps the child and every caller
-    /// observes the same exit status. The reap itself runs outside the lock.
+    /// concurrently and every caller observes the same exit status.
+    /// 两段式（先 `wnowait` 等待、再加锁回收）：第一段 waitpid(WNOWAIT)
+    /// 阻塞到子进程退出但**不消费**等待记录——所有等待者同刻醒来；第二段
+    /// 在锁下做真回收（首个见到未回收的调用方），其余读记录。
     public wait(self): Result[ExitStatus] = {
-        let mutable finished = false;
-        let mutable outcome = Result[ExitStatus].Error("failed to wait process");
-        while not finished then {
+        self.storage.mutex.lock();
+        if self.storage.waited then {
+            let status = self.stored_status();
+            self.storage.mutex.unlock();
+            return Result[ExitStatus].Ok(status);
+        };
+        self.storage.mutex.unlock();
+        // 段一：阻塞到退出，不消费（可重复观察）。
+        let w = unsafe { __koral_waitpid_wnowait(self.storage.pid) };
+        if w != 0 then {
+            // 已被别处回收（ECHILD）仍走加锁读记录；真错误报错。
             self.storage.mutex.lock();
             if self.storage.waited then {
                 let status = self.stored_status();
                 self.storage.mutex.unlock();
-                outcome = Result[ExitStatus].Ok(status);
-                finished = true;
-            } else {
-                if not self.storage.waiting then {
-                    // Claim the wait: this caller alone reaps the child.
-                    self.storage.waiting = true;
-                    self.storage.mutex.unlock();
-                    // waitpid may block for the child's life: run it outside
-                    // the lock so other queries are not stalled behind it.
-                    let mutable exit_code: Int32 = 0;
-                    let mutable signal_num: Int32 = 0;
-                    let mutable maxrss: UInt64 = 0;
-                    let result = unsafe {
-                        __koral_waitpid_full(
-                            self.storage.pid,
-                            &exit_code,
-                            &signal_num,
-                            &maxrss,
-                        )
-                    };
-                    self.storage.mutex.lock();
-                    self.storage.waiting = false;
-                    if result != 0 then {
-                        self.storage.mutex.unlock();
-                        // Failed reap releases the claim: the call stays retryable.
-                        outcome = Result[ExitStatus].Error(last_error_message());
-                    } else {
-                        self.storage.peak_rss_bytes = maxrss;
-                        self.storage.raw_status = if signal_num > 0 then {
-                            0 - Int(signal_num)
-                        } else {
-                            Int(exit_code)
-                        };
-                        self.storage.waited = true;
-                        let status = self.stored_status();
-                        self.storage.mutex.unlock();
-                        outcome = Result[ExitStatus].Ok(status);
-                    };
-                    finished = true;
-                } else {
-                    // Another wait() is reaping: block until it publishes the
-                    // outcome, then loop to report the same result.
-                    self.storage.mutex.unlock();
-                    __koral_thread_yield();
-                };
+                return Result[ExitStatus].Ok(status);
             };
+            self.storage.mutex.unlock();
+            return Result[ExitStatus].Error(last_error_message());
         };
-        return outcome;
+        // 段二：加锁回收。
+        self.storage.mutex.lock();
+        if self.storage.waited then {
+            let status = self.stored_status();
+            self.storage.mutex.unlock();
+            return Result[ExitStatus].Ok(status);
+        };
+        let mutable exit_code: Int32 = 0;
+        let mutable signal_num: Int32 = 0;
+        let mutable maxrss: UInt64 = 0;
+        let result = unsafe {
+            __koral_waitpid_full(
+                self.storage.pid,
+                &exit_code,
+                &signal_num,
+                &maxrss,
+            )
+        };
+        if result != 0 then {
+            self.storage.mutex.unlock();
+            return Result[ExitStatus].Error(last_error_message());
+        };
+        self.storage.peak_rss_bytes = maxrss;
+        self.storage.raw_status = if signal_num > 0 then {
+            0 - Int(signal_num)
+        } else {
+            Int(exit_code)
+        };
+        self.storage.waited = true;
+        let status = self.stored_status();
+        self.storage.mutex.unlock();
+        return Result[ExitStatus].Ok(status);
     };
 
     /// Wait for the child process to exit and capture all stdout/stderr output.
     /// Uses __koral_read_all_pipes for concurrent reading to avoid pipe deadlock.
     /// The pipe fds are claimed single-shot: a concurrent take_*_pipe() wins or
     /// loses the claim atomically, so no fd is ever closed twice.
-    public wait_output(self): Result[CommandOutput] = {
+    public wait_output(self): Result[CommandOutput] = self.wait_output_impl(0 - 1, 0 - 1);
+
+    /// 限时形（包内实现缝）：`Command.set_timeout` 的 run/run_output 收口走
+    /// 这里，公开面不暴露——超时的公开入口只有 `Command.set_timeout`，直接
+    /// spawn 的收口用 kill/terminate + wait 组合。管道读在 `timeout` 内收完
+    /// 即正常返回；到限先杀根进程（SIGKILL，**孙进程不杀**——超时杀只作用
+    /// 于直接子进程，孙进程的生命周期归其父），读管道再给 `grace` 宽限，
+    /// 到点带着已读数据关闭读端，返回 Error("timeout")。
+    protected wait_output_within(self, timeout: Duration, grace: Duration): Result[CommandOutput] = {
+        let timeout_ms = timeout.as_nanoseconds() / 1000000;
+        let grace_ms = grace.as_nanoseconds() / 1000000;
+        return self.wait_output_impl(timeout_ms, grace_ms);
+    };
+
+    private wait_output_impl(self, timeout_ms: Int64, grace_ms: Int64): Result[CommandOutput] = {
         // Claim the pipe fds under the lock; displaced fds are closed after
         // the lock is released.
         self.storage.mutex.lock();
@@ -233,11 +301,11 @@ given Process {
             unsafe { __koral_pipe_close(stdin_fd) };
         };
 
-        // Read both pipes concurrently via C runtime (uses poll/select internally)
         let mutable out_stdout: *mutable UInt8 = null;
         let mutable out_stdout_len = 0;
         let mutable out_stderr: *mutable UInt8 = null;
         let mutable out_stderr_len = 0;
+        let mutable timed_out: Int32 = 0;
 
         defer {
             if stdout_fd >= 0 then {
@@ -260,15 +328,46 @@ given Process {
             __koral_read_all_pipes(
                 stdout_fd,
                 stderr_fd,
+                timeout_ms,
                 &mutable out_stdout,
                 (&mutable out_stdout_len) as *mutable UInt64,
                 &mutable out_stderr,
                 (&mutable out_stderr_len) as *mutable UInt64,
+                &mutable timed_out,
             )
         };
 
         if read_result != 0 then {
             return Result[CommandOutput].Error(last_error_message());
+        };
+
+        if timed_out != 0 then {
+            // 到限：杀根进程，读管道给宽限期，到点关闭读端（defer 收口）。
+            let _ = self.kill();
+            let mutable g_out: *mutable UInt8 = null;
+            let mutable g_out_len = 0;
+            let mutable g_err: *mutable UInt8 = null;
+            let mutable g_err_len = 0;
+            let mutable g_timed: Int32 = 0;
+            let _ = unsafe {
+                __koral_read_all_pipes(
+                    stdout_fd,
+                    stderr_fd,
+                    grace_ms,
+                    &mutable g_out,
+                    (&mutable g_out_len) as *mutable UInt64,
+                    &mutable g_err,
+                    (&mutable g_err_len) as *mutable UInt64,
+                    &mutable g_timed,
+                )
+            };
+            if g_out != null then {
+                unsafe { dealloc_memory(g_out) };
+            };
+            if g_err != null then {
+                unsafe { dealloc_memory(g_err) };
+            };
+            return Result[CommandOutput].Error("timeout");
         };
 
         // 拷贝出管道缓冲区，列表自己持有存储，`defer` 释放原件。子进程

@@ -5859,11 +5859,13 @@ extension TypeChecker {
       let expectedArgCount = params.count - 1
       let placeholderMethods = (try? flattenedTraitMethods(traitName)) ?? [:]
       var placeholderParams = placeholderMethods[methodName]?.parameters
+      var placeholderTypeParams = placeholderMethods[methodName]?.typeParameters ?? []
       if placeholderParams == nil {
         // Tool (extension) methods are not in the trait DECLARATION's table;
         // their parameters carry the labels and defaults the planner needs.
         let toolMethods = (try? flattenedTraitToolMethods(traitName)) ?? [:]
         placeholderParams = toolMethods[methodName]?.parameters
+        placeholderTypeParams = toolMethods[methodName]?.typeParameters ?? []
       }
       let placeholderMeta = callParamMeta(
         from: placeholderParams?.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) } ?? [],
@@ -5900,6 +5902,7 @@ extension TypeChecker {
       }
 
       var typedArguments: [TypedExpressionNode] = []
+      var methodTypeParamBindings: [String: Type] = [:]
       for (arg, param) in zip(arguments, params.dropFirst()) {
         var typedArg: TypedExpressionNode
         if case .lambdaExpression(let lambdaParams, let returnType, let body, _) = arg {
@@ -5920,7 +5923,18 @@ extension TypeChecker {
           typedArg = try inferTypedExpression(arg, expectedType: param.type)
         }
         typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-        if typedArg.type != .error && param.type != .error
+        if context.containsGenericParameter(param.type) {
+          // The parameter type is (or contains) a method-level generic
+          // parameter: the argument BINDS it instead of matching it rigidly.
+          // Two arguments binding the same parameter differently still fail.
+          if typedArg.type != .error && param.type != .error
+            && !unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings) {
+            throw SemanticError.typeMismatch(
+              expected: param.type.description,
+              got: typedArg.type.description
+            )
+          }
+        } else if typedArg.type != .error && param.type != .error
           && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
@@ -5929,7 +5943,24 @@ extension TypeChecker {
         }
         typedArguments.append(typedArg)
       }
-      
+
+      // Method-level type arguments the call INFERS from its arguments are
+      // recorded on the placeholder exactly like explicit ones, so mono
+      // substitutes them when it resolves the concrete method. An unbound
+      // parameter keeps its identity (an empty slot would misalign the
+      // declaration-order array mono zips against).
+      let inferredMethodTypeArgs: [Type] = methodTypeArgs.isEmpty
+        ? placeholderTypeParams.map { typeParam in
+            methodTypeParamBindings[typeParam.name] ?? .genericParameter(name: typeParam.name)
+          }
+        : methodTypeArgs
+      let substitutedMethodType = methodTypeParamBindings.isEmpty
+        ? methodType
+        : SemaUtils.substituteType(methodType, substitution: methodTypeParamBindings, context: context)
+      let substitutedReturns = methodTypeParamBindings.isEmpty
+        ? returns
+        : SemaUtils.substituteType(returns, substitution: methodTypeParamBindings, context: context)
+
       // Keep the placeholder's OWN identity. Re-deriving `traitDefId` from
       // `traitName` here is what threw away the declaration and looked up
       // whichever trait of that spelling is registered first.
@@ -5939,13 +5970,13 @@ extension TypeChecker {
         traitMethodDefId: traitMethodDefId,
         methodName: methodName,
         base: adjustedBase,
-        methodTypeArgs: methodTypeArgs,
-        type: methodType
+        methodTypeArgs: inferredMethodTypeArgs,
+        type: substitutedMethodType
       )
       let call: TypedExpressionNode = .call(
         callee: adjustedCallee,
         arguments: typedArguments,
-        type: returns
+        type: substitutedReturns
       )
       return wrapReceiverMaterialization(materializedReceiver, body: call, type: returns)
     }
@@ -8693,9 +8724,18 @@ extension TypeChecker {
               var typedArg = try inferTypedExpression(arg)
               typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
               if context.containsGenericParameter(param.type) {
-                _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
-              }
-              if typedArg.type != .error && param.type != .error
+                // The parameter type is (or contains) a method-level generic
+                // parameter: the argument BINDS it instead of matching it
+                // rigidly -- `T.random(self)` infers R := Self. Two arguments
+                // binding the same parameter to different types still fail.
+                if typedArg.type != .error && param.type != .error
+                  && !unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings) {
+                  throw SemanticError.typeMismatch(
+                    expected: param.type.description,
+                    got: typedArg.type.description
+                  )
+                }
+              } else if typedArg.type != .error && param.type != .error
                 && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
                 throw SemanticError.typeMismatch(
                   expected: param.type.description,
@@ -8705,7 +8745,7 @@ extension TypeChecker {
               typedArguments.append(typedArg)
             }
 
-            let inferredMethodTypeArgs: [Type] = sig.typeParameters.compactMap { typeParam in
+            let inferredMethodTypeArgs: [Type] = sig.typeParameters.map { typeParam in
               if let bound = methodTypeParamBindings[typeParam.name] {
                 return bound
               }
@@ -8714,7 +8754,9 @@ extension TypeChecker {
                  existingName == typeParam.name {
                 return existingType
               }
-              return nil
+              // An unbound parameter keeps its identity: dropping the slot
+              // would misalign the declaration-order array mono zips against.
+              return .genericParameter(name: typeParam.name)
             }
             
             return .staticMethodCall(

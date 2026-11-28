@@ -14,7 +14,34 @@ let main(): Void = {
     let r1 = Command.new("koral_definitely_missing_program_xyz").run();
     when r1 in {
         .Ok(_) then panic("missing program must be a spawn error"),
-        .Error(_) then {},
+        .Error(e) then {
+            // SpawnError 三分类（项：spawn 失败带分类与程序名）。
+            assert(
+                e.message().contains("program not found"),
+                "missing program must classify as not found, got: \(e.message())",
+            );
+            assert(
+                e.message().contains("koral_definitely_missing_program_xyz"),
+                "spawn error must carry the program name",
+            );
+        },
+    };
+
+    // 无执行权限 → PermissionDenied 分类（POSIX）。
+    if not is_windows_host() then {
+        let noexec = "./proc_spawn_noexec_test.bin";
+        let _ = write_text_file(noexec, content = "not really a program");
+        let _ = set_permissions(noexec.to_path(), Permission.from_mode(0o644));
+        when Command.new(noexec).run() in {
+            .Ok(_) then panic("non-executable file must be a spawn error"),
+            .Error(e) then {
+                assert(
+                    e.message().contains("permission denied"),
+                    "non-executable must classify as permission denied, got: \(e.message())",
+                );
+            },
+        };
+        let _ = remove_file(noexec);
     };
     let r2 = Command.new("koral_definitely_missing_program_xyz").set_current_dir(
         "/tmp".to_path(),

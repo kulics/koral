@@ -1,20 +1,21 @@
 // EXPECT: into_string_ok
-// `into_string` hands the accumulated bytes to a `String` and empties the
-// buffer. The buffer's storage is a plain `alloc_memory` block (not a
-// single-block `Bytes`), so this is a one-copy handover rather than
-// StringBuilder's adoption; capacity stays, like `clear`.
+// `try_into_string` hands the accumulated bytes to a `String` and empties the
+// buffer; `try_to_string` snapshots. 编码问题走 `Result.Error` 不 panic。The
+// buffer's storage is a plain `alloc_memory` block (not a single-block
+// `Bytes`), so this is a one-copy handover rather than StringBuilder's
+// adoption; capacity stays, like `clear`.
 
 using "std/io" { ... };
 
 let main(): Void = {
     let mutable b = ByteBuffer.from_string("hello world");
-    let s = b.into_string();
+    let s = b.try_into_string().unwrap();
     assert(s == "hello world", "from_string roundtrip");
-    assert(b.into_string() == "", "drained");
+    assert(b.try_into_string().unwrap() == "", "drained");
 
     // The buffer stays usable after the handover.
     let _ = b.write_all(from = "again".as_slice());
-    assert(b.into_string() == "again", "reuse after handover");
+    assert(b.try_into_string().unwrap() == "again", "reuse after handover");
 
     // The whole buffer is handed over regardless of the cursor.
     let mutable c = ByteBuffer.from_string("abcd");
@@ -24,16 +25,16 @@ let main(): Void = {
     let c2 = c;
     let n = sink.borrow_slice((sl) => c2.read(into = sl[0..<2])) or else 0;
     assert(n == 2, "read two");
-    assert(c.into_string() == "abcd", "whole buffer handover");
-    assert(c.into_string() == "", "drained after cursor use");
+    assert(c.try_into_string().unwrap() == "abcd", "whole buffer handover");
+    assert(c.try_into_string().unwrap() == "", "drained after cursor use");
 
     // Snapshot extractions (`to_*`) leave the buffer untouched.
     let mutable t = ByteBuffer.from_string("snap");
-    assert(t.to_string() == "snap", "to_string snapshot");
+    assert(t.try_to_string().unwrap() == "snap", "try_to_string snapshot");
     let snap_bytes = t.to_bytes();
     assert(snap_bytes.count() == 4, "to_bytes snapshot count");
     assert(snap_bytes[0] == 's' and snap_bytes[3] == 'p', "to_bytes snapshot content");
-    assert(t.into_string() == "snap", "buffer untouched by snapshots");
+    assert(t.try_into_string().unwrap() == "snap", "buffer untouched by snapshots");
 
     // `into_bytes` hands the whole content over and drains the buffer.
     let mutable d = ByteBuffer.from_string("abcd");
@@ -41,7 +42,7 @@ let main(): Void = {
     assert(got.count() == 4, "into_bytes count");
     assert(got[0] == 'a' and got[3] == 'd', "into_bytes content");
     assert(d.into_bytes().count() == 0, "into_bytes drained");
-    assert(d.into_string() == "", "drained after into_bytes");
+    assert(d.try_into_string().unwrap() == "", "drained after into_bytes");
 
     // `to_bytes` ignores the cursor, unlike the Reader `read_all`.
     let mutable e = ByteBuffer.from_string("wxyz");
@@ -51,6 +52,16 @@ let main(): Void = {
     let full = e.to_bytes();
     assert(full.count() == 4, "to_bytes whole content");
     assert(full[2] == 'y', "to_bytes beyond cursor");
+
+    // 编码错误走 Error 不 panic；失败的交接不动缓冲。
+    let mut_bytes = List[UInt8].new();
+    mut_bytes.push(255);
+    mut_bytes.push(254);
+    let mutable bad = ByteBuffer.from_bytes(mut_bytes);
+    assert(bad.try_to_string().is_error(), "invalid utf8 -> error");
+    assert(bad.to_bytes().count() == 2, "snapshot failed: buffer untouched");
+    assert(bad.try_into_string().is_error(), "handover failed -> error");
+    assert(bad.to_bytes().count() == 2, "failed handover drains nothing");
 
     println("into_string_ok");
 };

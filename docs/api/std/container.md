@@ -61,17 +61,12 @@ given BitSet {
     public is_empty(self): Bool;
     /// Whether `value` is a member; values outside the universe answer `false`.
     public contains(self, value: UInt): Bool;
-    /// Add `value` to the set. Panics when `value` is outside the universe.
-    public insert(self, value: UInt): Void;
-    /// Add `value` to the set and report whether it was newly added. Panics
+    /// Add `value` to the set; return whether it was newly added. Panics when
+    /// `value` is outside the universe.
+    public insert(self, value: UInt): Bool;
+    /// Remove `value` from the set; return whether it was a member. Panics
     /// when `value` is outside the universe.
-    public try_insert(self, value: UInt): Bool;
-    /// Remove `value` from the set. Panics when `value` is outside the
-    /// universe; removing a non-member is a no-op.
-    public remove(self, value: UInt): Void;
-    /// Remove `value` from the set and report whether it was a member. Panics
-    /// when `value` is outside the universe.
-    public try_remove(self, value: UInt): Bool;
+    public remove(self, value: UInt): Bool;
     /// Remove every member, keeping the universe.
     public clear(self): Void;
     /// The members of both sets. Both sets must share the universe size.

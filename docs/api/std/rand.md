@@ -11,8 +11,8 @@ Import the module with `using "std/rand" { ... };`.
 
 ## Free Functions
 ```koral
-/// Create a Random instance backed by a system-entropy-seeded DefaultRandomSource.
-public let default_random(): Random[DefaultRandomSource];
+/// Create a system-entropy-seeded `DefaultRandomSource`.
+public let default_random(): DefaultRandomSource;
 ```
 
 ## Traits
@@ -34,9 +34,6 @@ public trait Randomizable {
 
 ## Types
 ```koral
-/// A random value generator wrapping any RandomSource with typed draws and collection helpers.
-public type mutable Random[R: RandomSource];
-
 /// A xoshiro256** pseudo-random generator with 256-bit state and period 2^256-1, not cryptographically secure.
 /// Copies share one underlying state, so generating through any copy advances them all.
 public type mutable DefaultRandomSource;
@@ -44,10 +41,9 @@ public type mutable DefaultRandomSource;
 
 ## Given Implementations
 ```koral
-/// Typed draws, bounded integers, and collection utilities over the wrapped source.
-given[R: RandomSource] Random[R] {
-    /// Construct from a RandomSource instance.
-    public new(rng: R): Random[R];
+/// Typed draws, bounded integers, and collection utilities on every
+/// `RandomSource`（原 `Random[R]` 包装类型的方法面，现直接扩展在源上）。
+given RandomSource {
     /// Generate a random value of any Randomizable type.
     public next[T: Randomizable](self): T;
     /// Generate a random Int within the given range, honoring its inclusive and exclusive bounds.

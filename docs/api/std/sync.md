@@ -314,10 +314,7 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     public try_insert(self, key: K, value: V): Bool;
     /// Remove `key`'s entry and return its value, if any. The old key is
     /// released after the unlock.
-    public take(self, key: K): Option[V];
-    /// Remove `key`'s entry and report whether it existed. The value and the
-    /// old key are released after the unlock.
-    public try_remove(self, key: K): Bool;
+    public remove(self, key: K): Option[V];
     /// The value stored under `key`, storing `value` first when absent. An
     /// unused duplicate value dies at the caller's statement end, after the
     /// unlock.
@@ -379,20 +376,13 @@ given[T: Hash and sendable] ConcurrentSet[T] {
     public is_empty(self): Bool;
     /// Whether `value` is a member.
     public contains(self, value: T): Bool;
-    /// Add `value` to the set. A discarded duplicate value dies at the
-    /// caller's statement end, after the unlock.
-    public insert(self, value: T): Void;
-    /// Add `value` to the set and report whether it was newly added. A
-    /// discarded duplicate value dies at the caller's statement end, after
-    /// the unlock.
-    public try_insert(self, value: T): Bool;
-    /// Remove `value` from the set. The stored member is extracted under the
-    /// lock and released after it.
-    public remove(self, value: T): Void;
-    /// Remove `value` from the set and report whether it was a member. The
+    /// Add `value` to the set; return whether it was newly added. A discarded
+    /// duplicate value dies at the caller's statement end, after the unlock.
+    public insert(self, value: T): Bool;
+    /// Remove `value` from the set; return whether it was a member. The
     /// stored member is extracted under the lock and released after it, so a
     /// destructor that calls back sees a free lock.
-    public try_remove(self, value: T): Bool;
+    public remove(self, value: T): Bool;
     /// Copy the members into an immutable `FrozenSet[T]` snapshot that can
     /// cross threads. The members are gathered under the shared lock; the
     /// snapshot is built (and the temporary array freed) after the unlock.
@@ -451,7 +441,7 @@ given Mutex {
     /// 释放锁
     public unlock(self): Void;
     /// 创建绑定到此互斥锁的条件变量
-    public condvar(self): MutexCondvar;
+    public new_condvar(self): MutexCondvar;
 };
 
 /// Implements `Drop`, destroying the underlying condition variable.
@@ -504,7 +494,7 @@ given SharedMutex {
     /// 尝试获取共享锁（非阻塞），成功返回 true
     public try_lock_shared(self): Bool;
     /// 创建绑定到此共享互斥锁独占模式的条件变量
-    public condvar(self): SharedMutexCondvar;
+    public new_condvar(self): SharedMutexCondvar;
 };
 
 /// Implements `Drop`, destroying the underlying condition variable.

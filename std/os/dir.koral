@@ -117,12 +117,12 @@ given DirIteratorStorage: Drop {
 };
 
 /// Iterator over the entries of one directory; the OS handle closes when the iterator is dropped.
-public type mutable DirIterator(storage: DirIteratorStorage);
+public type mutable DirIterator(private storage: DirIteratorStorage);
 
 private type mutable WalkDirStorage(mutable stack: List[DirIterator]);
 
 /// Depth-first iterator over a whole directory tree, produced by walk_dir.
-public type mutable WalkDirIterator(mutable storage: WalkDirStorage);
+public type mutable WalkDirIterator(private mutable storage: WalkDirStorage);
 
 /// Iterator conformance yielding the entries of one directory.
 given DirIterator: Iterator[DirEntry] {
@@ -136,7 +136,7 @@ given DirIterator: Iterator[DirEntry] {
 
         // POSIX 文件名字节不保证 UTF-8：lossy 转换（U+FFFD），遍历不因
         // 怪文件名失败。
-        let name = unsafe { String.from_cstring_lossy(__koral_dirent_name(entry)) };
+        let name = unsafe { String.from_cstring_ptr_lossy(__koral_dirent_name(entry)) };
         if name == "." or name == ".." then {
             return self.next();
         };
@@ -210,7 +210,7 @@ public let create_dir_all[T: ToPath](path: T): Result[Void] = {
     };
 
     let target = normalized.to_path();
-    if path_exist(target) then {
+    if path_exists(target) then {
         return dir_all_final_check(target);
     };
 
@@ -275,11 +275,11 @@ public let create_dir_all[T: ToPath](path: T): Result[Void] = {
         };
 
         let current_path = current_text.to_path();
-        if not path_exist(current_path) then {
+        if not path_exists(current_path) then {
             let current_cs = CString.from_string(current_text) or return;
             if unsafe { __koral_mkdir(current_cs.borrow_ptr(), 493) } != 0 then {
                 // Another process/thread may have created the directory concurrently.
-                if not path_exist(current_path) then {
+                if not path_exists(current_path) then {
                     return Result[Void].Error(last_error_message());
                 };
             };
@@ -387,8 +387,10 @@ public let walk_dir[T: ToPath](path: T): Result[WalkDirIterator] = {
 
 /// Create a temporary directory.
 /// When dir is empty path, uses the system temp directory.
+/// `prefix` is optional (default "") and must be a plain filename component.
 /// Returns the full path of the created temporary directory.
-public let create_temp_dir[T: ToPath](dir: T, prefix: String =): Result[Path] = {
+public let create_temp_dir[T: ToPath](dir: T, prefix: String = ""): Result[Path] = {
+    validate_temp_prefix(prefix);
     let dir_path = dir.to_path();
     let base = if dir_path.is_empty() then temp_dir() else dir_path;
     let base_str = base.to_string();
@@ -409,5 +411,5 @@ public let create_temp_dir[T: ToPath](dir: T, prefix: String =): Result[Path] = 
     if result == null then {
         return .Error(last_error_message());
     };
-    return .Ok(unsafe { String.from_cstring_unchecked(result).to_path() });
+    return .Ok(unsafe { String.from_cstring_ptr_unchecked(result).to_path() });
 };

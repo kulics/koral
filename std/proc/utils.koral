@@ -1,4 +1,5 @@
 using "std" { ... };
+using "std/os" { Path, ToPath };
 // ============================================================================
 // std.proc - Process Utility Functions
 // ============================================================================
@@ -16,15 +17,13 @@ using "std" { ... };
 private let foreign __koral_getpid(): UInt32;
 
 /// Send a signal to a process. Returns 0 on success, non-zero on failure.
-private let unsafe foreign __koral_send_signal(pid: UInt32, signal: Int32): Int32;
+protected let unsafe foreign __koral_send_signal(pid: UInt32, signal: Int32): Int32;
 
 /// Check if a process is alive. Returns 1 if alive, 0 if not.
 private let unsafe foreign __koral_is_alive(pid: UInt32): Int32;
 
-/// Get the working set size (resident memory) of a process in bytes. Returns -1 on error.
-private let unsafe foreign __koral_process_working_set_bytes(pid: UInt32): Int64;
-private let unsafe foreign __koral_process_tree_working_set_bytes(pid: UInt32): Int64;
-private let unsafe foreign __koral_kill_process_tree(pid: UInt32, signal: Int32): Int32;
+/// PATH lookup for a program name; writes the resolved path into out_buf.
+private let unsafe foreign __koral_find_program(name: *UInt8, out_buf: *UInt8, out_len: UInt64): Int32;
 
 /// Get pointer to errno value.
 /// Reuse errno helpers from std.os to avoid cross-module symbol ambiguity.
@@ -40,9 +39,21 @@ private let unsafe foreign __koral_kill_process_tree(pid: UInt32, signal: Int32)
 /// Get the current process PID.
 public let current_pid(): UInt32 = __koral_getpid();
 
+/// pid 合法性（进程族自由函数的统一入口校验）：pid 0 = 整个进程组（信号会
+/// 打到自己组里）且 POSIX 等价"送给自己"，pid 超 int32 上限在 C ABI 侧折损
+/// ——两者都按参数错误 panic（容量族负值同规）。
+private let validate_pid(pid: UInt32): Void = {
+    if pid == 0 or pid > UInt(2147483647) then {
+        panic("process pid out of range: \(pid)");
+    };
+};
+
 /// Send a signal to the process with the given PID (Unix).
 /// On Windows, SIGTERM/SIGKILL calls TerminateProcess; other signals return an error.
+/// 任意信号原语（kill_process / terminate_process 是常用门面，但 SIGHUP、
+/// SIGUSR1 之类外部库也要发）。
 public let send_process_signal(signal: Int, to: UInt32 =): Result[Void] = {
+    validate_pid(to);
     let result = unsafe { __koral_send_signal(to, Int32(signal)) };
     if result != 0 then {
         return Result[Void].Error(last_error_message());
@@ -50,36 +61,37 @@ public let send_process_signal(signal: Int, to: UInt32 =): Result[Void] = {
     return Result[Void].Ok({});
 };
 
-/// Force-kill the process with the given PID (equivalent to send_process_signal(9, to = pid)).
+/// Force-kill the process with the given PID (SIGKILL).
 public let kill_process(pid: UInt32): Result[Void] = send_process_signal(9, to = pid);
 
-/// Force-kill the process group rooted at the given PID.
-/// Koral-spawned subprocesses run in their own process group on POSIX,
-/// so this terminates the root process and any compiler children it spawned.
-public let kill_process_tree(pid: UInt32): Result[Void] = {
-    let result = unsafe { __koral_kill_process_tree(pid, 9) };
-    if result != 0 then {
-        return Result[Void].Error(last_error_message());
-    };
-    return Result[Void].Ok({});
-};
+/// Gracefully terminate the process with the given PID (SIGTERM; Windows:
+/// TerminateProcess).
+public let terminate_process(pid: UInt32): Result[Void] = send_process_signal(15, to = pid);
 
 /// Check whether the process with the given PID is still alive.
-public let is_process_alive(pid: UInt32): Bool = unsafe { __koral_is_alive(pid) != 0 };
-
-/// Get the working set size (resident memory) of a process in bytes.
-/// Returns 0 if the process is not found or an error occurs.
-public let process_working_set_bytes(pid: UInt32): UInt64 = {
-    let result = unsafe { __koral_process_working_set_bytes(pid) };
-    return if result < 0 then UInt64(0) else UInt64(result);
+public let is_process_alive(pid: UInt32): Bool = {
+    validate_pid(pid);
+    return unsafe { __koral_is_alive(pid) != 0 };
 };
 
-/// Get the total working set size of a process and all its child processes.
-/// This tracks the entire process tree, not just the root process.
-/// Returns 0 if the process is not found or an error occurs.
-public let process_tree_working_set_bytes(pid: UInt32): UInt64 = {
-    let result = unsafe { __koral_process_tree_working_set_bytes(pid) };
-    return if result < 0 then UInt64(0) else UInt64(result);
+/// Locate `program` on PATH (or a direct path when it contains a separator),
+/// returning the resolved executable path.
+public let find_program(program: String): Option[Path] = {
+    let name_cs = when CString.from_string(program) in {
+        .Ok(cs) then cs,
+        .Error(_) then return Option[Path].None(),
+    };
+    let mutable buf = unsafe { make_uninitialized_bytes(4096) };
+    let result = unsafe {
+        __koral_find_program(name_cs.borrow_ptr(), buf.borrow_mut_ptr(), 4096)
+    };
+    if result != 0 then {
+        return Option[Path].None();
+    };
+    return when unsafe { String.from_cstring_ptr(buf.borrow_ptr()) } in {
+        .Ok(p) then Option[Path].Some(p.to_path()),
+        .Error(_) then Option[Path].None(),
+    };
 };
 
 /// Convenience: synchronously execute a command and return only the exit status.

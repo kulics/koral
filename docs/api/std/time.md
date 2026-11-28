@@ -43,12 +43,10 @@ public type sendable TimeZone;
 ```koral
 /// Constructors from hour, minute, second, and nanosecond fields.
 given ClockTime {
-    /// Creates a ClockTime from hour, minute, second.
+    /// Creates a ClockTime from hour, minute, second, and an optional
+    /// nanosecond (default 0).
     /// Returns Error if any field is out of range.
-    public new(hour: Int =, minute: Int =, second: Int =): Result[ClockTime];
-    /// Creates a ClockTime from hour, minute, second, nanoseconds.
-    /// Returns Error if any field is out of range.
-    public new_full(hour: Int =, minute: Int =, second: Int =, nanosecond: Int =): Result[ClockTime];
+    public new(hour: Int =, minute: Int =, second: Int =, nanosecond: Int = 0): Result[ClockTime];
     /// Returns midnight (00:00:00).
     public midnight(): ClockTime;
 };

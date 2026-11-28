@@ -170,17 +170,18 @@ given[K: Hash, V: Any] Dict[K, V] {
                 let was_occupied = old_tag == UInt(1);
                 let mutable displaced = Option[V].None();
                 if was_occupied then {
-                    // 先把旧值拷出来（句柄 retain 一份），deinit 释放的是
-                    // 桶里的那份，返回的这份由调用方接走。
-                    displaced = Option[V].Some(bucket_ptr.value);
-                    deinit_memory(bucket_ptr);
-                };
-                init_memory(bucket_ptr, HashBucket[K, V](UInt(1), key, value));
-                if old_tag == UInt(2) then {
-                    // 复用了一个 tombstone 槽：陈旧桶少一个。
-                    self.deleted = self.deleted - 1;
-                };
-                if not was_occupied then {
+                    // 覆盖只换值、不动 key（key 保持桶里原实例——等值不同
+                    // 键不换身份）。旧值移出交给调用方，槽里在位换新。
+                    displaced = Option[V].Some(
+                        take_memory[V](&bucket_ptr.value as *mutable V),
+                    );
+                    init_memory[V](&bucket_ptr.value as *mutable V, value);
+                } else {
+                    init_memory(bucket_ptr, HashBucket[K, V](UInt(1), key, value));
+                    if old_tag == UInt(2) then {
+                        // 复用了一个 tombstone 槽：陈旧桶少一个。
+                        self.deleted = self.deleted - 1;
+                    };
                     self.size = self.size + 1;
                 };
                 return displaced;
@@ -259,19 +260,8 @@ given[K: Hash, V: Any] Dict[K, V] {
         .None() then false,
     };
 
-    /// Remove `key`'s entry if present, discarding its value.
-    public remove(self, key: K): Void = {
-        let _ = self.take(key);
-    };
-
-    /// Remove `key`'s entry if present; return whether one was removed.
-    public try_remove(self, key: K): Bool = when self.take(key) in {
-        .Some(_) then true,
-        .None() then false,
-    };
-
     /// Remove `key`'s entry and return its value, or `None` if the key is absent.
-    public take(self, key: K): Option[V] = unsafe {
+    public remove(self, key: K): Option[V] = unsafe {
         when self.find_slot(key) in {
             .None() then {
                 return Option[V].None();
@@ -557,7 +547,7 @@ given[T: Any] List[T] {
 /// form is where the owned buffer's destructor lives; the snapshot is
 /// immutable after construction.
 public type unsafe sendable mutable FrozenDict[K: Hash, V: Any](
-    protected buckets: *mutable HashBucket[K, V],
+    buckets: *mutable HashBucket[K, V],
     protected len: Int,
     protected capacity: Int,
 );

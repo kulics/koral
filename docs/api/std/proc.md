@@ -16,27 +16,23 @@ public let current_pid(): UInt32;
 
 /// Send a signal to the process with the given PID (Unix).
 /// On Windows, SIGTERM/SIGKILL calls TerminateProcess; other signals return an error.
+/// 任意信号原语（kill_process / terminate_process 是常用门面，但 SIGHUP、
+/// SIGUSR1 之类外部库也要发）。
 public let send_process_signal(signal: Int, to: UInt32 =): Result[Void];
 
-/// Force-kill the process with the given PID (equivalent to send_process_signal(9, to = pid)).
+/// Force-kill the process with the given PID (SIGKILL).
 public let kill_process(pid: UInt32): Result[Void];
 
-/// Force-kill the process group rooted at the given PID.
-/// Koral-spawned subprocesses run in their own process group on POSIX,
-/// so this terminates the root process and any compiler children it spawned.
-public let kill_process_tree(pid: UInt32): Result[Void];
+/// Gracefully terminate the process with the given PID (SIGTERM; Windows:
+/// TerminateProcess).
+public let terminate_process(pid: UInt32): Result[Void];
 
 /// Check whether the process with the given PID is still alive.
 public let is_process_alive(pid: UInt32): Bool;
 
-/// Get the working set size (resident memory) of a process in bytes.
-/// Returns 0 if the process is not found or an error occurs.
-public let process_working_set_bytes(pid: UInt32): UInt64;
-
-/// Get the total working set size of a process and all its child processes.
-/// This tracks the entire process tree, not just the root process.
-/// Returns 0 if the process is not found or an error occurs.
-public let process_tree_working_set_bytes(pid: UInt32): UInt64;
+/// Locate `program` on PATH (or a direct path when it contains a separator),
+/// returning the resolved executable path.
+public let find_program(program: String): Option[Path];
 
 /// Convenience: synchronously execute a command and return only the exit status.
 /// Internally uses Command.new(program).args(args).run().
@@ -52,6 +48,14 @@ public let run_command_output(program: String, args: List[String]): Result[Comma
 
 ## Types
 ```koral
+/// `Command.spawn` 的失败分类（程序名随身）：找不到程序、无执行权限、其余
+/// 系统错误。spawn 的运行时返回码 -2/-3/-1 映射到三变体。
+public type sendable SpawnError {
+    NotFound(program: String),
+    PermissionDenied(program: String),
+    Other(program: String, message: String),
+};
+
 /// Command builder for configuring and launching child processes.
 /// Provides a fluent API for setting program, arguments, environment variables,
 /// working directory, and I/O redirection before spawning.
@@ -61,7 +65,7 @@ public type mutable Command;
 /// output. 子进程输出是任意字节（不保证 UTF-8）：`stdout` / `stderr` 是
 /// 原始字节（`FrozenList[UInt8]`——不可变快照，保住 `CommandOutput` 的
 /// sendable），文本语义由调用方决定——受检走 `String.from_bytes`，不失败
-/// 走 `String.from_bytes_lossy` 或 `stdout_text` / `stderr_text` 视图。
+/// 走 `String.from_bytes_lossy` 或 `stdout_text_lossy` / `stderr_text_lossy` 视图。
 public type sendable CommandOutput(public status: ExitStatus, public stdout: FrozenList[UInt8], public stderr: FrozenList[UInt8]);
 
 /// Child process exit status.
@@ -114,11 +118,27 @@ public type sendable IoRedirect {
     StdoutPipe(pipe: StdoutPipe),
     /// Use another child process's stderr pipe (typically for stdin chaining).
     StderrPipe(pipe: StderrPipe),
+    /// Feed `data` to the child's stdin from memory（库内边读边写：管道写端
+    /// 由库内后台任务泵入，避免大输入堵死管道缓冲；数据冻结成
+    /// `FrozenList`——跨任务捕获要 sendable）。
+    Bytes(data: FrozenList[UInt8]),
+    /// Send this stream to the SAME pipe as stdout（stderr 用：两条流共管道，
+    /// 输出按到达序合流）。
+    ToStdout(),
 };
 ```
 
 ## Given Implementations
 ```koral
+/// `Error` for `SpawnError`: the message names the program and the class.
+given SpawnError: Error {
+    /// The failure text: `program not found: <p>` / `permission denied: <p>` /
+    /// `<p>: <system message>`.
+    public message(self): String;
+    /// No underlying cause: the spawn failure is terminal at this layer.
+    public source(self): Option[Error];
+};
+
 /// Configure arguments, environment, working directory, and I/O redirection, then spawn or run the child.
 given Command {
     /// Create a new command builder for the specified program.
@@ -142,6 +162,16 @@ given Command {
     /// Configure stderr redirection (chainable).
     public set_stderr(self, cfg: IoRedirect): Command;
     /// Asynchronously spawn a child process, returning a Process handle.
+    /// 为 `run` / `run_output` 设超时（命名参数 `after`）。到限先杀根进程
+    /// （SIGKILL；**孙进程不杀**——超时杀只作用于直接子进程，孙进程的
+    /// 生命周期归其父），读管道给宽限期（内部固定 1s），到点关闭读端，
+    /// 返回 Error("timeout: <program>")。
+    public set_timeout(self, after: Duration =): Command;
+    /// Start the child process and return its handle.
+    /// The command's stdio configuration is consumed here: held pipes and file
+    /// redirects are released after the spawn, so the handle (not the command)
+    /// owns them from here on. Failure returns `SpawnError` naming the program
+    /// (NotFound / PermissionDenied / Other).
     public spawn(self): Result[Process];
     /// Synchronously execute the command and wait for completion.
     /// Returns only the exit status (does not capture output).
@@ -162,9 +192,9 @@ given CommandOutput {
     /// Get exit code (convenience method delegating to status).
     public code(self): Option[Int];
     /// stdout 的 lossy 文本视图（每个最大非法子序列替换为 U+FFFD）。
-    public stdout_text(self): String;
+    public stdout_text_lossy(self): String;
     /// stderr 的 lossy 文本视图（每个最大非法子序列替换为 U+FFFD）。
-    public stderr_text(self): String;
+    public stderr_text_lossy(self): String;
 };
 
 /// String conformance: renders the exit status together with the captured stdout and stderr.
@@ -234,10 +264,22 @@ given Process {
     /// Peak resident set size (RSS) of the child process in bytes, as reported
     /// by the kernel after the process was reaped. 0 means not captured.
     public peak_rss_bytes(self): UInt64;
+    /// Force-kill the child (SIGKILL). 只杀根进程——孙进程不杀（与
+    /// `Command.set_timeout` 的到期杀同语义，文档见 `set_timeout`）。
+    public kill(self): Result[Void];
+    /// Gracefully terminate the child (SIGTERM; Windows: TerminateProcess).
+    /// 只作用于根进程。
+    public terminate(self): Result[Void];
+    /// Detach: release this handle's claims (un-taken pipes close now) and
+    /// stop tracking the child -- the drop of the handle runs the same
+    /// action. 剩余生命周期归操作系统（父进程退出时收养回收兜底）。
+    public detach(self): Void;
     /// Block until the child process exits, returning its exit status.
     /// Idempotent and thread-safe: any number of threads may call wait()
-    /// concurrently; exactly one of them reaps the child and every caller
-    /// observes the same exit status. The reap itself runs outside the lock.
+    /// concurrently and every caller observes the same exit status.
+    /// 两段式（先 `wnowait` 等待、再加锁回收）：第一段 waitpid(WNOWAIT)
+    /// 阻塞到子进程退出但**不消费**等待记录——所有等待者同刻醒来；第二段
+    /// 在锁下做真回收（首个见到未回收的调用方），其余读记录。
     public wait(self): Result[ExitStatus];
     /// Wait for the child process to exit and capture all stdout/stderr output.
     /// Uses __koral_read_all_pipes for concurrent reading to avoid pipe deadlock.

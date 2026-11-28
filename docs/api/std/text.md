@@ -42,9 +42,6 @@ public trait Formattable: ToString {
 
 ## Types
 ```koral
-/// Bit flags that control how a regex is compiled and matched.
-public type sendable RegexFlag;
-
 /// A compiled regular expression, ready to match text.
 public type Regex;
 
@@ -65,20 +62,20 @@ public type sendable Captures;
 /// Iterator over the successive non-overlapping matches of a regex.
 /// `prev_end` 记住上一匹配的结束位置：紧接其后的零宽匹配跳过（Go 的
 /// `FindAll` 规则），`$` 在 "abc" 上只出一个匹配。
-public type mutable MatchIterator;
+public type mutable RegexFindIterator;
 
 /// Iterator over successive matches, each with its capture groups.
-/// `prev_end` 的规则同 `MatchIterator`。
-public type mutable CapturesIterator;
+/// `prev_end` 的规则同 `RegexFindIterator`。
+public type mutable RegexCapturesIterator;
 
 /// Iterator over the text pieces between a regex's matches.
 public type mutable RegexSplitIterator;
 
 /// Iterable view over the successive non-overlapping matches of a regex.
-public type MatchView;
+public type RegexFindView;
 
 /// Iterable view over successive matches, each with its capture groups.
-public type CapturesView;
+public type RegexCapturesView;
 
 /// Iterable view over the text pieces between a regex's matches.
 public type RegexSplitView;
@@ -316,11 +313,10 @@ given Rune: Parseable {
 
 /// Compile patterns into `Regex` values.
 given Regex {
-    /// Compile `pattern` with default flags into a `Regex`.
+    /// Compile `pattern` into a `Regex`. Flags are spelled INLINE in the
+    /// pattern (`(?i)` / `(?m)` / `(?im)`, and `(?i:...)` scoped to a group).
     /// Returns `Result.Error` with the engine's message if the pattern is invalid.
     public compile(pattern: String): Result[Regex];
-    /// Compile `pattern` with `flags` applied, returning `Result.Error` on an invalid pattern.
-    public compile_with_flags(pattern: String, flags: RegexFlag): Result[Regex];
 };
 
 /// Match testing and first-match search without capture detail.
@@ -328,12 +324,10 @@ given Regex {
     /// Test whether the pattern matches anywhere in `text`, capturing no groups.
     public matches(self, text: String): Bool;
     /// Return the first match in `text`, recording only the whole match's span.
-    /// Returns `None` when the pattern does not match.
-    public find(self, text: String): Option[Match];
-    /// Return the first match in `text` starting at byte `offset`. Returns
-    /// `None` when `offset` falls inside a multi-byte character (starts must
-    /// land on rune boundaries).
-    public find_at(self, offset: Int, text: String): Option[Match];
+    /// `from` names the byte offset to start at (default 0); returns `None`
+    /// when `from` falls inside a multi-byte character (starts must land on
+    /// rune boundaries).
+    public find(self, text: String, from: Int = 0): Option[Match];
 };
 
 /// Capture-group search plus match and capture iterators.
@@ -342,18 +336,16 @@ given Regex {
     /// capture groups. The view is `Iterable` (`for`, and `lazy()` for
     /// pipelines); it hands out a fresh cursor per `iterator()` and is never
     /// spent.
-    public find_all(self, text: String): MatchView;
+    public find_all(self, text: String): RegexFindView;
     /// Return the first match in `text` with all of its capture groups.
-    /// Returns `None` when the pattern does not match.
-    public captures(self, text: String): Option[Captures];
-    /// Return the first match in `text` starting at byte `offset`, with
-    /// all of its capture groups. Starts must land on rune boundaries.
-    public captures_at(self, offset: Int, text: String): Option[Captures];
+    /// `from` names the byte offset to start at (default 0); starts must land
+    /// on rune boundaries. Returns `None` when the pattern does not match.
+    public captures(self, text: String, from: Int = 0): Option[Captures];
     /// Return a view over every non-overlapping match in `text`, each with its
     /// capture groups. The view is `Iterable` (`for`, and `lazy()` for
     /// pipelines); it hands out a fresh cursor per `iterator()` and is never
     /// spent.
-    public captures_all(self, text: String): CapturesView;
+    public captures_all(self, text: String): RegexCapturesView;
 };
 
 /// Substitution of the first match or of every match.
@@ -364,16 +356,14 @@ given Regex {
     /// Replace every match in `text` with `with`, expanding `$0`..`$9` and `$$` as in `replace`.
     /// 紧接上一匹配结束位置的零宽匹配跳过（Go 规则），该处字符原样并入。
     public replace_all(self, text: String, with: String =): String;
-    /// Replace the first match in `text` by the string `f` builds from it
-    /// (the closure sees every capture group). Returns `text` unchanged when
-    /// there is no match. The `by` argument leads, `text` trails -- same
-    /// order as `find_at`'s `offset`.
-    public replace_by(self, f: (Captures) -> String, text: String): String;
-    /// Replace every match in `text` by the string `f` builds from it.
+    /// Replace the first match in `text` with the string `with` builds from
+    /// it (the closure sees every capture group). Returns `text` unchanged
+    /// when there is no match.
+    public replace_fn(self, text: String, with: (Captures) -> String =): String;
+    /// Replace every match in `text` with the string `with` builds from it.
     /// Zero-width matches step one rune at a time; 紧接上一匹配结束位置的
-    /// 零宽匹配跳过（Go 规则），该处字符原样并入。The `by` argument leads,
-    /// `text` trails -- same order as `find_at`'s `offset`.
-    public replace_all_by(self, f: (Captures) -> String, text: String): String;
+    /// 零宽匹配跳过（Go 规则），该处字符原样并入。
+    public replace_all_fn(self, text: String, with: (Captures) -> String =): String;
     /// Escape every regex metacharacter in `text`, so it matches literally.
     public escape(text: String): String;
 };
@@ -387,20 +377,6 @@ given Regex {
     public split(self, text: String): RegexSplitView;
 };
 
-/// Flag constructors and bitwise combinators for `RegexFlag`.
-given RegexFlag {
-    /// The empty flag set: default, case-sensitive, whole-text matching.
-    public none(): RegexFlag;
-    /// Match letters case-insensitively.
-    public ignore_case(): RegexFlag;
-    /// Make `^` and `$` match line starts and ends, not just the text's ends.
-    public multiline(): RegexFlag;
-    /// Combine two flag sets with bitwise OR.
-    public combine(self, other: RegexFlag): RegexFlag;
-    /// Return `true` if every flag in `flag` is set on this value.
-    public has(self, flag: RegexFlag): Bool;
-};
-
 /// Accessors for the compiled pattern's source and capture-group count.
 given Regex {
     /// Return the original pattern string.
@@ -408,8 +384,8 @@ given Regex {
     /// Return the number of capturing groups in the pattern (the whole
     /// match is not a group).
     public group_count(self): Int;
-    /// Return the name of capture group `index` (`""` for an unnamed group),
-    /// or `None` when the index is out of range.
+    /// Return the name of capture group `index`, or `None` when the index is
+    /// out of range or the group is unnamed.
     public group_name(self, index: Int): Option[String];
     /// Return the index of the capture group named `name`, or `None` when
     /// the pattern declares no such group.
@@ -443,19 +419,19 @@ given Captures {
     public group(self, index: Int): Option[Match];
     /// Return the capture group named `name` as a `Match`, or `None` when
     /// the pattern declares no such group or it did not take part.
-    public group_by_name(self, name: String): Option[Match];
+    public named_group(self, name: String): Option[Match];
 };
 
-/// `Iterable` for `MatchView`: a fresh matches cursor per call.
-given MatchView: Iterable[Match, MatchIterator] {
+/// `Iterable` for `RegexFindView`: a fresh matches cursor per call.
+given RegexFindView: Iterable[Match, RegexFindIterator] {
     /// Build a fresh cursor over the matches; the view itself is untouched.
-    public iterator(self): MatchIterator;
+    public iterator(self): RegexFindIterator;
 };
 
-/// `Iterable` for `CapturesView`: a fresh captures cursor per call.
-given CapturesView: Iterable[Captures, CapturesIterator] {
+/// `Iterable` for `RegexCapturesView`: a fresh captures cursor per call.
+given RegexCapturesView: Iterable[Captures, RegexCapturesIterator] {
     /// Build a fresh cursor over the capture sets; the view itself is untouched.
-    public iterator(self): CapturesIterator;
+    public iterator(self): RegexCapturesIterator;
 };
 
 /// `Iterable` for `RegexSplitView`: a fresh pieces cursor per call.
@@ -464,14 +440,14 @@ given RegexSplitView: Iterable[String, RegexSplitIterator] {
     public iterator(self): RegexSplitIterator;
 };
 
-/// Iterator conformance for `MatchIterator`, yielding matches one after another.
-given MatchIterator: Iterator[Match] {
+/// Iterator conformance for `RegexFindIterator`, yielding matches one after another.
+given RegexFindIterator: Iterator[Match] {
     /// Return the next match, resuming after the previous one, or `None` when exhausted.
     public next(self): Option[Match];
 };
 
-/// Iterator conformance for `CapturesIterator`, yielding one capture set at a time.
-given CapturesIterator: Iterator[Captures] {
+/// Iterator conformance for `RegexCapturesIterator`, yielding one capture set at a time.
+given RegexCapturesIterator: Iterator[Captures] {
     /// Return the next match's captures, resuming after the previous one, or `None`.
     public next(self): Option[Captures];
 };

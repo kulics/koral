@@ -53,11 +53,18 @@ public let walk_dir[T: ToPath](path: T): Result[WalkDirIterator];
 
 /// Create a temporary directory.
 /// When dir is empty path, uses the system temp directory.
+/// `prefix` is optional (default "") and must be a plain filename component.
 /// Returns the full path of the created temporary directory.
-public let create_temp_dir[T: ToPath](dir: T, prefix: String =): Result[Path];
+public let create_temp_dir[T: ToPath](dir: T, prefix: String = ""): Result[Path];
 
-/// Get environment variable by name (renamed from get_env)
+/// Get environment variable by name (renamed from get_env).
+/// 文本严格族：值不是合法 UTF-8 时视同不可用返回 `None`（与缺席混同）；
+/// 要字节保真走 `env_raw`。
 public let env(name: String): Option[String];
+
+/// Get the environment variable's value as raw bytes.
+/// 字节保真族（raw = 零转换）：`CString` 不声称 UTF-8，值原样进出。
+public let env_raw(name: String): Option[CString];
 
 /// Set environment variable (returns Result instead of Void)
 public let set_env(name: String, value: String): Result[Void];
@@ -65,8 +72,15 @@ public let set_env(name: String, value: String): Result[Void];
 /// Remove (unset) an environment variable
 public let remove_env(name: String): Result[Void];
 
-/// List all environment variables as key-value pairs
-public let all_env(): List[Pair[String, String]];
+/// List all environment entries as raw `NAME=VALUE` byte strings.
+/// 字节保真族（raw = 零转换零解析）：条目是 envp 原形，连 `=` 都不拆——
+/// 非 UTF-8 条目原样保留。`Command` 的子环境合并在字节层走这里。
+public let env_all_raw(): FrozenList[CString];
+
+/// List all environment variables as key-value pairs.
+/// 文本严格族：条目的键或值不是合法 UTF-8 时直接 panic（`std::env::vars`
+/// 同款——名单叫 all 就要给全，不静默丢条目）；要保真走 `env_all_raw`。
+public let env_all(): FrozenList[Pair[String, String]];
 
 /// Get home directory
 public let home_dir(): Option[Path];
@@ -124,7 +138,7 @@ public let remove_file[T: ToPath](path: T): Result[Void];
 public let rename_path[T1: ToPath, T2: ToPath](src: T1, to: T2 =): Result[Void];
 
 /// Check if path exists on disk.
-public let path_exist[T: ToPath](path: T): Bool;
+public let path_exists[T: ToPath](path: T): Bool;
 
 /// Convert to absolute path (does not resolve symlinks)
 ///
@@ -137,7 +151,7 @@ public let absolute_path[T: ToPath](path: T): Result[Path];
 ///
 /// The result is normalized to the canonical `/` form even though the OS call
 /// underneath returns the platform spelling.
-public let canonicalize_path[T: ToPath](path: T): Result[Path];
+public let canonical_path[T: ToPath](path: T): Result[Path];
 
 /// Open a file and return a File handle (unbuffered, directly wraps fd).
 ///
@@ -181,8 +195,9 @@ public let truncate_file[T: ToPath](path: T, size: Int): Result[Void];
 
 /// Create a temporary file.
 /// When dir is empty, uses the system temp directory.
+/// `prefix` is optional (default "") and must be a plain filename component.
 /// Returns an open File handle (use file.path() to get the path).
-public let create_temp_file[T: ToPath](dir: T, prefix: String =): Result[File];
+public let create_temp_file[T: ToPath](dir: T, prefix: String = ""): Result[File];
 
 /// Get platform path separator ("/" on Unix, "\" on Windows)
 public let path_separator(): String;
@@ -315,7 +330,7 @@ given File {
     /// This is a low-level operation for interop with OS APIs and cross-module fd sharing.
     public fd(self): Int;
     /// Get the file path (returns the normalized path from when the file was opened).
-    /// Does not resolve symlinks or relative paths; use canonicalize_path for that.
+    /// Does not resolve symlinks or relative paths; use canonical_path for that.
     public path(self): Path;
     /// Get file metadata by querying via the file descriptor (no path needed).
     public info(self): Result[FileInfo];
@@ -397,12 +412,6 @@ given Permission {
     public has_other_write(self): Bool;
     /// Other execute permission
     public has_other_exec(self): Bool;
-    /// Factory method: read-only for all (0o444 = 292)
-    public readonly(): Permission;
-    /// Factory method: owner read-write, group/other read (0o644 = 420)
-    public read_write(): Permission;
-    /// Factory method: owner all, group/other read+exec (0o755 = 493)
-    public executable(): Permission;
 };
 
 /// ToString conformance rendering the classic "rwxrwxrwx" form.

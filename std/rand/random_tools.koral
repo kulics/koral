@@ -1,9 +1,10 @@
 using "std" { ... };
 // ============================================================================
-// std.rand - Random Wrapper Type and Convenience Functions
+// std.rand - Source Tools and Convenience Functions
 // ============================================================================
-// [R RandomSource]Random: generic wrapper holding any RandomSource
-// next_int / next_uint: bounded integer random (Lemire algorithm)
+// given RandomSource: typed draws / bounded integers / collection utilities
+//   （原 `Random` 包装类型的方法，现直接扩展在源上——源本身就是生成器）
+// next / next_int / next_uint: bounded integer random (Lemire algorithm)
 // shuffle / choose: collection utilities
 // default_random(): convenience free function
 // ============================================================================
@@ -50,19 +51,14 @@ let lemire_bounded[R: RandomSource](source: R, range: UInt64): UInt64 = {
 };
 
 // ============================================================================
-// Random wrapper type
+// RandomSource tools
 // ============================================================================
 
-/// A random value generator wrapping any RandomSource with typed draws and collection helpers.
-public type mutable Random[R: RandomSource](private rng: R);
-
-/// Typed draws, bounded integers, and collection utilities over the wrapped source.
-given[R: RandomSource] Random[R] {
-    /// Construct from a RandomSource instance.
-    public new(rng: R): Random[R] = Random[R](rng);
-
+/// Typed draws, bounded integers, and collection utilities on every
+/// `RandomSource`（原 `Random[R]` 包装类型的方法面，现直接扩展在源上）。
+given RandomSource {
     /// Generate a random value of any Randomizable type.
-    public next[T: Randomizable](self): T = T.random(self.rng);
+    public next[T: Randomizable](self): T = T.random(self);
 
     /// Generate a random Int within the given range, honoring its inclusive and exclusive bounds.
     /// Panics if the range is empty.
@@ -129,13 +125,13 @@ given[R: RandomSource] Random[R] {
             return low;
         };
         if low == Int.min_value() and high == Int.max_value() then {
-            return Int(WrappingInt(self.rng.generate()));
+            return Int(WrappingInt(self.generate()));
         };
         // Map signed [low, high] to unsigned [0, range_size) via XOR with min
         let u_low = UInt64(WrappingUInt64(low)) ^ UInt64(WrappingUInt64(Int.min_value()));
         let u_high = UInt64(WrappingUInt64(high)) ^ UInt64(WrappingUInt64(Int.min_value()));
         let range_size = u_high - u_low + 1;
-        let u_result = u_low + lemire_bounded(self.rng, range_size);
+        let u_result = u_low + lemire_bounded(self, range_size);
         return Int(WrappingInt((u_result ^ UInt64(WrappingUInt64(Int.min_value())))));
     };
 
@@ -204,10 +200,10 @@ given[R: RandomSource] Random[R] {
             return low;
         };
         if low == 0 and high == UInt.max_value() then {
-            return UInt(self.rng.generate());
+            return UInt(self.generate());
         };
         let range_size = UInt64((high - low + 1));
-        return UInt((low + UInt(lemire_bounded(self.rng, range_size))));
+        return UInt((low + UInt(lemire_bounded(self, range_size))));
     };
 
     /// Randomly shuffle a list in place using the Fisher-Yates algorithm.
@@ -219,7 +215,7 @@ given[R: RandomSource] Random[R] {
         let mutable i = len - 1;
         while i > 0 then {
             // Pick a random index in [0, i]
-            let j = Int(lemire_bounded(self.rng, UInt64((i + 1))));
+            let j = Int(lemire_bounded(self, UInt64((i + 1))));
             if i != j then {
                 let tmp = list[i];
                 list[i] = list[j];
@@ -235,13 +231,12 @@ given[R: RandomSource] Random[R] {
         if len == 0 then {
             return Option[T].None();
         };
-        let idx = Int(lemire_bounded(self.rng, UInt64(len)));
+        let idx = Int(lemire_bounded(self, UInt64(len)));
         return Option[T].Some(list[idx]);
     };
 };
 
-/// Create a Random instance backed by a system-entropy-seeded DefaultRandomSource.
-public let default_random(): Random[DefaultRandomSource] = {
-    let rng = DefaultRandomSource.new();
-    return Random[DefaultRandomSource].new(rng);
+/// Create a system-entropy-seeded `DefaultRandomSource`.
+public let default_random(): DefaultRandomSource = {
+    return DefaultRandomSource.new();
 };

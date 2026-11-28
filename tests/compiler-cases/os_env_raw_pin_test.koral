@@ -1,0 +1,77 @@
+// EXPECT: env_raw_ok
+// EXPECT: env_strict_none_ok
+// EXPECT: env_all_raw_ok
+// 读族四象限的字节保真钉：
+//   * env_raw：非 UTF-8 值原样往返（CString 载体，字节不换不丢）；
+//   * env：文本严格族——非 UTF-8 值视同不可用（None，不换字不泄漏）；
+//   * env_all_raw：NAME=VALUE 原形条目（raw = 零转换零解析），名字段可
+//     定位、值字段字节保真。
+
+using "std/os" { ... };
+
+let unsafe foreign __koral_setenv(name: *UInt8, value: *UInt8): Int32;
+let unsafe foreign __koral_unsetenv(name: *UInt8): Int32;
+
+let main(): Void = unsafe {
+    let name_cs = CString.from_string("KORAL_RAW_PIN").unwrap();
+    // 非 UTF-8 值：0xFF 0xFE 'A'，裸字节写入环境。
+    let val_ptr = alloc_memory[UInt8](4);
+    init_memory(val_ptr, UInt8(255));
+    init_memory(val_ptr + 1, UInt8(254));
+    init_memory(val_ptr + 2, UInt8(65));
+    init_memory(val_ptr + 3, UInt8(0));
+    let rc = __koral_setenv(name_cs.borrow_ptr(), val_ptr as *UInt8);
+    assert(rc == 0, "raw setenv");
+
+    // ── env_raw：字节保真单查 ─────────────────────────────────────────────
+    let cs = env_raw("KORAL_RAW_PIN").unwrap();
+    assert(cs.count() == 3, "raw value length");
+    let vp = cs.borrow_ptr();
+    assert(
+        vp[0] == UInt8(255) and vp[1] == UInt8(254) and vp[2] == UInt8(65),
+        "raw value bytes round-trip",
+    );
+    println("env_raw_ok");
+
+    // ── env：文本严格族视非 UTF-8 为不可用 ────────────────────────────────
+    assert(env("KORAL_RAW_PIN").is_none(), "strict env hides non-UTF-8");
+    println("env_strict_none_ok");
+
+    // ── env_all_raw：NAME=VALUE 原形条目字节保真 ──────────────────────────
+    let name_len = name_cs.count();
+    let np = name_cs.borrow_ptr();
+    let mutable found = false;
+    for entry in env_all_raw() then {
+        let p = entry.borrow_ptr();
+        let mutable i = 0;
+        while i < entry.count() and p[i] != UInt8(61) then {
+            i += 1;
+        };
+        if i == name_len then {
+            let mutable same = true;
+            let mutable j = 0;
+            while j < name_len then {
+                if p[j] != np[j] then {
+                    same = false;
+                };
+                j += 1;
+            };
+            if same then {
+                assert(entry.count() == name_len + 1 + 3, "raw entry length");
+                assert(
+                    p[name_len + 1] == UInt8(255)
+                        and p[name_len + 2] == UInt8(254)
+                        and p[name_len + 3] == UInt8(65),
+                    "raw entry value bytes",
+                );
+                found = true;
+            };
+        };
+    };
+    assert(found, "env_all_raw keeps the non-UTF-8 entry byte-faithful");
+    println("env_all_raw_ok");
+
+    // 清场。
+    let _ = __koral_unsetenv(name_cs.borrow_ptr());
+    dealloc_memory(val_ptr);
+};

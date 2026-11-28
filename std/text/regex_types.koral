@@ -2,30 +2,8 @@ using "std" { ... };
 // ============================================================================
 // std.text - Type Definitions
 // ============================================================================
-
-/// Bit flags that control how a regex is compiled and matched.
-public type sendable RegexFlag(value: UInt);
-
-/// Flag constructors and bitwise combinators for `RegexFlag`.
-given RegexFlag {
-
-    /// The empty flag set: default, case-sensitive, whole-text matching.
-    public none(): RegexFlag = RegexFlag(0);
-
-    /// Match letters case-insensitively.
-    public ignore_case(): RegexFlag = RegexFlag(1);
-
-    /// Make `^` and `$` match line starts and ends, not just the text's ends.
-    public multiline(): RegexFlag = RegexFlag(2);
-
-    /// Combine two flag sets with bitwise OR.
-    public combine(self, other: RegexFlag): RegexFlag = RegexFlag(
-        self.value | other.value,
-    );
-
-    /// Return `true` if every flag in `flag` is set on this value.
-    public has(self, flag: RegexFlag): Bool = (self.value & flag.value) == flag.value;
-};
+// 编译期旗标已随「只留行内写法」定案删除（`(?i)` / `(?m)` / `(?i:...)`），
+// 不设 RegexFlag 类型。
 
 /// A compiled regular expression, ready to match text.
 public type Regex(prog: ReProgram, pat: String, groups: Int);
@@ -40,18 +18,27 @@ given Regex {
     /// match is not a group).
     public group_count(self): Int = self.groups;
 
-    /// Return the name of capture group `index` (`""` for an unnamed group),
-    /// or `None` when the index is out of range.
+    /// Return the name of capture group `index`, or `None` when the index is
+    /// out of range or the group is unnamed.
     public group_name(self, index: Int): Option[String] = {
         if index < 1 or index > self.groups then {
             return Option[String].None();
         };
-        return self.prog.names.get(index - 1);
+        return when self.prog.names.get(index - 1) in {
+            .Some(n) then {
+                if n.is_empty() then Option[String].None()
+                else Option[String].Some(n)
+            },
+            .None() then Option[String].None(),
+        };
     };
 
     /// Return the index of the capture group named `name`, or `None` when
     /// the pattern declares no such group.
     public named_group_index(self, name: String): Option[Int] = {
+        if name.is_empty() then {
+            return Option[Int].None();
+        };
         for i in 0..<self.prog.names.count() then {
             if self.prog.names.get(i) == Option[String].Some(name) then {
                 return Option[Int].Some(i + 1);
@@ -95,7 +82,7 @@ public type sendable Captures(
     slots: [34]Int32, // 内联捕获槽 [s0, e0, s1, e1, ...]（-1 = 未匹配）
     spill: Option[ReSlotRow], // 超出内联容量时的槽行受管块
     groups: Int, // 模式中的捕获组数
-    names: FrozenList[String], // 捕获组名表（下标 i = 组 i+1；"" = 未命名）
+    names: FrozenList[String], // 捕获组名表（下标 i = 组 i+1；"" = 未命名，查名跳过）
 );
 
 /// Accessors for the overall match and its capturing groups.
@@ -156,7 +143,10 @@ given Captures {
 
     /// Return the capture group named `name` as a `Match`, or `None` when
     /// the pattern declares no such group or it did not take part.
-    public group_by_name(self, name: String): Option[Match] = {
+    public named_group(self, name: String): Option[Match] = {
+        if name.is_empty() then {
+            return Option[Match].None();
+        };
         for i in 0..<self.names.count() then {
             if self.names.get(i) == Option[String].Some(name) then {
                 return self.group(i + 1);
@@ -169,11 +159,11 @@ given Captures {
 /// Iterator over the successive non-overlapping matches of a regex.
 /// `prev_end` 记住上一匹配的结束位置：紧接其后的零宽匹配跳过（Go 的
 /// `FindAll` 规则），`$` 在 "abc" 上只出一个匹配。
-public type mutable MatchIterator(regex: Regex, text: String, mutable offset: Int, mutable prev_end: Int);
+public type mutable RegexFindIterator(regex: Regex, text: String, mutable offset: Int, mutable prev_end: Int);
 
 /// Iterator over successive matches, each with its capture groups.
-/// `prev_end` 的规则同 `MatchIterator`。
-public type mutable CapturesIterator(regex: Regex, text: String, mutable offset: Int, mutable prev_end: Int);
+/// `prev_end` 的规则同 `RegexFindIterator`。
+public type mutable RegexCapturesIterator(regex: Regex, text: String, mutable offset: Int, mutable prev_end: Int);
 
 /// Iterator over the text pieces between a regex's matches.
 public type mutable RegexSplitIterator(
@@ -189,27 +179,27 @@ public type mutable RegexSplitIterator(
 // `lazy()` pipelines all work off the same view.
 
 /// Iterable view over the successive non-overlapping matches of a regex.
-public type MatchView(regex: Regex, text: String);
+public type RegexFindView(regex: Regex, text: String);
 
 /// Iterable view over successive matches, each with its capture groups.
-public type CapturesView(regex: Regex, text: String);
+public type RegexCapturesView(regex: Regex, text: String);
 
 /// Iterable view over the text pieces between a regex's matches.
 public type RegexSplitView(regex: Regex, text: String);
 
-/// `Iterable` for `MatchView`: a fresh matches cursor per call.
-given MatchView: Iterable[Match, MatchIterator] {
+/// `Iterable` for `RegexFindView`: a fresh matches cursor per call.
+given RegexFindView: Iterable[Match, RegexFindIterator] {
 
     /// Build a fresh cursor over the matches; the view itself is untouched.
-    public iterator(self): MatchIterator = MatchIterator(self.regex, self.text, 0, -1);
+    public iterator(self): RegexFindIterator = RegexFindIterator(self.regex, self.text, 0, -1);
 };
 
-/// `Iterable` for `CapturesView`: a fresh captures cursor per call.
-given CapturesView: Iterable[Captures, CapturesIterator] {
+/// `Iterable` for `RegexCapturesView`: a fresh captures cursor per call.
+given RegexCapturesView: Iterable[Captures, RegexCapturesIterator] {
 
     /// Build a fresh cursor over the capture sets; the view itself is untouched.
-    public iterator(self): CapturesIterator =
-        CapturesIterator(self.regex, self.text, 0, -1);
+    public iterator(self): RegexCapturesIterator =
+        RegexCapturesIterator(self.regex, self.text, 0, -1);
 };
 
 /// `Iterable` for `RegexSplitView`: a fresh pieces cursor per call.
@@ -231,16 +221,16 @@ let regex_next_offset(text: String, i: Int): Int = {
 };
 
 // ============================================================================
-// MatchIterator — Iterator implementation
+// RegexFindIterator — Iterator implementation
 // ============================================================================
 
-/// Iterator conformance for `MatchIterator`, yielding matches one after another.
-given MatchIterator: Iterator[Match] {
+/// Iterator conformance for `RegexFindIterator`, yielding matches one after another.
+given RegexFindIterator: Iterator[Match] {
 
     /// Return the next match, resuming after the previous one, or `None` when exhausted.
     public next(self): Option[Match] = {
         while self.offset <= self.text.count() then {
-            when Regex.find_at(self.regex, self.offset, self.text) in {
+            when self.regex.find(self.text, from = self.offset) in {
                 .Some(m) then {
                     if m.start() == m.end() and m.start() == self.prev_end then {
                         // 紧接上一匹配结束位置的零宽匹配跳过（Go 规则）：
@@ -267,16 +257,16 @@ given MatchIterator: Iterator[Match] {
 };
 
 // ============================================================================
-// CapturesIterator — Iterator implementation
+// RegexCapturesIterator — Iterator implementation
 // ============================================================================
 
-/// Iterator conformance for `CapturesIterator`, yielding one capture set at a time.
-given CapturesIterator: Iterator[Captures] {
+/// Iterator conformance for `RegexCapturesIterator`, yielding one capture set at a time.
+given RegexCapturesIterator: Iterator[Captures] {
 
     /// Return the next match's captures, resuming after the previous one, or `None`.
     public next(self): Option[Captures] = {
         while self.offset <= self.text.count() then {
-            when Regex.captures_at(self.regex, self.offset, self.text) in {
+            when self.regex.captures(self.text, from = self.offset) in {
                 .Some(c) then {
                     if c.start() == c.end() and c.start() == self.prev_end then {
                         // 紧接上一匹配结束位置的零宽匹配跳过（Go 规则）。
@@ -320,7 +310,7 @@ given RegexSplitIterator: Iterator[String] {
             return Option[String].None();
         };
 
-        when Regex.find_at(self.regex, self.offset, self.text) in {
+        when self.regex.find(self.text, from = self.offset) in {
             .Some(m) then {
                 let part = self.text.substring(self.offset..<m.start());
 

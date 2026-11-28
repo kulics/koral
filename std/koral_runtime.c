@@ -2911,465 +2911,67 @@ int32_t __koral_is_alive(uint32_t pid) {
 #endif
 }
 
-// --- __koral_process_working_set_bytes ---
-// Returns the working set size (resident memory) of a process in bytes.
-// Returns -1 on error (process not found, access denied, etc).
+// (kill_process_tree / working_set_bytes family removed: proc API 2026-11-28)
 
-int64_t __koral_process_working_set_bytes(uint32_t pid) {
+// --- __koral_waitpid_wnowait ---
+// Block until the child EXITS without consuming the wait record (POSIX
+// WNOWAIT; on Windows a process object never needs "reaping" so this is a
+// plain wait). The later locked reap calls __koral_waitpid_full and consumes.
+int32_t __koral_waitpid_wnowait(uint32_t pid) {
 #if defined(_WIN32) || defined(_WIN64)
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ, FALSE, (DWORD)pid);
+    HANDLE h = koral_process_handle_peek((DWORD)pid);
+    int using_registry_handle = (h != NULL);
+    if (h == NULL) {
+        h = OpenProcess(SYNCHRONIZE, FALSE, (DWORD)pid);
+    }
     if (h == NULL) return -1;
-    PROCESS_MEMORY_COUNTERS pmc;
-    BOOL ok = GetProcessMemoryInfo(h, &pmc, sizeof(pmc));
-    CloseHandle(h);
-    if (!ok) return -1;
-    return (int64_t)pmc.WorkingSetSize;
-#elif defined(__APPLE__)
-    struct proc_taskinfo taskinfo;
-    int size = proc_pidinfo((int)pid, PROC_PIDTASKINFO, 0, &taskinfo, (int)sizeof(taskinfo));
-    if (size != (int)sizeof(taskinfo)) return -1;
-    return (int64_t)taskinfo.pti_resident_size;
+    DWORD wait_result = WaitForSingleObject(h, INFINITE);
+    if (!using_registry_handle) CloseHandle(h);
+    return (wait_result == WAIT_OBJECT_0) ? 0 : -1;
 #else
-    char path[64];
-    snprintf(path, sizeof(path), "/proc/%u/status", pid);
-    FILE* f = fopen(path, "r");
-    if (!f) return -1;
-    char line[256];
-    int64_t rss_kb = -1;
-    while (fgets(line, sizeof(line), f)) {
-        if (strncmp(line, "VmRSS:", 6) == 0) {
-            rss_kb = strtoll(line + 6, NULL, 10);
-            break;
+    // waitid(WNOWAIT) 而非 waitpid(WNOWAIT)：POSIX 把 WNOWAIT 留给 waitid，
+    // macOS 的 waitpid 直接 EINVAL。
+    siginfo_t info;
+    memset(&info, 0, sizeof(info));
+    while (waitid(P_PID, (pid_t)pid, &info, WEXITED | WNOWAIT) < 0) {
+        if (errno == ECHILD) {
+            // Already reaped elsewhere: treat as exited (the locked reap
+            // will read the recorded status).
+            return 0;
         }
+        if (errno != EINTR) return -1;
     }
-    fclose(f);
-    return rss_kb > 0 ? rss_kb * 1024 : -1;
-#endif
-}
-
-#if defined(__APPLE__)
-// On macOS the test runner needs the memory footprint of the spawned process
-// (typically the compiler or a test binary). Child helper processes (clang,
-// ld) contribute relatively little compared to the root, and scanning the
-// full process table on every 50 ms poll tick was both slow and error-prone
-// (the old process-group scan could attribute unrelated processes to the
-// measured tree). Reporting the root process RSS alone is accurate enough
-// and avoids those failure modes.
-static int64_t __koral_process_tree_working_set_bytes_macos(uint32_t root_pid) {
-    return __koral_process_working_set_bytes(root_pid);
-}
-
-// Parent-child tree collection on macOS via sysctl(KERN_PROC_ALL). This runs
-// only on kill/inspect (rare), never on the 50 ms memory poll above. The
-// start time guards against PID reuse, as on Linux and Windows.
-static int __koral_collect_tree_pids(uint32_t root_pid, uint32_t* out_pids, int cap) {
-    int mib[4] = { CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0 };
-    size_t len = 0;
-    if (sysctl(mib, 4, NULL, &len, NULL, 0) != 0) {
-        return -1;
-    }
-    len += len / 8 + sizeof(struct kinfo_proc) * 16;
-    struct kinfo_proc* kprocs = (struct kinfo_proc*)malloc(len);
-    if (!kprocs) return -1;
-    if (sysctl(mib, 4, kprocs, &len, NULL, 0) != 0) {
-        free(kprocs);
-        return -1;
-    }
-    int count = (int)(len / sizeof(struct kinfo_proc));
-
-    long root_ppid = 0;
-    unsigned long long root_start = 0;
-    int root_found = 0;
-    for (int i = 0; i < count; i++) {
-        if ((uint32_t)kprocs[i].kp_proc.p_pid == root_pid) {
-            root_ppid = kprocs[i].kp_eproc.e_ppid;
-            root_start = (unsigned long long)kprocs[i].kp_proc.p_starttime.tv_sec * 1000000ULL
-                + (unsigned long long)kprocs[i].kp_proc.p_starttime.tv_usec;
-            root_found = 1;
-            break;
-        }
-    }
-    if (!root_found) {
-        free(kprocs);
-        return -1;
-    }
-
-    uint32_t* queue = (uint32_t*)malloc(sizeof(uint32_t) * (size_t)cap);
-    unsigned long long* queue_start = (unsigned long long*)malloc(sizeof(unsigned long long) * (size_t)cap);
-    int* order = (int*)malloc(sizeof(int) * (size_t)cap);
-    unsigned char* claimed = (unsigned char*)calloc((size_t)count, 1);
-    if (!queue || !queue_start || !order || !claimed) {
-        free(kprocs); free(queue); free(queue_start); free(order); free(claimed);
-        out_pids[0] = root_pid;
-        return 1;
-    }
-    int qhead = 0, qtail = 0, n = 0;
-    queue[qtail] = root_pid;
-    queue_start[qtail] = root_start;
-    qtail++;
-    order[n++] = -1;
-    while (qhead < qtail) {
-        uint32_t current = queue[qhead];
-        unsigned long long current_start = queue_start[qhead];
-        qhead++;
-        for (int i = 0; i < count; i++) {
-            if (claimed[i]) continue;
-            if ((uint32_t)kprocs[i].kp_eproc.e_ppid != current) continue;
-            unsigned long long start = (unsigned long long)kprocs[i].kp_proc.p_starttime.tv_sec * 1000000ULL
-                + (unsigned long long)kprocs[i].kp_proc.p_starttime.tv_usec;
-            if (start < current_start) continue;  // PID reuse
-            claimed[i] = 1;
-            if (n < cap) order[n++] = i;
-            if (qtail < cap) {
-                queue[qtail] = (uint32_t)kprocs[i].kp_proc.p_pid;
-                queue_start[qtail] = start;
-                qtail++;
-            }
-        }
-    }
-    int out = 0;
-    for (int i = n - 1; i >= 0; i--) {
-        out_pids[out++] = (order[i] == -1) ? root_pid : (uint32_t)kprocs[order[i]].kp_proc.p_pid;
-    }
-    free(kprocs);
-    free(queue);
-    free(queue_start);
-    free(order);
-    free(claimed);
-    return out;
-}
-#endif
-
-#if defined(__linux__)
-// Parent-child tree collection on Linux: /proc/<pid>/stat yields ppid and
-// starttime (field 22). The start time guards against PID reuse -- a child
-// must have started no earlier than its parent (the same guard the Windows
-// walk makes with creation times). This replaces the old process-group scan,
-// which attributed unrelated same-group processes to the measured tree.
-typedef struct {
-    uint32_t pid;
-    long ppid;
-    unsigned long long starttime;
-} KoralLinuxProcEntry;
-
-static int __koral_linux_proc_stat(uint32_t pid, long* out_ppid, unsigned long long* out_starttime) {
-    char path[64];
-    snprintf(path, sizeof(path), "/proc/%u/stat", pid);
-    FILE* f = fopen(path, "r");
-    if (!f) return -1;
-
-    char line[4096];
-    if (!fgets(line, sizeof(line), f)) {
-        fclose(f);
-        return -1;
-    }
-    fclose(f);
-
-    char* closing_paren = strrchr(line, ')');
-    if (!closing_paren) return -1;
-
-    // After comm: state ppid pgrp session tty_nr tpgid flags minflt cminflt
-    // majflt cmajflt utime stime cutime cstime priority nice num_threads
-    // itrealvalue starttime (field 22).
-    long ppid = 0;
-    unsigned long long starttime = 0;
-    if (sscanf(closing_paren + 1,
-               " %*c %ld %*ld %*ld %*ld %*ld %*lu %*lu %*lu %*lu %*lu"
-               " %*lu %*lu %*ld %*ld %*ld %*ld %*ld %*ld %llu",
-               &ppid, &starttime) != 2) {
-        return -1;
-    }
-
-    *out_ppid = ppid;
-    *out_starttime = starttime;
     return 0;
-}
-
-// Collect root + descendants, deepest first. Returns the count, or -1 when
-// the root itself cannot be inspected.
-static int __koral_collect_tree_pids(uint32_t root_pid, uint32_t* out_pids, int cap) {
-    long root_ppid = 0;
-    unsigned long long root_start = 0;
-    if (__koral_linux_proc_stat(root_pid, &root_ppid, &root_start) != 0) {
-        return -1;
-    }
-
-    KoralLinuxProcEntry* procs = (KoralLinuxProcEntry*)malloc(sizeof(KoralLinuxProcEntry) * (size_t)cap);
-    if (!procs) return -1;
-    int count = 0;
-
-    DIR* dir = opendir("/proc");
-    if (!dir) {
-        free(procs);
-        out_pids[0] = root_pid;
-        return 1;
-    }
-    struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL && count < cap) {
-        if (!isdigit((unsigned char)entry->d_name[0])) continue;
-        uint32_t pid = (uint32_t)strtoul(entry->d_name, NULL, 10);
-        if (pid == 0) continue;
-        long ppid = 0;
-        unsigned long long starttime = 0;
-        if (__koral_linux_proc_stat(pid, &ppid, &starttime) != 0) continue;
-        procs[count].pid = pid;
-        procs[count].ppid = ppid;
-        procs[count].starttime = starttime;
-        count++;
-    }
-    closedir(dir);
-
-    // BFS from the root, then reverse for deepest-first output.
-    uint32_t* queue = (uint32_t*)malloc(sizeof(uint32_t) * (size_t)cap);
-    unsigned long long* queue_start = (unsigned long long*)malloc(sizeof(unsigned long long) * (size_t)cap);
-    int* order = (int*)malloc(sizeof(int) * (size_t)cap);
-    unsigned char* claimed = (unsigned char*)calloc((size_t)(count > 0 ? count : 1), 1);
-    if (!queue || !queue_start || !order || !claimed) {
-        free(procs); free(queue); free(queue_start); free(order); free(claimed);
-        out_pids[0] = root_pid;
-        return 1;
-    }
-    int qhead = 0, qtail = 0, n = 0;
-    queue[qtail] = root_pid;
-    queue_start[qtail] = root_start;
-    qtail++;
-    order[n++] = -1;  // the root itself, emitted first and reversed last
-    while (qhead < qtail) {
-        uint32_t current = queue[qhead];
-        unsigned long long current_start = queue_start[qhead];
-        qhead++;
-        for (int i = 0; i < count; i++) {
-            if (claimed[i]) continue;
-            if ((uint32_t)procs[i].ppid != current) continue;
-            if (procs[i].starttime < current_start) continue;  // PID reuse
-            claimed[i] = 1;
-            if (n < cap) order[n++] = i;
-            if (qtail < cap) {
-                queue[qtail] = procs[i].pid;
-                queue_start[qtail] = procs[i].starttime;
-                qtail++;
-            }
-        }
-    }
-
-    int out = 0;
-    for (int i = n - 1; i >= 0; i--) {
-        uint32_t pid = (order[i] == -1) ? root_pid : procs[order[i]].pid;
-        if (pid != 0) out_pids[out++] = pid;
-    }
-    free(procs);
-    free(queue);
-    free(queue_start);
-    free(order);
-    free(claimed);
-    return out;
-}
-
-static int64_t __koral_process_tree_working_set_bytes_linux(uint32_t root_pid) {
-    uint32_t* pids = (uint32_t*)malloc(sizeof(uint32_t) * 4096);
-    if (!pids) return __koral_process_working_set_bytes(root_pid);
-    int n = __koral_collect_tree_pids(root_pid, pids, 4096);
-    if (n <= 0) {
-        free(pids);
-        return __koral_process_working_set_bytes(root_pid);
-    }
-    int64_t total = 0;
-    for (int i = 0; i < n; i++) {
-        int64_t rss = __koral_process_working_set_bytes(pids[i]);
-        if (rss > 0) total += rss;
-    }
-    free(pids);
-    return total;
-}
 #endif
-
-
-// --- __koral_process_tree_working_set_bytes ---
-// Returns the total working set size of a process and all its descendants.
-// This is needed because the test runner monitors the compiler process,
-// but the compiler spawns child processes (like clang) that may consume
-// significant memory independently.
-#if defined(_WIN32) || defined(_WIN64)
-static uint64_t __koral_filetime_ticks(FILETIME ft) {
-    return ((uint64_t)ft.dwHighDateTime << 32) | (uint64_t)ft.dwLowDateTime;
 }
 
-static int __koral_process_creation_ticks(DWORD pid, uint64_t* out_ticks) {
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
-    if (h == NULL) return -1;
+// PATH resolver lives with __koral_spawn below; forward-declared for find_program.
+static char* __koral_resolve_program(const char* program, char* const* envp, const char* cwd);
 
-    FILETIME creation_time, exit_time, kernel_time, user_time;
-    BOOL ok = GetProcessTimes(h, &creation_time, &exit_time, &kernel_time, &user_time);
-    CloseHandle(h);
-    if (!ok) return -1;
-
-    *out_ticks = __koral_filetime_ticks(creation_time);
+// --- __koral_find_program ---
+// PATH search for a bare program name (or a direct path check when the name
+// contains a separator). Writes the resolved path as UTF-8 into out_buf and
+// returns 0; returns -1 with the buffer untouched when not found.
+int32_t __koral_find_program(const char* name, char* out_buf, uint64_t out_len) {
+    if (name == NULL || out_buf == NULL || out_len == 0) return -1;
+#if defined(_WIN32) || defined(_WIN64)
+    char full[MAX_PATH * 4];
+    DWORD n = SearchPathA(NULL, name, ".exe", (DWORD)sizeof(full), full, NULL);
+    if (n == 0 || n >= (DWORD)sizeof(full)) return -1;
+    if ((uint64_t)n + 1 > out_len) return -1;
+    memcpy(out_buf, full, (size_t)n + 1);
     return 0;
-}
-#endif
-
-int64_t __koral_process_tree_working_set_bytes(uint32_t root_pid) {
-#if defined(_WIN32) || defined(_WIN64)
-    // First, get memory for the root process
-    int64_t total = __koral_process_working_set_bytes(root_pid);
-    if (total < 0) total = 0;
-
-    uint64_t root_creation_ticks = 0;
-    if (__koral_process_creation_ticks((DWORD)root_pid, &root_creation_ticks) != 0) {
-        return total;
-    }
-
-    // Build a map of parent PID -> child PIDs using Toolhelp32
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) return total;
-
-    // Collect all processes
-    typedef struct { DWORD pid; DWORD ppid; } ProcEntry;
-    ProcEntry procs[4096];
-    int count = 0;
-
-    PROCESSENTRY32 pe;
-    pe.dwSize = sizeof(pe);
-    if (Process32First(snapshot, &pe)) {
-        do {
-            if (count < 4096) {
-                procs[count].pid = pe.th32ProcessID;
-                procs[count].ppid = pe.th32ParentProcessID;
-                count++;
-            }
-        } while (Process32Next(snapshot, &pe));
-    }
-
-    CloseHandle(snapshot);
-
-    typedef struct { uint32_t pid; uint64_t creation_ticks; } ProcQueueEntry;
-    ProcQueueEntry queue[4096];
-    int qhead = 0, qtail = 0;
-    queue[qtail].pid = root_pid;
-    queue[qtail].creation_ticks = root_creation_ticks;
-    qtail++;
-
-    while (qhead < qtail) {
-        uint32_t current = queue[qhead].pid;
-        uint64_t current_creation_ticks = queue[qhead].creation_ticks;
-        qhead++;
-        for (int i = 0; i < count; i++) {
-            if (procs[i].ppid == current) {
-                uint64_t child_creation_ticks = 0;
-                if (__koral_process_creation_ticks(procs[i].pid, &child_creation_ticks) != 0) {
-                    continue;
-                }
-                if (child_creation_ticks < current_creation_ticks) {
-                    continue;
-                }
-                int64_t child_mem = __koral_process_working_set_bytes(procs[i].pid);
-                if (child_mem > 0) total += child_mem;
-                if (qtail < 4096) {
-                    queue[qtail].pid = procs[i].pid;
-                    queue[qtail].creation_ticks = child_creation_ticks;
-                    qtail++;
-                }
-            }
-        }
-    }
-
-    return total;
-#elif defined(__APPLE__)
-    // Walk the process tree rooted at root_pid so we capture the compiler
-    // and any helper children (clang, ld, …) without scanning unrelated
-    // processes that merely share a process-group id.
-    return __koral_process_tree_working_set_bytes_macos(root_pid);
-#elif defined(__linux__)
-    return __koral_process_tree_working_set_bytes_linux(root_pid);
 #else
-    // On other POSIX targets, fall back to the root process only.
-    return __koral_process_working_set_bytes(root_pid);
-#endif
-}
-
-int32_t __koral_kill_process_tree(uint32_t root_pid, int32_t signal) {
-#if defined(_WIN32) || defined(_WIN64)
-    // Windows: SIGTERM(15) / SIGKILL(9) mean TerminateProcess. Walk the
-    // parent-child tree (same Toolhelp snapshot the memory accounting uses)
-    // and terminate every node, children first.
-    if (signal != 9 && signal != 15) {
-        errno = EINVAL;
+    char* resolved = __koral_resolve_program(name, NULL, NULL);
+    if (resolved == NULL) return -1;
+    size_t n = strlen(resolved);
+    if (n + 1 > out_len) {
+        free(resolved);
         return -1;
     }
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snapshot == INVALID_HANDLE_VALUE) {
-        return __koral_send_signal(root_pid, signal);
-    }
-    typedef struct { DWORD pid; DWORD ppid; } ProcEntry;
-    ProcEntry procs[4096];
-    int count = 0;
-    PROCESSENTRY32 pe;
-    pe.dwSize = sizeof(pe);
-    if (Process32First(snapshot, &pe)) {
-        do {
-            if (count < 4096) {
-                procs[count].pid = pe.th32ProcessID;
-                procs[count].ppid = pe.th32ParentProcessID;
-                count++;
-            }
-        } while (Process32Next(snapshot, &pe));
-    }
-    CloseHandle(snapshot);
-
-    DWORD tree[4096];
-    int n = 0;
-    tree[n++] = (DWORD)root_pid;
-    for (int i = 0; i < n && i < 4096; i++) {
-        for (int j = 0; j < count; j++) {
-            if (procs[j].pid != 0 && procs[j].ppid == tree[i]) {
-                if (n < 4096) tree[n++] = procs[j].pid;
-                procs[j].pid = 0;
-            }
-        }
-    }
-    int rc = 0;
-    for (int i = n - 1; i >= 0; i--) {
-        if (tree[i] == 0) continue;
-        if (__koral_send_signal(tree[i], signal) != 0 && i == 0) {
-            rc = -1;
-        }
-    }
-    return rc;
-#else
-    // POSIX: walk the parent-child tree and signal every node, children
-    // first. Group-based delivery (kill(-pgid)) is gone: spawn keeps the
-    // child in the parent's process group (Go/Rust default), so a group
-    // signal would sweep in unrelated members of that group.
-    if (root_pid == 0) {
-        errno = EINVAL;
-        return -1;
-    }
-#if defined(__linux__) || defined(__APPLE__)
-    uint32_t* pids = (uint32_t*)malloc(sizeof(uint32_t) * 4096);
-    if (!pids) {
-        return kill((pid_t)root_pid, signal) == 0 ? 0 : -1;
-    }
-    int n = __koral_collect_tree_pids(root_pid, pids, 4096);
-    if (n <= 0) {
-        free(pids);
-        // The root's own stat is unreadable (already gone, or no /proc):
-        // fall back to signalling just the root.
-        return kill((pid_t)root_pid, signal) == 0 ? 0 : -1;
-    }
-    int rc = 0;
-    for (int i = 0; i < n; i++) {
-        // pid 0 must never reach kill(): it signals the caller's whole
-        // process group.
-        if (pids[i] == 0) continue;
-        if (kill((pid_t)pids[i], signal) != 0 && errno != ESRCH && pids[i] == root_pid) {
-            rc = -1;
-        }
-    }
-    free(pids);
-    return rc;
-#else
-    return kill((pid_t)root_pid, signal) == 0 ? 0 : -1;
-#endif
+    memcpy(out_buf, resolved, n + 1);
+    free(resolved);
+    return 0;
 #endif
 }
 
@@ -3823,6 +3425,7 @@ int32_t __koral_spawn(
     if (stderr_mode == 1) si.hStdError = stderr_write;
     else if (stderr_mode == 2) si.hStdError = INVALID_HANDLE_VALUE;
     else if (stderr_mode == 3) si.hStdError = stderr_file;
+    else if (stderr_mode == 4) si.hStdError = si.hStdOutput;
     else si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 
     memset(&pi, 0, sizeof(pi));
@@ -3876,6 +3479,7 @@ int32_t __koral_spawn(
     );
     // Read the thread's last-error slot before the frees below can spend it.
     DWORD spawn_err = ok ? 0 : GetLastError();
+    int32_t win_spawn_code = -1;
 
     free(wcmdline);
     free(wprogram);
@@ -3885,6 +3489,9 @@ int32_t __koral_spawn(
 
     if (!ok) {
         __koral_win_record_error(spawn_err);
+        win_spawn_code = (spawn_err == ERROR_FILE_NOT_FOUND || spawn_err == ERROR_PATH_NOT_FOUND)
+            ? -2
+            : (spawn_err == ERROR_ACCESS_DENIED) ? -3 : -1;
         goto fail;
     }
 
@@ -3920,7 +3527,7 @@ fail:
     if (stdin_file != INVALID_HANDLE_VALUE) CloseHandle(stdin_file);
     if (stdout_file != INVALID_HANDLE_VALUE) CloseHandle(stdout_file);
     if (stderr_file != INVALID_HANDLE_VALUE) CloseHandle(stderr_file);
-    return -1;
+    return win_spawn_code;
 }
 
 #else  // POSIX
@@ -4178,6 +3785,9 @@ int32_t __koral_spawn(
             } else if (stderr_mode == 3) {
                 dup2(stderr_file, STDERR_FILENO);
                 close(stderr_file);
+            } else if (stderr_mode == 4) {
+                // ToStdout: 与 stdout 同管道合流。
+                dup2(STDOUT_FILENO, STDERR_FILENO);
             }
 
             if (null_fd >= 0) close(null_fd);
@@ -4251,6 +3861,9 @@ int32_t __koral_spawn(
             posix_spawn_file_actions_addclose(&actions, stderr_pipe[1]);
         } else if (stderr_mode == 2) {
             posix_spawn_file_actions_adddup2(&actions, null_fd, STDERR_FILENO);
+        } else if (stderr_mode == 4) {
+            // ToStdout: 与 stdout 同管道合流。
+            posix_spawn_file_actions_adddup2(&actions, STDOUT_FILENO, STDERR_FILENO);
         } else if (stderr_mode == 3) {
             posix_spawn_file_actions_adddup2(&actions, stderr_file, STDERR_FILENO);
             posix_spawn_file_actions_addclose(&actions, stderr_file);
@@ -4305,6 +3918,10 @@ fail:
     if (stdout_file >= 0) close(stdout_file);
     if (stderr_file >= 0) close(stderr_file);
     if (null_fd >= 0) close(null_fd);
+    // Spawn error classification (Command.spawn 的 SpawnError 三分类）：
+    // -2 = program not found, -3 = permission denied, -1 = other.
+    if (errno == ENOENT) return -2;
+    if (errno == EACCES || errno == EPERM) return -3;
     return -1;
 }
 
@@ -4372,9 +3989,14 @@ static DWORD WINAPI __koral_read_pipe_thread_win(LPVOID arg) {
 }
 #endif
 
+// timeout_ms < 0 = 无限等待到 EOF；>= 0 = 宽限期限（到点带着已读数据返回，
+// *out_timed_out = 1）——Command.set_timeout 的「读管道给宽限期，到点关闭
+// 读端」。out_timed_out 可为 NULL。
 int32_t __koral_read_all_pipes(int32_t stdout_fd, int32_t stderr_fd,
+                              int64_t timeout_ms,
                               uint8_t** out_stdout, uint64_t* out_stdout_len,
-                              uint8_t** out_stderr, uint64_t* out_stderr_len) {
+                              uint8_t** out_stderr, uint64_t* out_stderr_len,
+                              int32_t* out_timed_out) {
     DynBuf stdout_buf, stderr_buf;
     dynbuf_init(&stdout_buf);
     dynbuf_init(&stderr_buf);
@@ -4383,108 +4005,114 @@ int32_t __koral_read_all_pipes(int32_t stdout_fd, int32_t stderr_fd,
     *out_stdout_len = 0;
     *out_stderr = NULL;
     *out_stderr_len = 0;
+    if (out_timed_out != NULL) *out_timed_out = 0;
 
     uint8_t tmp[4096];
 
     // If both fds are invalid, nothing to do
     if (stdout_fd < 0 && stderr_fd < 0) return 0;
 
-    // If only one fd is valid, just read it sequentially
-    if (stdout_fd < 0) {
-        while (1) {
-            int64_t n = __koral_pipe_read(stderr_fd, tmp, sizeof(tmp));
-            if (n < 0) goto fail;
-            if (n == 0) break;
-            if (dynbuf_append(&stderr_buf, tmp, (uint64_t)n) < 0) goto fail;
-        }
-        goto done;
-    }
-    if (stderr_fd < 0) {
-        while (1) {
-            int64_t n = __koral_pipe_read(stdout_fd, tmp, sizeof(tmp));
-            if (n < 0) goto fail;
-            if (n == 0) break;
-            if (dynbuf_append(&stdout_buf, tmp, (uint64_t)n) < 0) goto fail;
-        }
-        goto done;
-    }
-
-    // Both fds valid: use poll (POSIX) or sequential read (Windows)
+    // One or two valid fds, poll-bounded (POSIX) / reader-thread-bounded
+    // (Windows). timeout_ms < 0 = until EOF; >= 0 = until the grace deadline
+    // (returns with what was read, *out_timed_out = 1).
 #if defined(_WIN32) || defined(_WIN64)
     {
-        KoralPipeReadThreadCtx stdout_ctx;
-        KoralPipeReadThreadCtx stderr_ctx;
-        stdout_ctx.fd = stdout_fd;
-        stdout_ctx.buf = &stdout_buf;
-        stdout_ctx.error = 0;
-        stderr_ctx.fd = stderr_fd;
-        stderr_ctx.buf = &stderr_buf;
-        stderr_ctx.error = 0;
-
-        HANDLE stdout_thread = CreateThread(NULL, 0, __koral_read_pipe_thread_win, &stdout_ctx, 0, NULL);
-        if (stdout_thread == NULL) goto fail;
-
-        HANDLE stderr_thread = CreateThread(NULL, 0, __koral_read_pipe_thread_win, &stderr_ctx, 0, NULL);
-        if (stderr_thread == NULL) {
-            WaitForSingleObject(stdout_thread, INFINITE);
-            CloseHandle(stdout_thread);
-            goto fail;
+        int fds_arr[2] = { stdout_fd, stderr_fd };
+        DynBuf* bufs_arr[2] = { &stdout_buf, &stderr_buf };
+        KoralPipeReadThreadCtx ctxs[2];
+        HANDLE threads[2];
+        int nthreads = 0;
+        for (int i = 0; i < 2; i++) {
+            if (fds_arr[i] < 0) continue;
+            ctxs[nthreads].fd = fds_arr[i];
+            ctxs[nthreads].buf = bufs_arr[i];
+            ctxs[nthreads].error = 0;
+            threads[nthreads] = CreateThread(NULL, 0, __koral_read_pipe_thread_win, &ctxs[nthreads], 0, NULL);
+            if (threads[nthreads] == NULL) {
+                for (int j = 0; j < nthreads; j++) {
+                    WaitForSingleObject(threads[j], INFINITE);
+                    CloseHandle(threads[j]);
+                }
+                goto fail;
+            }
+            nthreads++;
         }
-
-        if (WaitForSingleObject(stdout_thread, INFINITE) != WAIT_OBJECT_0) {
-            CloseHandle(stdout_thread);
-            CloseHandle(stderr_thread);
-            goto fail;
+        uint64_t start_ticks = GetTickCount64();
+        for (int i = 0; i < nthreads; i++) {
+            DWORD wait_ms = INFINITE;
+            if (timeout_ms >= 0) {
+                uint64_t elapsed = GetTickCount64() - start_ticks;
+                if ((uint64_t)timeout_ms <= elapsed) {
+                    wait_ms = 0;
+                } else {
+                    wait_ms = (DWORD)((uint64_t)timeout_ms - elapsed);
+                }
+            }
+            DWORD wr = WaitForSingleObject(threads[i], wait_ms);
+            if (wr == WAIT_TIMEOUT) {
+                // 宽限到点：关闭读端让读者线程退出，再回收。
+                if (out_timed_out != NULL) *out_timed_out = 1;
+                if (stdout_fd >= 0) __koral_pipe_close(stdout_fd);
+                if (stderr_fd >= 0) __koral_pipe_close(stderr_fd);
+                WaitForSingleObject(threads[i], INFINITE);
+            }
+            CloseHandle(threads[i]);
         }
-        if (WaitForSingleObject(stderr_thread, INFINITE) != WAIT_OBJECT_0) {
-            CloseHandle(stdout_thread);
-            CloseHandle(stderr_thread);
-            goto fail;
+        for (int i = 0; i < nthreads; i++) {
+            if (ctxs[i].error) goto fail;
         }
-
-        CloseHandle(stdout_thread);
-        CloseHandle(stderr_thread);
-
-        if (stdout_ctx.error || stderr_ctx.error) goto fail;
     }
 #else
     {
         struct pollfd fds[2];
-        int nfds = 2;
-        int stdout_open = 1, stderr_open = 1;
+        int which[2];
+        int nfds = 0;
+        if (stdout_fd >= 0) { fds[nfds].fd = stdout_fd; fds[nfds].events = POLLIN; which[nfds] = 0; nfds++; }
+        if (stderr_fd >= 0) { fds[nfds].fd = stderr_fd; fds[nfds].events = POLLIN; which[nfds] = 1; nfds++; }
+        int open_count = nfds;
 
-        fds[0].fd = stdout_fd;
-        fds[0].events = POLLIN;
-        fds[1].fd = stderr_fd;
-        fds[1].events = POLLIN;
-
-        while (stdout_open || stderr_open) {
-            if (!stdout_open) fds[0].fd = -1;
-            if (!stderr_open) fds[1].fd = -1;
-
-            int ret = poll(fds, nfds, -1);
+        int64_t deadline_ms = -1;
+        if (timeout_ms >= 0) {
+            struct timespec ts_now;
+            clock_gettime(CLOCK_MONOTONIC, &ts_now);
+            deadline_ms = (int64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000 + timeout_ms;
+        }
+        while (open_count > 0) {
+            for (int i = 0; i < nfds; i++) {
+                if (fds[i].fd < 0) continue;
+            }
+            int wait_ms = -1;
+            if (deadline_ms >= 0) {
+                struct timespec ts_now;
+                clock_gettime(CLOCK_MONOTONIC, &ts_now);
+                int64_t now_ms = (int64_t)ts_now.tv_sec * 1000 + ts_now.tv_nsec / 1000000;
+                wait_ms = (int)(deadline_ms - now_ms);
+                if (wait_ms <= 0) {
+                    if (out_timed_out != NULL) *out_timed_out = 1;
+                    break;
+                }
+            }
+            int ret = poll(fds, nfds, wait_ms);
             if (ret < 0) {
                 if (errno == EINTR) continue;
                 goto fail;
             }
-
-            if (fds[0].revents & (POLLIN | POLLHUP)) {
-                int64_t n = read(stdout_fd, tmp, sizeof(tmp));
-                if (n < 0 && errno != EINTR) goto fail;
-                if (n <= 0) {
-                    stdout_open = 0;
-                } else {
-                    if (dynbuf_append(&stdout_buf, tmp, (uint64_t)n) < 0) goto fail;
-                }
+            if (ret == 0) {
+                if (out_timed_out != NULL) *out_timed_out = 1;
+                break;
             }
-
-            if (fds[1].revents & (POLLIN | POLLHUP)) {
-                int64_t n = read(stderr_fd, tmp, sizeof(tmp));
-                if (n < 0 && errno != EINTR) goto fail;
-                if (n <= 0) {
-                    stderr_open = 0;
-                } else {
-                    if (dynbuf_append(&stderr_buf, tmp, (uint64_t)n) < 0) goto fail;
+            for (int i = 0; i < nfds; i++) {
+                if (fds[i].fd < 0) continue;
+                if (fds[i].revents & (POLLIN | POLLHUP)) {
+                    int64_t n = read(fds[i].fd, tmp, sizeof(tmp));
+                    if (n < 0 && errno != EINTR) goto fail;
+                    if (n <= 0) {
+                        fds[i].fd = -1;
+                        open_count--;
+                    } else {
+                        DynBuf* b = (which[i] == 0) ? &stdout_buf : &stderr_buf;
+                        if (dynbuf_append(b, tmp, (uint64_t)n) < 0) goto fail;
+                    }
                 }
             }
         }

@@ -6,7 +6,10 @@ using "std" { ... };
 // Access via: using "std/proc" { ... };
 // ============================================================================
 
-using "std/os" { Path, ToPath, all_env };
+using "std/os" { Path, ToPath, env_all_raw };
+using "std/time" { MonoTime };
+using "std/async" { Timer, run_task };
+using "std/io" { Writer };
 
 // ============================================================================
 // FFI Declarations
@@ -49,6 +52,10 @@ private let stdio_to_int(s: IoRedirect): Int32 = when s in {
     .File(_) then Int32(3),
     .StdoutPipe(_) then Int32(3),
     .StderrPipe(_) then Int32(3),
+    // stdin 喂字节：库内建管道后泵入（等同 Piped 的子端）。
+    .Bytes(_) then Int32(1),
+    // stderr 与 stdout 合流（运行时 mode 4）。
+    .ToStdout() then Int32(4),
 };
 
 /// Extract the file descriptor from an IoRedirect (mode=3 variants).
@@ -60,6 +67,18 @@ private let stdio_to_fd(s: IoRedirect): Int32 = when s in {
     .Inherit() then Int32(0) - 1,
     .Piped() then Int32(0) - 1,
     .Null() then Int32(0) - 1,
+    .Bytes(_) then Int32(0) - 1,
+    .ToStdout() then Int32(0) - 1,
+};
+
+/// 超时等待的轮询小睡（一次性 Timer，2ms 粒度）。
+private let proc_poll_sleep(): Void = {
+    let d = when Duration.new(seconds = 0, nanoseconds = 2000000) in {
+        .Ok(v) then v,
+        .Error(_) then return,
+    };
+    let t = Timer.new(d);
+    t.wait();
 };
 
 /// Convert a list of C strings to an array of NUL-terminated UInt8 pointers
@@ -73,17 +92,42 @@ private let argv_to_ptrs(argv: List[CString]): **UInt8 = {
     return ptrs;
 };
 
-/// Extract the name part of a "KEY=VALUE" environment entry.
-private let env_entry_name(entry: String): String = when entry.find("=") in {
-    .Some(idx) then entry.substring(0..<idx),
-    .None() then entry,
+/// `NAME=VALUE` 条目的名字段字节宽度：到首个 `=`（无 `=` 则整条）。
+private let env_entry_name_len(entry: CString): Int = {
+    let p = entry.borrow_ptr();
+    let mutable i = 0;
+    while i < entry.count() then {
+        if unsafe { p[i] } == UInt8(61) then {
+            return i;
+        };
+        i += 1;
+    };
+    return entry.count();
+};
+
+/// 条目的名字段是否就是 `name` 的字节（字节级比对，不经 UTF-8 解码）。
+private let env_entry_named(entry: CString, name: String): Bool = {
+    let nlen = env_entry_name_len(entry);
+    if nlen != name.count() then {
+        return false;
+    };
+    let ep = entry.borrow_ptr();
+    let np = name.borrow_ptr();
+    let mutable i = 0;
+    while i < nlen then {
+        if unsafe { ep[i] != np[i] } then {
+            return false;
+        };
+        i += 1;
+    };
+    return true;
 };
 
 /// Drop every entry named `name` from `entries`, in place.
-private let env_entries_remove(entries: List[String], name: String): Void = {
+private let env_entries_remove(entries: List[CString], name: String): Void = {
     let mutable i = 0;
     while i < entries.count() then {
-        if env_entry_name(entries[i]) == name then {
+        if env_entry_named(entries[i], name) then {
             entries.remove_at(i);
         } else {
             i += 1;
@@ -98,16 +142,19 @@ private let env_entries_remove(entries: List[String], name: String): Void = {
 ///   Clear  — empty the inherited environment (later actions build on the
 ///            empty base)
 /// Returns the merged "KEY=VALUE" block to pass as the whole child environment.
-private let build_env_strings(actions: List[EnvAction]): List[String] = {
-    let mutable result: List[String] = [];
-    for pair in all_env() then {
-        result.push("\(pair.first)=\(pair.second)");
-    };
+private let build_env_strings(actions: List[EnvAction]): Result[List[CString]] = {
+    // 从父环境的**原始字节条目**起手（env_all_raw：NAME=VALUE 原形，非 UTF-8
+    // 条目原样保留），动作按名字节级合并。不能经 env_all 解码重建——文本
+    // 严格族遇非 UTF-8 条目直接 panic。
+    let mutable result: List[CString] = env_all_raw().to_list();
     for action in actions then {
         when action in {
             .Set(name, value) then {
                 env_entries_remove(result, name);
-                result.push("\(name)=\(value)");
+                // name/value 是 String（合法 UTF-8、无内嵌 NUL 经 from_string
+                // 检查），拼接条目走 checked 形。
+                let entry = CString.from_string("\(name)=\(value)") or return;
+                result.push(entry);
             },
             .Remove(name) then {
                 env_entries_remove(result, name);
@@ -117,7 +164,7 @@ private let build_env_strings(actions: List[EnvAction]): List[String] = {
             },
         };
     };
-    return result;
+    return Result[List[CString]].Ok(result);
 };
 
 /// Convert env strings list to pointer array for FFI. The `CString` values
@@ -132,6 +179,32 @@ private let env_strs_to_ptrs(strs: List[CString]): **UInt8 = {
         unsafe { init_memory(ptrs + i, strs[i].borrow_ptr()) };
     };
     return ptrs;
+};
+
+// ============================================================================
+// SpawnError — Command.spawn 的失败分类
+// ============================================================================
+
+/// `Command.spawn` 的失败分类（程序名随身）：找不到程序、无执行权限、其余
+/// 系统错误。spawn 的运行时返回码 -2/-3/-1 映射到三变体。
+public type sendable SpawnError {
+    NotFound(program: String),
+    PermissionDenied(program: String),
+    Other(program: String, message: String),
+};
+
+/// `Error` for `SpawnError`: the message names the program and the class.
+given SpawnError: Error {
+    /// The failure text: `program not found: <p>` / `permission denied: <p>` /
+    /// `<p>: <system message>`.
+    public message(self): String = when self in {
+        .NotFound(p) then "program not found: \(p)",
+        .PermissionDenied(p) then "permission denied: \(p)",
+        .Other(p, m) then "\(p): \(m)",
+    };
+
+    /// No underlying cause: the spawn failure is terminal at this layer.
+    public source(self): Option[Error] = Option[Error].None();
 };
 
 // ============================================================================
@@ -161,6 +234,7 @@ private type mutable CommandStorage(
     mutable stdin_cfg: IoRedirect,
     mutable stdout_cfg: IoRedirect,
     mutable stderr_cfg: IoRedirect,
+    mutable timeout: Option[Duration],
 );
 
 // ============================================================================
@@ -185,6 +259,7 @@ given Command {
             IoRedirect.Inherit(),
             IoRedirect.Inherit(),
             IoRedirect.Inherit(),
+            .None(),
         ),
     );
 
@@ -245,6 +320,20 @@ given Command {
     };
 
     /// Asynchronously spawn a child process, returning a Process handle.
+    /// 为 `run` / `run_output` 设超时（命名参数 `after`）。到限先杀根进程
+    /// （SIGKILL；**孙进程不杀**——超时杀只作用于直接子进程，孙进程的
+    /// 生命周期归其父），读管道给宽限期（内部固定 1s），到点关闭读端，
+    /// 返回 Error("timeout: <program>")。
+    public set_timeout(self, after: Duration =): Command = {
+        self.storage.timeout = Option[Duration].Some(after);
+        return self;
+    };
+
+    /// Start the child process and return its handle.
+    /// The command's stdio configuration is consumed here: held pipes and file
+    /// redirects are released after the spawn, so the handle (not the command)
+    /// owns them from here on. Failure returns `SpawnError` naming the program
+    /// (NotFound / PermissionDenied / Other).
     public spawn(self): Result[Process] = {
         // Build argv array (program + arguments)
         let mutable argv = [self.storage.program];
@@ -261,9 +350,14 @@ given Command {
         // the actions merge into a copy of the current environment and the
         // merged block is the child's complete environment.
         let has_env_actions = not self.storage.env_actions.is_empty();
-        let env_strs = if has_env_actions then build_env_strings(self.storage.env_actions) else List[String].new();
+        // 动作合并走字节保真形：env_all_raw 的 NAME=VALUE 原形条目直接进
+        // envp，不经 String 世界往返。
+        let mutable env_cs = List[CString].new();
+        if has_env_actions then {
+            env_cs = build_env_strings(self.storage.env_actions) or return;
+        };
         // envc < 0 tells the runtime "inherit"; >= 0 is the complete block.
-        let envc = if has_env_actions then Int32(env_strs.count()) else Int32(0) - 1;
+        let envc = if has_env_actions then Int32(env_cs.count()) else Int32(0) - 1;
         let stdin_fd = stdio_to_fd(self.storage.stdin_cfg);
         let stdout_fd = stdio_to_fd(self.storage.stdout_cfg);
         let stderr_fd = stdio_to_fd(self.storage.stderr_cfg);
@@ -282,10 +376,6 @@ given Command {
         let mutable argv_cs = List[CString].new();
         for arg in argv then {
             argv_cs.push(CString.from_string(arg) or return);
-        };
-        let mutable env_cs = List[CString].new();
-        for entry in env_strs then {
-            env_cs.push(CString.from_string(entry) or return);
         };
         let argv_ptrs = argv_to_ptrs(argv_cs);
         let env_ptrs = env_strs_to_ptrs(env_cs);
@@ -316,20 +406,54 @@ given Command {
             unsafe { dealloc_memory(env_ptrs) };
         };
 
+        // spawn 之后释放本 builder 持有的管道/文件重定向：fd 已 dup 进子进
+        // 程，父侧的 File/管道句柄在这里归还（编排流的值传递到此为止）。
+        let stdin_bytes = when self.storage.stdin_cfg in {
+            .Bytes(data) then Option[FrozenList[UInt8]].Some(data),
+            _ then Option[FrozenList[UInt8]].None(),
+        };
+        self.storage.stdin_cfg = IoRedirect.Inherit();
+        self.storage.stdout_cfg = IoRedirect.Inherit();
+        self.storage.stderr_cfg = IoRedirect.Inherit();
+
         if result != 0 then {
-            return .Error(last_error_message());
+            // -2 = not found, -3 = permission denied, 其余 = other（SpawnError
+            // 三分类，程序名随身）。
+            let program = self.storage.program;
+            if result == Int32(0 - 2) then {
+                return Result[Process].Error(SpawnError.NotFound(program));
+            };
+            if result == Int32(0 - 3) then {
+                return Result[Process].Error(SpawnError.PermissionDenied(program));
+            };
+            return Result[Process].Error(
+                SpawnError.Other(program, last_error_message()),
+            );
         };
 
-        return .Ok(
-            Process(
-                make_process_storage(
-                    proc.pid,
-                    proc.stdin_fd,
-                    proc.stdout_fd,
-                    proc.stderr_fd,
-                ),
+        let child = Process(
+            make_process_storage(
+                proc.pid,
+                proc.stdin_fd,
+                proc.stdout_fd,
+                proc.stderr_fd,
             ),
         );
+
+        // stdin 喂字节（IoRedirect.Bytes）：库内边读边写——管道先同步取走
+        // （否则 wait_output 的「未取即关」会抢走它），泵入交给后台任务，
+        // 任务尾的句柄析构关写端 = EOF。
+        if stdin_bytes is .Some(data) then {
+            if child.take_stdin_pipe() is .Some(pipe) then {
+                let payload = data;
+                let writer = pipe;
+                let _ = run_task(() => {
+                    let _ = writer.write(from = payload.as_slice());
+                });
+            };
+        };
+
+        return Result[Process].Ok(child);
     };
 
     /// Synchronously execute the command and wait for completion.
@@ -344,8 +468,37 @@ given Command {
                 "run() does not support Piped stdin; use spawn() and take_stdin_pipe()",
             );
         };
+        let timeout = self.storage.timeout;
         return when self.spawn() in {
-            .Ok(child) then child.wait(),
+            .Ok(child) then {
+                when timeout in {
+                    .None() then child.wait(),
+                    .Some(t) then {
+                        // 限时形：轮询 try_wait 到限；到限杀根进程（孙进程
+                        // 不杀），返回 timeout 错误。
+                        let start = MonoTime.now();
+                        while true then {
+                            when child.try_wait() in {
+                                .Ok(.Some(status)) then {
+                                    return Result[ExitStatus].Ok(status);
+                                },
+                                .Ok(.None()) then {},
+                                .Error(e) then {
+                                    return Result[ExitStatus].Error(e);
+                                },
+                            };
+                            if start.elapsed() >= t then {
+                                let _ = child.kill();
+                                return Result[ExitStatus].Error(
+                                    "timeout: \(self.storage.program)",
+                                );
+                            };
+                            proc_poll_sleep();
+                        };
+                        Result[ExitStatus].Error("timeout: \(self.storage.program)")
+                    },
+                }
+            },
             .Error(e) then Result[ExitStatus].Error(e),
         };
     };
@@ -353,12 +506,41 @@ given Command {
     /// Synchronously execute the command, capture stdout/stderr, and wait for completion.
     /// Forces stdout/stderr to Piped mode to capture output.
     public run_output(self): Result[CommandOutput] = {
-        // Force stdout/stderr to Piped to capture output
+        // Force stdout to Piped to capture output. stderr 强推 Piped 只在
+        // 缺省（Inherit）时——显式选择（ToStdout 合流/Null/File/管道链接）
+        // 尊重调用方。
         self.storage.stdout_cfg = IoRedirect.Piped();
-        self.storage.stderr_cfg = IoRedirect.Piped();
+        if self.storage.stderr_cfg is .Inherit() then {
+            self.storage.stderr_cfg = IoRedirect.Piped();
+        };
+        let timeout = self.storage.timeout;
 
         return when self.spawn() in {
-            .Ok(child) then child.wait_output(),
+            .Ok(child) then {
+                when timeout in {
+                    .None() then child.wait_output(),
+                    .Some(t) then {
+                        // 限时形：管道读限时；到限杀根进程、读管道给 1s 宽
+                        // 限、到点关闭读端（wait_output_within 收口）。
+                        let grace = when Duration.new(seconds = 1, nanoseconds = 0) in {
+                            .Ok(g) then g,
+                            .Error(_) then t,
+                        };
+                        when child.wait_output_within(t, grace) in {
+                            .Ok(out) then Result[CommandOutput].Ok(out),
+                            .Error(e) then {
+                                if e.message() == "timeout" then {
+                                    Result[CommandOutput].Error(
+                                        "timeout: \(self.storage.program)",
+                                    )
+                                } else {
+                                    Result[CommandOutput].Error(e)
+                                }
+                            },
+                        }
+                    },
+                }
+            },
             .Error(e) then Result[CommandOutput].Error(e),
         };
     };

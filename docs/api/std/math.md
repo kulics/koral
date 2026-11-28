@@ -96,7 +96,7 @@ public let erfc[T: FloatMath](x: T): T;
 public let gamma[T: FloatMath](x: T): T;
 
 /// Return the natural logarithm of the absolute value of the gamma function of x.
-public let log_gamma[T: FloatMath](x: T): T;
+public let ln_gamma[T: FloatMath](x: T): T;
 
 /// Return the logarithm of x in the given base, computed as ln(x) / ln(base).
 /// The domain is x > 0 with a positive base different from 1.
@@ -226,7 +226,7 @@ public trait FloatMath: FloatingPoint {
     /// Return the gamma function of x, or NaN at the non-positive integers.
     gamma(x: Self): Self;
     /// Return the natural logarithm of the absolute value of the gamma function of x.
-    log_gamma(x: Self): Self;
+    ln_gamma(x: Self): Self;
 };
 
 /// Whole numbers with division, remainder, integer powers, and integer logarithms.

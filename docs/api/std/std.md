@@ -18,7 +18,7 @@ public let sleep(d: Duration): Void;
 public let make_bytes(count: Int): List[UInt8];
 
 /// A `count`-byte list of uninitialized bytes, meant for buffers that are
-/// filled before being read.
+/// filled before being read（自建 I/O 缓冲的外部库同用）。
 /// 调用契约（`let unsafe`）：每个字节在读取前必须先写入——未初始化内存
 /// 读出的值不可观测地任意。
 public let unsafe make_uninitialized_bytes(count: Int): List[UInt8];
@@ -445,7 +445,8 @@ public type intrinsic Bool;
 /// The type of computations that never produce a value.
 public type intrinsic Never;
 
-/// A 64-bit signed integer; arithmetic panics on overflow.
+/// A platform-width signed integer (pointer width: 32-bit on 32-bit targets,
+/// 64-bit on 64-bit targets); arithmetic panics on overflow.
 public type intrinsic Int;
 
 /// An 8-bit signed integer; arithmetic panics on overflow.
@@ -460,7 +461,8 @@ public type intrinsic Int32;
 /// A 64-bit signed integer; arithmetic panics on overflow.
 public type intrinsic Int64;
 
-/// A 64-bit unsigned integer with no sign; arithmetic panics on overflow.
+/// A platform-width unsigned integer with no sign (pointer width: 32-bit on
+/// 32-bit targets, 64-bit on 64-bit targets); arithmetic panics on overflow.
 public type intrinsic UInt;
 
 /// An 8-bit unsigned integer with no sign; arithmetic panics on overflow.
@@ -475,7 +477,7 @@ public type intrinsic UInt32;
 /// A 64-bit unsigned integer with no sign; arithmetic panics on overflow.
 public type intrinsic UInt64;
 
-/// A 64-bit signed integer that wraps on overflow.
+/// A platform-width signed integer (pointer width) that wraps on overflow.
 public type intrinsic WrappingInt;
 
 /// An 8-bit signed integer that wraps on overflow.
@@ -490,7 +492,8 @@ public type intrinsic WrappingInt32;
 /// A 64-bit signed integer that wraps on overflow.
 public type intrinsic WrappingInt64;
 
-/// A 64-bit unsigned integer with no sign that wraps on overflow.
+/// A platform-width unsigned integer with no sign (pointer width) that wraps
+/// on overflow.
 public type intrinsic WrappingUInt;
 
 /// An 8-bit unsigned integer with no sign that wraps on overflow.
@@ -2625,6 +2628,12 @@ given CString {
     /// truncated value).
     /// 调用契约（`let unsafe`）：担保 `value` 无内嵌 NUL 字节。
     public unsafe from_string_unchecked(value: String): CString;
+    /// Copy the NUL-terminated bytes at `cstr` into a fresh block. 字节保真：
+    /// 内容可以是任意字节（`CString` 不声称 UTF-8）——C 字节串原样进、原样
+    /// 出，不过 `String` 世界（那边恒合法 UTF-8）。`String` 侧指针构造器的
+    /// 对称面。
+    /// 调用契约（`let unsafe`）：担保 `cstr` 指向 NUL 结尾的可读字节串。
+    public unsafe from_cstring_ptr_unchecked(cstr: *UInt8): CString;
     /// The content length in bytes, without the trailing NUL.
     public count(self): Int;
     /// Whether there are no content bytes (the block still holds the NUL).
@@ -2635,9 +2644,14 @@ given CString {
     public borrow_ptr(self): *UInt8;
     /// 只读切片窗口（slice-design）：`[]UInt8`，零拷贝（写死块）。
     public as_slice(self): []UInt8;
+};
+
+/// `ToString` for `CString`: the content as a `String`, without a copy -- the
+/// result is a window on this block (the NUL is not part of the content). Use
+/// `clone` on the result to detach it from this block.
+given CString: ToString {
     /// The content as a `String`, without a copy -- the result is a window on
-    /// this block (the NUL is not part of the content). Use `clone` on the
-    /// result to detach it from this block.
+    /// this block (the NUL is not part of the content).
     public to_string(self): String;
 };
 
@@ -2742,12 +2756,8 @@ given[K: Hash, V: Any] Dict[K, V] {
     public get_or_insert(self, key: K, value: V): V;
     /// Return whether `key` has a stored value.
     public contains_key(self, key: K): Bool;
-    /// Remove `key`'s entry if present, discarding its value.
-    public remove(self, key: K): Void;
-    /// Remove `key`'s entry if present; return whether one was removed.
-    public try_remove(self, key: K): Bool;
     /// Remove `key`'s entry and return its value, or `None` if the key is absent.
-    public take(self, key: K): Option[V];
+    public remove(self, key: K): Option[V];
     /// Return whether the dict has no entries.
     public is_empty(self): Bool;
     /// Remove every entry from the dict.
@@ -3408,7 +3418,7 @@ given Float32 {
     /// Returns the smallest positive normal value.
     public min_normal(): Float32;
     /// Returns the smallest positive denormal value.
-    public min_denormal(): Float32;
+    public min_subnormal(): Float32;
     /// Returns whether `self` is NaN.
     public is_nan(self): Bool;
     /// Returns whether `self` is positive or negative infinity.
@@ -3426,7 +3436,7 @@ given Float64 {
     /// Returns the smallest positive normal value.
     public min_normal(): Float64;
     /// Returns the smallest positive denormal value.
-    public min_denormal(): Float64;
+    public min_subnormal(): Float64;
     /// Returns whether `self` is NaN.
     public is_nan(self): Bool;
     /// Returns whether `self` is positive or negative infinity.
@@ -3517,8 +3527,6 @@ given UInt8 {
     /// Returns whether `self` is an ASCII punctuation character: graphic and
     /// neither letter nor digit.
     public is_ascii_punctuation(self): Bool;
-    /// Returns `self` as a `Rune` (every byte is a valid scalar value).
-    public to_rune(self): Rune;
     /// Returns the ASCII lowercase form of `self`, or `self` unchanged.
     public to_ascii_lowercase(self): UInt8;
     /// Returns the ASCII uppercase form of `self`, or `self` unchanged.
@@ -3689,8 +3697,6 @@ given[T: Any] Result[T] {
     public ok(self): Option[T];
     /// The error as an `Option`, discarding the `Ok` value.
     public error(self): Option[Error];
-    /// Return the `Ok` value, or compute a default from the error.
-    public unwrap_or_else(self, f: (Error) -> T): T;
 };
 
 /// `Eq` for `Result[T]`: `Ok` values compare with `==`, and `Ok` never equals
@@ -3807,17 +3813,14 @@ given[T: Hash] Set[T] {
     /// rehashing. Panics when `additional` is negative（容量族负值 panic）。
     public reserve(self, additional: Int): Void;
     /// Add `value` to the set if it is not already present.
-    public insert(self, value: T): Void;
-    /// Add `value` only if it is absent; return whether it was added.
-    public try_insert(self, value: T): Bool;
+    /// Add `value`; return whether it was added (false when already present).
+    public insert(self, value: T): Bool;
     /// Add every element of `other` to the set.
     public insert_set(self, other: Set[T]): Void;
     /// Return whether `value` is in the set.
     public contains(self, value: T): Bool;
-    /// Remove `value` from the set if present, ignoring whether it was there.
-    public remove(self, value: T): Void;
     /// Remove `value` if present; return whether it was removed.
-    public try_remove(self, value: T): Bool;
+    public remove(self, value: T): Bool;
     /// Return whether the set has no elements.
     public is_empty(self): Bool;
     /// Return whether every element of `self` is also in `other`.
@@ -3969,11 +3972,6 @@ given StringBuilder {
     public push_rune(self, rune: Rune): Void;
     /// Empty the builder, keeping its allocated capacity.
     public clear(self): Void;
-    /// Return a stable snapshot that does not alias future builder mutations.
-    /// 校验 UTF-8，非法字节 panic（checked 形态）；免检快照走
-    /// `to_string_unchecked`（`let unsafe` 调用契约，担保累积字节是合法
-    /// UTF-8——`push_byte` 的契约）。
-    public to_string(self): String;
     /// Unchecked snapshot: no UTF-8 validation. Behavior is undefined when
     /// the accumulated bytes are not valid UTF-8.
     public unsafe to_string_unchecked(self): String;
@@ -3987,18 +3985,30 @@ given StringBuilder {
     public unsafe into_string_unchecked(self): String;
 };
 
+/// `ToString` for `StringBuilder`: return a stable snapshot that does not
+/// alias future builder mutations. 校验 UTF-8，非法字节 panic（checked 形态）；
+/// 免检快照走 `to_string_unchecked`（`let unsafe` 调用契约，担保累积字节是
+/// 合法 UTF-8——`push_byte` 的契约）。消费交接走 `into_string`。
+given StringBuilder: ToString {
+    /// A stable UTF-8-checked snapshot that does not alias future builder
+    /// mutations. Panics on invalid accumulated bytes; the unchecked form is
+    /// `to_string_unchecked`.
+    public to_string(self): String;
+};
+
 /// Construction, inspection, searching, and transformation of `String` values.
 given String {
     /// Unsafe constructor: copy `len` bytes without validating UTF-8.
     /// Behavior is undefined when those bytes are not valid UTF-8.
     /// The caller guarantees `bytes`/`len` point at `len` readable bytes.
     public unsafe from_utf8_ptr_unchecked(bytes: *UInt8, len: Int): String;
-    /// The concatenation of `left` and `right` in ONE allocation: both parts
-    /// copy straight into the result's own buffer. `String.add` routes here --
-    /// building a temporary raw buffer and copying it again into the result
-    /// doubled the cost of every `+`. A result past the string length limit
-    /// (2^31-1) panics before any allocation happens.
-    public concat(left: String, right: String): String;
+    /// The concatenation of `self` and `other` in ONE allocation: both parts
+    /// copy straight into the result's own buffer（与 `List.concat` 同款实例
+    /// 形）。`String.add` routes here -- building a temporary raw buffer and
+    /// copying it again into the result doubled the cost of every `+`. A
+    /// result past the string length limit (2^31-1) panics before any
+    /// allocation happens.
+    public concat(self, other: String): String;
     /// Checked constructor: copy `len` bytes, validating UTF-8.
     /// Return an error when the bytes are not valid UTF-8.
     /// The caller guarantees `bytes`/`len` point at `len` readable bytes.
@@ -4020,23 +4030,23 @@ given String {
     /// Build a string from a null-terminated C string, returning an error when
     /// it is not valid UTF-8.
     /// The caller guarantees `cstr` points at a readable NUL-terminated string.
-    public unsafe from_cstring(cstr: *UInt8): Result[String];
+    public unsafe from_cstring_ptr(cstr: *UInt8): Result[String];
     /// Build a string from a null-terminated C string without validating UTF-8.
     /// Behavior is undefined when the bytes are not valid UTF-8.
     /// The caller guarantees `cstr` points at a readable NUL-terminated string.
-    public unsafe from_cstring_unchecked(cstr: *UInt8): String;
+    public unsafe from_cstring_ptr_unchecked(cstr: *UInt8): String;
     /// Copy `len` bytes into a string, replacing each maximal ill-formed UTF-8
-    /// subsequence with U+FFFD -- never fails (Rust `String::from_utf8_lossy`
+    /// subsequence with U+FFFD -- never fails (Rust `String::from_utf8_ptr_lossy`
     /// 同规则)。OS 摄入面（文件名 / symlink 目标 / argv / stdin 行）用它。
     /// The caller guarantees `bytes`/`len` point at `len` readable bytes.
-    public unsafe from_utf8_lossy(bytes: *UInt8, len: Int): String;
+    public unsafe from_utf8_ptr_lossy(bytes: *UInt8, len: Int): String;
     /// Copy `bytes` into a string, replacing each maximal ill-formed UTF-8
     /// subsequence with U+FFFD -- never fails.
     public from_bytes_lossy(bytes: List[UInt8]): String;
     /// Build a string from a null-terminated C string, replacing each maximal
     /// ill-formed UTF-8 subsequence with U+FFFD -- never fails.
     /// The caller guarantees `cstr` points at a readable NUL-terminated string.
-    public unsafe from_cstring_lossy(cstr: *UInt8): String;
+    public unsafe from_cstring_ptr_lossy(cstr: *UInt8): String;
     /// Create an empty string.
     public new(): String;
     /// The length of the string in UTF-8 bytes, not runes.
@@ -4059,9 +4069,6 @@ given String {
     public starts_with(self, prefix: String): Bool;
     /// Whether the string ends with `suffix`.
     public ends_with(self, suffix: String): Bool;
-    /// Return the byte index of the first occurrence of `pat`, or `None` when
-    /// absent; an empty pattern matches at 0.
-    public find(self, pat: String): Option[Int];
     /// Return the byte index of the last occurrence of `pat`, or `None` when
     /// absent; an empty pattern matches at the end (the byte length).
     public find_last(self, pat: String): Option[Int];
@@ -4089,12 +4096,13 @@ given String {
     /// Return a copy with each ASCII word titlecased: its first letter upper,
     /// the rest lower.
     public to_ascii_titlecase(self): String;
-    /// Search from byte index `start` for the first occurrence of `pat`, returning
-    /// its index or `None`. An empty pattern matches at `start` itself (so
-    /// `find("")` is `Some(0)`), following Rust/Python/JS/Go/Java and staying
-    /// consistent with `starts_with`/`ends_with`; a negative or past-the-end
-    /// `start` is an out-of-domain position and yields `None`, never a panic.
-    public find_from(self, start: Int, pat: String): Option[Int];
+    /// Return the byte index of the first occurrence of `pat`, or `None` when
+    /// absent; `from` names the byte index to search from (default 0). An
+    /// empty pattern matches at `from` itself (so `find("")` is `Some(0)`),
+    /// following Rust/Python/JS/Go/Java and staying consistent with
+    /// `starts_with`/`ends_with`; a negative or past-the-end `from` is an
+    /// out-of-domain position and yields `None`, never a panic.
+    public find(self, pat: String, from: Int = 0): Option[Int];
     /// Whether `pat` occurs anywhere in the string (the empty pattern occurs
     /// in every string).
     public contains(self, pat: String): Bool;
@@ -4397,14 +4405,14 @@ given[T: ToString] List[T]: ToString {
 given[T: ToString, R: Iterator[T]] LazyView[T, R] {
     /// Return the items' display text joined by the given separator, or the
     /// empty string when there are no items.
-    public join_to_string(self, seperator: String): String;
+    public join_to_string(self, separator: String): String;
 };
 
 /// Joining the items of a list into one string.
 given[T: ToString] List[T] {
     /// Return the items' display text joined by the given separator, or the
     /// empty string when the list is empty.
-    public join_to_string(self, seperator: String): String;
+    public join_to_string(self, separator: String): String;
 };
 
 /// `ToString` for `Dict`: renders `[key: value, ...]`.
@@ -4443,7 +4451,7 @@ given String: Error {
 /// Constructors for `WrappedError`.
 given WrappedError {
     /// Wrap `cause` under a context line.
-    public new(context: String, cause: Error): WrappedError;
+    public new(context: String, cause: Error =): WrappedError;
 };
 
 /// `Error` for `WrappedError`: the context is the message, the cause is the

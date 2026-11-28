@@ -21,7 +21,7 @@ public let current_thread_id(): UInt64;
 
 /// 立即让出当前线程时间片，提示调度器切换到其他线程
 /// 不保证一定会切换——调度器可能立即恢复当前线程
-public let yield_thread_now(): Void;
+public let yield_thread(): Void;
 
 /// 获取可用并行度（通常等于逻辑 CPU 核心数，但可能受 cgroup、affinity 等限制）
 public let available_parallelism(): Int;
@@ -124,6 +124,8 @@ given Timer {
     /// Block for the timer's duration. Returns immediately if already fired or cancelled.
     /// Marks the timer as fired only when the full duration elapses; a wait()
     /// cut short by cancel() leaves the timer unfired.
+    /// 契约：wait 期间持有本句柄的 retain 副本——睡眠中别的线程放手也不会
+    /// 让 drop 销毁 timer 上下文（否则睡眠中的 ctx 悬垂）。
     public wait(self): Void;
     /// Reset the timer: clears fired state and sets a new duration.
     /// The next wait() will block for the new duration.
@@ -145,6 +147,8 @@ given Ticker {
     /// Create a ticker that fires every `interval`.
     public new(interval: Duration): Ticker;
     /// Block until the next tick. Returns immediately if cancelled.
+    /// 契约：wait 期间持有本句柄的 retain 副本（同 `Timer.wait`）——睡眠中
+    /// 别的线程放手也不会让 drop 销毁计时器上下文。
     public wait(self): Void;
     /// Change the interval. Takes effect on the next wait() call.
     /// Re-arms a cancelled ticker: the runtime's cancel is one-shot, so the

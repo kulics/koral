@@ -215,15 +215,16 @@ given[T: Hash and sendable] ConcurrentSet[T] {
         return out;
     };
 
-    /// Add `value` to the set. A discarded duplicate value dies at the
-    /// caller's statement end, after the unlock.
-    public insert(self, value: T): Void = {
+    /// Add `value` to the set; return whether it was newly added. A discarded
+    /// duplicate value dies at the caller's statement end, after the unlock.
+    public insert(self, value: T): Bool = {
         self.rw_lock.lock();
         self.ensure_room();
         let final_idx = when set_find_slot(self.slots, self.capacity, value) in {
             .Some(i) then i,
             .None() then { panic("ConcurrentSet insert failed"); },
         };
+        let mutable added = false;
         unsafe {
             let slot_ptr = self.slots + final_idx;
             if slot_ptr.tag != UInt(1) then {
@@ -232,63 +233,17 @@ given[T: Hash and sendable] ConcurrentSet[T] {
                 };
                 self.size = self.size + 1;
                 init_memory(slot_ptr, ConcurrentSetSlot[T](UInt(1), value));
+                added = true;
             };
         };
         self.rw_lock.unlock();
+        return added;
     };
 
-    /// Add `value` to the set and report whether it was newly added. A
-    /// discarded duplicate value dies at the caller's statement end, after
-    /// the unlock.
-    public try_insert(self, value: T): Bool = {
-        self.rw_lock.lock();
-        self.ensure_room();
-        let final_idx = when set_find_slot(self.slots, self.capacity, value) in {
-            .Some(i) then i,
-            .None() then { panic("ConcurrentSet try_insert failed"); },
-        };
-        unsafe {
-            let slot_ptr = self.slots + final_idx;
-            if slot_ptr.tag == UInt(1) then {
-                self.rw_lock.unlock();
-                return false;
-            };
-            if slot_ptr.tag == UInt(2) then {
-                self.deleted = self.deleted - 1;
-            };
-            self.size = self.size + 1;
-            init_memory(slot_ptr, ConcurrentSetSlot[T](UInt(1), value));
-        };
-        self.rw_lock.unlock();
-        return true;
-    };
-
-    /// Remove `value` from the set. The stored member is extracted under the
-    /// lock and released after it.
-    public remove(self, value: T): Void = {
-        self.rw_lock.lock();
-        let mutable dead_member = Option[ConcurrentSetSlot[T]].None();
-        when set_find_slot(self.slots, self.capacity, value) in {
-            .Some(idx) then {
-                unsafe {
-                    let slot_ptr = self.slots + idx;
-                    if slot_ptr.tag == UInt(1) then {
-                        dead_member = Option[ConcurrentSetSlot[T]].Some(take_memory(slot_ptr));
-                        set_set_tag(slot_ptr, UInt(2));
-                        self.size = self.size - 1;
-                        self.deleted = self.deleted + 1;
-                    };
-                };
-            },
-            .None() then {},
-        };
-        self.rw_lock.unlock();
-    };
-
-    /// Remove `value` from the set and report whether it was a member. The
+    /// Remove `value` from the set; return whether it was a member. The
     /// stored member is extracted under the lock and released after it, so a
     /// destructor that calls back sees a free lock.
-    public try_remove(self, value: T): Bool = {
+    public remove(self, value: T): Bool = {
         self.rw_lock.lock();
         let mutable existed = false;
         let mutable dead_member = Option[ConcurrentSetSlot[T]].None();

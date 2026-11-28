@@ -160,7 +160,7 @@ private let find_case_manifest(config: RunnerConfig, info: CaseInfo): Option[Pat
     let mutable current = info.absolute_path.dir_name().normalize();
     while true then {
         let candidate = current.join("koral.json");
-        if path_exist(candidate) then {
+        if path_exists(candidate) then {
             return Option[Path].Some(candidate);
         };
         if current == cases_root then {
@@ -177,7 +177,7 @@ private let find_case_manifest(config: RunnerConfig, info: CaseInfo): Option[Pat
 
 private let find_case_requires_root(manifest_path: Path): Option[Path] = {
     let requires_root = manifest_path.dir_name().join("requires").normalize();
-    if path_exist(requires_root) then {
+    if path_exists(requires_root) then {
         return Option[Path].Some(requires_root);
     };
     return Option[Path].None();
@@ -221,7 +221,7 @@ private let prepared_run_executable_path(
     output_dir: Path,
     launch_attempt: Int,
 ): Result[Path] = {
-    let exe_path = when path_exist(executable_path_for_case(info, output_dir)) in {
+    let exe_path = when path_exists(executable_path_for_case(info, output_dir)) in {
         true then executable_path_for_case(info, output_dir),
         false then find_built_executable(output_dir) or return,
     };
@@ -237,7 +237,7 @@ private let prepared_run_executable_path(
     let mutable copy_attempt = launch_attempt;
     while copy_attempt < launch_attempt + 16 then {
         let launch_path = output_dir.join("run-" + copy_attempt.to_string() + ".exe");
-        if path_exist(launch_path) then {
+        if path_exists(launch_path) then {
             copy_attempt += 1;
             continue;
         };
@@ -247,7 +247,7 @@ private let prepared_run_executable_path(
                 return Result[Path].Ok(launch_path);
             },
             .Error(e) then {
-                if path_exist(launch_path) then {
+                if path_exists(launch_path) then {
                     copy_attempt += 1;
                     continue;
                 };
@@ -397,12 +397,14 @@ private let execute_command_with_timeout(
 
         if not aborted and stop_requested.load() != 0 then {
             aborted = true;
-            let _ = kill_process_tree(pid);
+            let _ = proc.kill();
         };
 
         if not timed_out and command_start.elapsed().as_seconds() >= timeout_secs then {
             timed_out = true;
-            let _ = kill_process_tree(pid);
+            // 根进程一杀（kill_process_tree 已随 proc API 收敛删除）；孙进程
+            // 不杀——测试子树的生命周期归其父。
+            let _ = proc.kill();
         };
 
         sleep(poll_sleep);
@@ -552,7 +554,7 @@ private let create_case_output_dir(config: RunnerConfig, info: CaseInfo): Result
                 return Result[Path].Ok(candidate);
             },
             .Error(e) then {
-                if path_exist(candidate) then {
+                if path_exists(candidate) then {
                     attempt += 1;
                 } else {
                     return Result[Path].Error(e);
@@ -743,7 +745,7 @@ private let observe_case(
     };
 
     let mutable compile_text = normalize_output(
-        compile_output.stdout_text() + compile_output.stderr_text(),
+        compile_output.stdout_text_lossy() + compile_output.stderr_text_lossy(),
     );
     let mutable accepted = infer_exit_code(compile_output.status) == 0;
     let mutable ran_check_only = check_only;
@@ -789,7 +791,7 @@ private let observe_case(
                 return .Infra(label + " side: " + message);
             },
         };
-        compile_text = normalize_output(fallback_output.stdout_text() + fallback_output.stderr_text());
+        compile_text = normalize_output(fallback_output.stdout_text_lossy() + fallback_output.stderr_text_lossy());
         accepted = infer_exit_code(fallback_output.status) == 0;
         ran_check_only = false;
     };
@@ -829,7 +831,7 @@ private let observe_case(
         },
     };
 
-    let run_text = normalize_output(run_output.stdout_text() + run_output.stderr_text());
+    let run_text = normalize_output(run_output.stdout_text_lossy() + run_output.stderr_text_lossy());
     let run_exit = infer_exit_code(run_output.status);
     return .Observed(
         label,
@@ -1198,7 +1200,7 @@ public let run_single_case(
     };
 
     let mutable build_combined = normalize_output(
-        build_output.stdout_text() + build_output.stderr_text(),
+        build_output.stdout_text_lossy() + build_output.stderr_text_lossy(),
     );
     let mutable build_lines = output_lines_trimmed(build_combined);
     let mutable build_exit_code = infer_exit_code(build_output.status);
@@ -1270,7 +1272,7 @@ public let run_single_case(
             },
         };
 
-        build_combined = normalize_output(build_output.stdout_text() + build_output.stderr_text());
+        build_combined = normalize_output(build_output.stdout_text_lossy() + build_output.stderr_text_lossy());
         build_lines = output_lines_trimmed(build_combined);
         build_exit_code = infer_exit_code(build_output.status);
     };
@@ -1344,7 +1346,7 @@ public let run_single_case(
                 );
             },
         };
-        build_combined = normalize_output(build_output.stdout_text() + build_output.stderr_text());
+        build_combined = normalize_output(build_output.stdout_text_lossy() + build_output.stderr_text_lossy());
         build_lines = output_lines_trimmed(build_combined);
         build_exit_code = infer_exit_code(build_output.status);
     };
@@ -1444,7 +1446,7 @@ public let run_single_case(
             },
         };
 
-        let run_combined = normalize_output(run_output.stdout_text() + run_output.stderr_text());
+        let run_combined = normalize_output(run_output.stdout_text_lossy() + run_output.stderr_text_lossy());
         let run_lines = output_lines_trimmed(run_combined);
         let run_exit_code = infer_exit_code(run_output.status);
         let total_duration_ms = start.elapsed().as_milliseconds();
@@ -1565,7 +1567,7 @@ public let run_single_case(
         },
     };
 
-    let run_combined = normalize_output(run_output.stdout_text() + run_output.stderr_text());
+    let run_combined = normalize_output(run_output.stdout_text_lossy() + run_output.stderr_text_lossy());
     let run_lines = output_lines_trimmed(run_combined);
     let run_exit_code = infer_exit_code(run_output.status);
     let total_duration_ms = start.elapsed().as_milliseconds();

@@ -322,17 +322,6 @@ given StringBuilder {
         self.data[0] = 0;
     };
 
-    /// Return a stable snapshot that does not alias future builder mutations.
-    /// 校验 UTF-8，非法字节 panic（checked 形态）；免检快照走
-    /// `to_string_unchecked`（`let unsafe` 调用契约，担保累积字节是合法
-    /// UTF-8——`push_byte` 的契约）。
-    public to_string(self): String = {
-        if String.validate_utf8(self.data, self.len) then {
-            return unsafe { String.from_utf8_ptr_unchecked(self.data, self.len) };
-        };
-        panic("StringBuilder.to_string: invalid UTF-8");
-    };
-
     /// Unchecked snapshot: no UTF-8 validation. Behavior is undefined when
     /// the accumulated bytes are not valid UTF-8.
     public unsafe to_string_unchecked(self): String = unsafe {
@@ -375,6 +364,22 @@ given StringBuilder {
     };
 };
 
+/// `ToString` for `StringBuilder`: return a stable snapshot that does not
+/// alias future builder mutations. 校验 UTF-8，非法字节 panic（checked 形态）；
+/// 免检快照走 `to_string_unchecked`（`let unsafe` 调用契约，担保累积字节是
+/// 合法 UTF-8——`push_byte` 的契约）。消费交接走 `into_string`。
+given StringBuilder: ToString {
+    /// A stable UTF-8-checked snapshot that does not alias future builder
+    /// mutations. Panics on invalid accumulated bytes; the unchecked form is
+    /// `to_string_unchecked`.
+    public to_string(self): String = {
+        if String.validate_utf8(self.data, self.len) then {
+            return unsafe { String.from_utf8_ptr_unchecked(self.data, self.len) };
+        };
+        panic("StringBuilder.to_string: invalid UTF-8");
+    };
+};
+
 // ============================================================================
 // String Methods
 // ============================================================================
@@ -393,21 +398,22 @@ given String {
         return String(s, UInt32(0), UInt32(len));
     };
 
-    /// The concatenation of `left` and `right` in ONE allocation: both parts
-    /// copy straight into the result's own buffer. `String.add` routes here --
-    /// building a temporary raw buffer and copying it again into the result
-    /// doubled the cost of every `+`. A result past the string length limit
-    /// (2^31-1) panics before any allocation happens.
-    public concat(left: String, right: String): String = unsafe {
-        let left_len = Int(left.len);
-        let right_len = Int(right.len);
+    /// The concatenation of `self` and `other` in ONE allocation: both parts
+    /// copy straight into the result's own buffer（与 `List.concat` 同款实例
+    /// 形）。`String.add` routes here -- building a temporary raw buffer and
+    /// copying it again into the result doubled the cost of every `+`. A
+    /// result past the string length limit (2^31-1) panics before any
+    /// allocation happens.
+    public concat(self, other: String): String = unsafe {
+        let left_len = Int(self.len);
+        let right_len = Int(other.len);
         let total = left_len + right_len;
         if total > string_length_limit() then {
             panic_string_capacity_exceeded(total);
         };
         let result = alloc_bytes(UInt(total));
-        copy_memory(result.elements(), left.bytes.elements() + Int(left.off), UInt(left_len));
-        copy_memory(result.elements() + left_len, right.bytes.elements() + Int(right.off), UInt(right_len));
+        copy_memory(result.elements(), self.bytes.elements() + Int(self.off), UInt(left_len));
+        copy_memory(result.elements() + left_len, other.bytes.elements() + Int(other.off), UInt(right_len));
         return String(result, UInt32(0), UInt32(total));
     };
 
@@ -619,7 +625,7 @@ given String {
     /// Build a string from a null-terminated C string, returning an error when
     /// it is not valid UTF-8.
     /// The caller guarantees `cstr` points at a readable NUL-terminated string.
-    public unsafe from_cstring(cstr: *UInt8): Result[String] = unsafe {
+    public unsafe from_cstring_ptr(cstr: *UInt8): Result[String] = unsafe {
         let mutable len = 0;
         while cstr[len] != UInt8(0) then {
             len += 1;
@@ -630,7 +636,7 @@ given String {
     /// Build a string from a null-terminated C string without validating UTF-8.
     /// Behavior is undefined when the bytes are not valid UTF-8.
     /// The caller guarantees `cstr` points at a readable NUL-terminated string.
-    public unsafe from_cstring_unchecked(cstr: *UInt8): String = unsafe {
+    public unsafe from_cstring_ptr_unchecked(cstr: *UInt8): String = unsafe {
         let mutable len = 0;
         while cstr[len] != UInt8(0) then {
             len += 1;
@@ -639,7 +645,7 @@ given String {
     };
 
     // Lossy 解码引擎：合法序列原样拷贝，每个「最大非法子序列」替换为一个
-    // U+FFFD（Rust `String::from_utf8_lossy` / WHATWG 同规则）。产物恒为
+    // U+FFFD（Rust `String::from_utf8_ptr_lossy` / WHATWG 同规则）。产物恒为
     // 合法 UTF-8，所以走 unchecked 收尾是有据的。
     private unsafe decode_lossy_into(
         acc: StringBuilder,
@@ -716,10 +722,10 @@ given String {
     };
 
     /// Copy `len` bytes into a string, replacing each maximal ill-formed UTF-8
-    /// subsequence with U+FFFD -- never fails (Rust `String::from_utf8_lossy`
+    /// subsequence with U+FFFD -- never fails (Rust `String::from_utf8_ptr_lossy`
     /// 同规则)。OS 摄入面（文件名 / symlink 目标 / argv / stdin 行）用它。
     /// The caller guarantees `bytes`/`len` point at `len` readable bytes.
-    public unsafe from_utf8_lossy(bytes: *UInt8, len: Int): String = {
+    public unsafe from_utf8_ptr_lossy(bytes: *UInt8, len: Int): String = {
         let acc = StringBuilder.new();
         unsafe { String.decode_lossy_into(acc, bytes, len) };
         return unsafe { acc.into_string_unchecked() };
@@ -728,18 +734,18 @@ given String {
     /// Copy `bytes` into a string, replacing each maximal ill-formed UTF-8
     /// subsequence with U+FFFD -- never fails.
     public from_bytes_lossy(bytes: List[UInt8]): String = unsafe {
-        String.from_utf8_lossy(bytes.borrow_ptr(), bytes.count())
+        String.from_utf8_ptr_lossy(bytes.borrow_ptr(), bytes.count())
     };
 
     /// Build a string from a null-terminated C string, replacing each maximal
     /// ill-formed UTF-8 subsequence with U+FFFD -- never fails.
     /// The caller guarantees `cstr` points at a readable NUL-terminated string.
-    public unsafe from_cstring_lossy(cstr: *UInt8): String = unsafe {
+    public unsafe from_cstring_ptr_lossy(cstr: *UInt8): String = unsafe {
         let mutable len = 0;
         while cstr[len] != UInt8(0) then {
             len += 1;
         };
-        return String.from_utf8_lossy(cstr, len);
+        return String.from_utf8_ptr_lossy(cstr, len);
     };
 
     /// Create an empty string.
@@ -853,9 +859,6 @@ given String {
         return true;
     };
 
-    /// Return the byte index of the first occurrence of `pat`, or `None` when
-    /// absent; an empty pattern matches at 0.
-    public find(self, pat: String): Option[Int] = self.find_from(0, pat);
 
     /// Return the byte index of the last occurrence of `pat`, or `None` when
     /// absent; an empty pattern matches at the end (the byte length).
@@ -866,7 +869,7 @@ given String {
         let mutable result = Option[Int].None();
         let mutable start = 0;
         // Using while is pattern matching for iterator-like loop
-        while self.find_from(start, pat) is .Some(idx) then {
+        while self.find(pat, from = start) is .Some(idx) then {
             result = Option[Int].Some(idx);
             start = idx + 1;
         };
@@ -1021,12 +1024,14 @@ given String {
         return String(s, UInt32(0), UInt32(len));
     };
 
-    /// Search from byte index `start` for the first occurrence of `pat`, returning
-    /// its index or `None`. An empty pattern matches at `start` itself (so
-    /// `find("")` is `Some(0)`), following Rust/Python/JS/Go/Java and staying
-    /// consistent with `starts_with`/`ends_with`; a negative or past-the-end
-    /// `start` is an out-of-domain position and yields `None`, never a panic.
-    public find_from(self, start: Int, pat: String): Option[Int] = unsafe {
+    /// Return the byte index of the first occurrence of `pat`, or `None` when
+    /// absent; `from` names the byte index to search from (default 0). An
+    /// empty pattern matches at `from` itself (so `find("")` is `Some(0)`),
+    /// following Rust/Python/JS/Go/Java and staying consistent with
+    /// `starts_with`/`ends_with`; a negative or past-the-end `from` is an
+    /// out-of-domain position and yields `None`, never a panic.
+    public find(self, pat: String, from: Int = 0): Option[Int] = unsafe {
+        let start = from;
         let len = Int(self.len);
         let pat_len = Int(pat.len);
         if start < 0 or start > len or pat_len > len then {
@@ -1059,7 +1064,7 @@ given String {
 
     /// Whether `pat` occurs anywhere in the string (the empty pattern occurs
     /// in every string).
-    public contains(self, pat: String): Bool = self.find_from(0, pat).is_some();
+    public contains(self, pat: String): Bool = self.find(pat, from = 0).is_some();
 
     /// Return the string repeated `times` times, or the empty string when `times` is 0.
     /// A result past the string length limit (2^31-1) panics before any
@@ -1103,7 +1108,7 @@ given String {
         let mutable start = 0;
         let mutable count = 0;
         while count < n then {
-            when self.find_from(start, pat) in {
+            when self.find(pat, from = start) in {
                 .Some(idx) then {
                     let prefix_len = idx - start;
                     if prefix_len > 0 then {
@@ -1175,7 +1180,7 @@ given String {
         let mutable result = StringBuilder.new();
         let mutable start = 0;
         // Using while is pattern matching
-        while self.find_from(start, pat) is .Some(idx) then {
+        while self.find(pat, from = start) is .Some(idx) then {
             let prefix_len = idx - start;
             if prefix_len > 0 then {
                 let slice = self.make_substring(start, prefix_len);
@@ -1441,7 +1446,7 @@ given StringLinesIterator: Iterator[String] {
             self.index = len + 1;
             return Option[String].None();
         };
-        when self.source.find_from(self.index, "\n") in {
+        when self.source.find("\n", from = self.index) in {
             .Some(i) then {
                 // 行尾是 `\n` 或 `\r\n`——剥掉一个行尾 `\r`；其它位置的
                 // `\r` 是内容（与 `scanln` 同一条规则）。

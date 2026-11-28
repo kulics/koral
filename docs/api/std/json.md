@@ -114,11 +114,11 @@ given JsonValue {
     /// Return the `Bool` payload, or `None` when this is not a `Bool`.
     public as_bool(self): Option[Bool];
     /// Return the `JsonNumber` payload, or `None` when this is not a number.
-    public as_json_number(self): Option[JsonNumber];
+    public as_number(self): Option[JsonNumber];
     /// Return the numeric payload as `Float64`, or `None` when this is not
     /// a number. An integer payload converts (and can round past 2^53 --
-    /// read `as_json_number` and its `as_int` / `as_uint` for the exact value).
-    public as_number(self): Option[Float64];
+    /// read `as_number` and its `as_int` / `as_uint` for the exact value).
+    public as_float64(self): Option[Float64];
     /// Return the exact `Int` value, or `None` when this is not an integer
     /// number (`JsonNumber.as_int` semantics: a float form is not an integer).
     public as_int(self): Option[Int];

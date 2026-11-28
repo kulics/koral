@@ -1,0 +1,90 @@
+// EXPECT: timeout_ok
+// EXPECT: stdin_bytes_ok
+// EXPECT: stderr_to_stdout_ok
+// EXPECT: find_program_ok
+// 新 proc API 合集钉：
+//   * set_timeout 对 run_output 生效：到期杀根进程（孙进程不杀）、返回
+//     Error("timeout: <program>");
+//   * IoRedirect.Bytes：库内把字节泵进子进程 stdin（边读边写）；
+//   * IoRedirect.ToStdout：stderr 与 stdout 共管道合流；
+//   * find_program：PATH 查找返回 Option[Path]。
+
+using "std/os" { ... };
+using "std/time" { MonoTime };
+using "std/proc" { ... };
+
+let main(): Void = {
+    // ── set_timeout: 到期杀根 + timeout 错误 ───────────────────────────────
+    let slow = if is_windows_host() then {
+        Command.new("ping").arg("-n").arg("30").arg("127.0.0.1")
+    } else {
+        Command.new("sleep").arg("30")
+    };
+    let started = MonoTime.now();
+    let r = slow.set_timeout(after = 200ms).run();
+    when r in {
+        .Ok(_) then panic("timeout must fire for a 30s child"),
+        .Error(e) then {
+            assert(
+                e.message().contains("timeout"),
+                "timeout error message, got: \(e.message())",
+            );
+            assert(
+                e.message().contains("timeout:"),
+                "timeout error names the program, got: \(e.message())",
+            );
+        },
+    };
+    // 到期即杀：总墙钟远小于子进程的 30s。
+    assert(
+        started.elapsed().as_seconds() < 10,
+        "timeout must fire near the deadline",
+    );
+    println("timeout_ok");
+
+    // ── IoRedirect.Bytes：内存字节喂 stdin ─────────────────────────────────
+    let mut_bytes = List[UInt8].new();
+    for b in "hello-bytes".as_slice() then {
+        mut_bytes.push(b);
+    };
+    let feed = mut_bytes.into_frozen_list();
+    let r2 = Command.new("cat").set_stdin(IoRedirect.Bytes(feed)).run_output();
+    when r2 in {
+        .Ok(out) then {
+            assert(
+                out.stdout_text_lossy() == "hello-bytes",
+                "cat echoes the fed bytes, got: \(out.stdout_text_lossy())",
+            );
+        },
+        .Error(e) then panic("bytes stdin failed: \(e.message())"),
+    };
+    println("stdin_bytes_ok");
+
+    // ── IoRedirect.ToStdout：stderr 并入 stdout 合流 ───────────────────────
+    let mut_sh = List[String].new();
+    mut_sh.push("-c");
+    mut_sh.push("echo out1; echo err1 1>&2");
+    let r3 = Command.new("sh").args(mut_sh).set_stderr(IoRedirect.ToStdout()).run_output();
+    when r3 in {
+        .Ok(out) then {
+            let merged = out.stdout_text_lossy();
+            assert(merged.contains("out1"), "merged stream keeps stdout");
+            assert(merged.contains("err1"), "merged stream carries stderr");
+        },
+        .Error(e) then panic("to-stdout failed: \(e.message())"),
+    };
+    println("stderr_to_stdout_ok");
+
+    // ── find_program：PATH 查找 ────────────────────────────────────────────
+    let found = if is_windows_host() then {
+        find_program("cmd")
+    } else {
+        find_program("sh")
+    };
+    assert(found.is_some(), "find_program must locate the shell");
+    assert(
+        find_program("koral_definitely_missing_program_xyz").is_none(),
+        "find_program must miss a missing program",
+    );
+    println("find_program_ok");
+};

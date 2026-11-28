@@ -228,7 +228,7 @@ public let rename_path[T1: ToPath, T2: ToPath](src: T1, to: T2 =): Result[Void] 
 // ============================================================================
 
 /// Check if path exists on disk.
-public let path_exist[T: ToPath](path: T): Bool = {
+public let path_exists[T: ToPath](path: T): Bool = {
     let s = path.to_path().to_string();
     let cs = when CString.from_string(s) in {
         .Ok(v) then v,
@@ -261,7 +261,7 @@ public let absolute_path[T: ToPath](path: T): Result[Path] = {
 ///
 /// The result is normalized to the canonical `/` form even though the OS call
 /// underneath returns the platform spelling.
-public let canonicalize_path[T: ToPath](path: T): Result[Path] = {
+public let canonical_path[T: ToPath](path: T): Result[Path] = {
     let s = path.to_path().to_string();
     let cs = CString.from_string(s) or return;
     let buf = unsafe { alloc_memory[UInt8](4096) };
@@ -270,7 +270,7 @@ public let canonicalize_path[T: ToPath](path: T): Result[Path] = {
     if result != 0 then {
         return Result[Path].Error(last_error_message());
     };
-    return when unsafe { String.from_cstring(buf) } in {
+    return when unsafe { String.from_cstring_ptr(buf) } in {
         .Ok(resolved) then Result[Path].Ok(resolved.to_path().normalize()),
         .Error(e) then Result[Path].Error(e),
     };
@@ -445,7 +445,7 @@ public let read_symlink[T: ToPath](path: T): Result[Path] = {
         };
         if Int(result) < buf_size then {
             // symlink 目标字节不保证 UTF-8：lossy 转换（U+FFFD），不失败。
-            let target = unsafe { String.from_utf8_lossy(buf, Int(result)) };
+            let target = unsafe { String.from_utf8_ptr_lossy(buf, Int(result)) };
             unsafe { dealloc_memory(buf) };
             return Result[Path].Ok(target.to_path());
         };
@@ -471,10 +471,20 @@ public let truncate_file[T: ToPath](path: T, size: Int): Result[Void] = {
 // Temporary File Creation
 // ============================================================================
 
+/// 临时名 `prefix` 的合法性（create_temp_* 共用）：必须是纯文件名成分——
+/// 不含路径分隔符、不含 NUL（两者都会把 XXXXXX 模板带出目标目录或截断）。
+protected let validate_temp_prefix(prefix: String): Void = {
+    if prefix.contains("/") or prefix.contains("\\") or prefix.contains("\u{0}") then {
+        panic("create_temp prefix must not contain path separators or NUL");
+    };
+};
+
 /// Create a temporary file.
 /// When dir is empty, uses the system temp directory.
+/// `prefix` is optional (default "") and must be a plain filename component.
 /// Returns an open File handle (use file.path() to get the path).
-public let create_temp_file[T: ToPath](dir: T, prefix: String =): Result[File] = {
+public let create_temp_file[T: ToPath](dir: T, prefix: String = ""): Result[File] = {
+    validate_temp_prefix(prefix);
     let dir_path = dir.to_path();
     let base = if dir_path.is_empty() then temp_dir() else dir_path;
     let base_str = base.to_string();
@@ -495,6 +505,6 @@ public let create_temp_file[T: ToPath](dir: T, prefix: String =): Result[File] =
     if fd < 0 then {
         return Result[File].Error(last_error_message());
     };
-    let file_path = unsafe { String.from_cstring_unchecked(buf.borrow_mut_ptr()) };
+    let file_path = unsafe { String.from_cstring_ptr_unchecked(buf.borrow_mut_ptr()) };
     return Result[File].Ok(File(FileStorage(fd, file_path.to_path())));
 };

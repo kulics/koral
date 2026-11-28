@@ -1,0 +1,66 @@
+// EXPECT: ok
+// 工具块体内 Self→R 推断钉：把 `self`（类型 Self）传给被调泛型方法的类型
+// 形参 R 时，R 必须能取 Self 为实例（随机数工具块 `T.random(self)` 的语言
+// 级形状）。种子侧曾拒收 "expected R, got Self"（静态需求形），同一族的
+// 泛型形参接收者 + 泛型实例方法（占位符形）也曾拒收——两形此钉锁住双侧一致。
+
+trait Src {
+    generate(self): UInt64;
+};
+
+trait Draw {
+    draw[R: Src](source: R): Self;
+};
+
+trait Draw2 {
+    draw2[R: Src](self, source: R): Int;
+};
+
+type Token();
+
+given Token: Draw {
+    draw[R: Src](source: R): Token = {
+        let _ = source;
+        return Token();
+    };
+};
+
+given Token: Draw2 {
+    draw2[R: Src](self, source: R): Int = {
+        let _ = self;
+        return Int(source.generate());
+    };
+};
+
+type MySrc();
+
+given MySrc: Src {
+    generate(self): UInt64 = 7;
+};
+
+// 静态需求形：T.draw(self) 要求 R := Self（种子缺口的原形状）。
+given Src {
+    next[T: Draw](self): T = T.draw(self);
+};
+
+// 占位符形：泛型形参接收者的泛型实例方法，d.draw2(s) 要求 R := S。
+trait Sink {
+    run[D: Draw2, S: Src](self, d: D, s: S): Int;
+};
+
+type Boss();
+
+given Boss: Sink {
+    run[D: Draw2, S: Src](self, d: D, s: S): Int = d.draw2(s);
+};
+
+let main(): Void = {
+    let s = MySrc();
+    let t: Token = s.next();
+    let _ = t;
+
+    let b = Boss();
+    let n = b.run(Token(), MySrc());
+    assert(n == 7, "instance generic method infers R from the argument");
+    println("ok");
+};
